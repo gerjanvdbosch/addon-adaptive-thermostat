@@ -1,5 +1,4 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM ghcr.io/hassio-addons/addon-base-python:3.11
 
 # system deps for scientific stack (kept minimal)
 RUN apt-get update && apt-get install -y --no-install-recommends \
