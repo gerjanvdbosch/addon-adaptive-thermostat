@@ -1,4 +1,5 @@
-FROM ghcr.io/home-assistant/home-assistant:stable
+# FROM ghcr.io/home-assistant/home-assistant:stable
+FROM ghcr.io/hassio-addons/addon-base-python:3.14
 
 # system deps for scientific stack (kept minimal)
 RUN apt-get update && apt-get install -y --no-install-recommends \
