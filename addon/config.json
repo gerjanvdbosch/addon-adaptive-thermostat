@@ -6,8 +6,12 @@
   "arch": ["amd64", "armv7", "aarch64"],
   "startup": "services",
   "boot": "auto",
-  "options": {},
-  "schema": {},
+  "options": {
+     "model_dir": "/data/adaptive_thermostat/model"
+  },
+  "schema": {
+      "model_dir": "str?"
+  },
   "ports": {},
   "map": ["config:rw"],
   "host_network": false,
