@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-COPY app /opt/adaptive_thermostat/app
+COPY addon /opt/adaptive_thermostat/addon
 
 ENV MODEL_DIR=/data
 CMD ["/run.sh"]
