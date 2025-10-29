@@ -1,6 +1,5 @@
 #!/usr/bin/with-contenv bashio
-
-set -euo pipefail
+# shellcheck shell=bash
 
 printf 'Preparing to start...\n'
 
