@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+ARG BUILD_FROM
+FROM $BUILD_FROM
 
 # system deps for scientific stack (kept minimal)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -11,7 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY run.sh run.sh
-RUN chmod +x run.sh
+RUN chmod a+x run.sh
 
 ENV MODEL_DIR=/data
 CMD ["./run.sh"]
