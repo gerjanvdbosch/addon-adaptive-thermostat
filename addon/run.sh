@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/command/with-contenv bashio
 
 printf 'Preparing to start...\n'
 
