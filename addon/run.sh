@@ -21,4 +21,4 @@ mkdir -p "$MODEL_DIR"
 printf '%s run.sh: starting (pid %s, MODEL_DIR=%s)\n' "$(date --iso-8601=seconds)" "$$" "$MODEL_DIR"
 
 # Start WSGI entry (api_service exposes app via run_proc.py)
-exec python3 -u /opt/adaptive_thermostat/addon/run_proc.py
+exec python3 -u /app/run_proc.py
