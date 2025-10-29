@@ -1,12 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/command/with-contenv bashio
+# shellcheck shell=bash
 
-# Require and read options via bashio (Supervisor add-on environment)
-# source bashio helpers (available in Supervisor add-on base images)
-if [ -f /usr/lib/bashio/helpers.sh ]; then
-  # shellcheck disable=SC1091
-  source /usr/lib/bashio/helpers.sh
-fi
+bashio::log.info "Preparing to start..."
 
 # Ensure model_dir option exists
 bashio::config.require 'model_dir'
