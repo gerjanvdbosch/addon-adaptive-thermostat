@@ -1,10 +1,5 @@
 FROM ghcr.io/hassio-addons/base-python:16.1.4
 
-# system deps for scientific stack (kept minimal)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 COPY requirements.txt .
