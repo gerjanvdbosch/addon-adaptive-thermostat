@@ -1,0 +1,15 @@
+{
+  "name": "Adaptive Thermostat Addon",
+  "version": "0.1",
+  "slug": "addon-adaptive-thermostat",
+  "description": "scikit-learn based adaptive thermostat HA addon",
+  "arch": ["amd64", "armv7", "aarch64"],
+  "startup": "services",
+  "boot": "auto",
+  "options": {},
+  "schema": {},
+  "ports": {},
+  "map": ["config:rw"],
+  "host_network": false,
+  "homeassistant_api": true
+}
