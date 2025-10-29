@@ -2,12 +2,12 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+printf 'Preparing to start...\n'
+
 # If Supervisor runtime provides with-contenv and bashio, use them to source helpers
 if [ -x /command/with-contenv ] && [ -f /usr/lib/bashio/helpers.sh ]; then
   exec /command/with-contenv bashio "$0" "$@"
 fi
-
-bashio::log.info "Preparing to start..."
 
 # Ensure model_dir option exists
 bashio::config.require 'model_dir'
