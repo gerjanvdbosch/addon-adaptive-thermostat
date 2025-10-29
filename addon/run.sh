@@ -1,5 +1,11 @@
-#!/command/with-contenv bashio
+#!/usr/bin/env bash
 # shellcheck shell=bash
+set -euo pipefail
+
+# If Supervisor runtime provides with-contenv and bashio, use them to source helpers
+if [ -x /command/with-contenv ] && [ -f /usr/lib/bashio/helpers.sh ]; then
+  exec /command/with-contenv bashio "$0" "$@"
+fi
 
 bashio::log.info "Preparing to start..."
 
