@@ -14,4 +14,4 @@ COPY run.sh run.sh
 RUN chmod +x run.sh
 
 ENV MODEL_DIR=/data
-CMD ["./run.sh"]
+CMD ["/app/run.sh"]
