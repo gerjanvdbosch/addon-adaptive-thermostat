@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY run.sh run.sh
-RUN chmod a+x run.sh
+RUN chmod +x run.sh
 
 ENV MODEL_DIR=/data
-CMD ["./run.sh"]
+CMD ["/app/run.sh"]
