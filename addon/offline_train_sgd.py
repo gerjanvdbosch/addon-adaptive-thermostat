@@ -8,6 +8,7 @@ import sys
 import json
 import datetime
 import traceback
+import yaml
 import numpy as np
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -21,6 +22,20 @@ MODEL_PATH = os.environ.get("MODEL_PATH", "/data/model_pipeline_sgd.pkl")
 FEEDBACK_PATH = os.environ.get("FEEDBACK_PATH", "/data/historical_feedback.json")
 DIAG_PATH = os.environ.get("DIAG_PATH", "/data/training_diagnostics.json")
 MIN_SAMPLES = int(os.environ.get("MIN_SAMPLES", "40"))
+
+# Optionally read sgd params from local config_default.yaml in same dir
+HERE = os.path.dirname(__file__)
+CFG_PATH = os.path.join(HERE, "config_default.yaml")
+DEFAULT_SGD_PARAMS = {
+    "loss": "squared_loss",
+    "penalty": "l2",
+    "alpha": 1e-4,
+    "max_iter": 1000,
+    "tol": 1e-4,
+    "learning_rate": "invscaling",
+    "eta0": 1e-3,
+    "power_t": 0.25
+}
 
 FEATURES = [
     "huidige_temp","temp_verandering",
@@ -100,6 +115,44 @@ def prepare_dataset(rows):
         pass
     return X, y, eff
 
+def load_sgd_params():
+    # priority: environment overrides config file
+    env_alpha = os.environ.get("SGD_ALPHA")
+    if env_alpha is not None:
+        try:
+            params = DEFAULT_SGD_PARAMS.copy()
+            params["alpha"] = float(env_alpha)
+            # optional other env vars
+            if os.environ.get("SGD_ETA0") is not None:
+                params["eta0"] = float(os.environ.get("SGD_ETA0"))
+            if os.environ.get("SGD_MAX_ITER") is not None:
+                params["max_iter"] = int(os.environ.get("SGD_MAX_ITER"))
+            if os.environ.get("SGD_LEARNING_RATE") is not None:
+                params["learning_rate"] = os.environ.get("SGD_LEARNING_RATE")
+            return params
+        except Exception:
+            pass
+
+    # fallback: read config_default.yaml if present
+    try:
+        if os.path.exists(CFG_PATH):
+            with open(CFG_PATH, "r") as f:
+                cfg = yaml.safe_load(f) or {}
+            sgd_cfg = cfg.get("sgd", {}) if isinstance(cfg, dict) else {}
+            params = DEFAULT_SGD_PARAMS.copy()
+            # map known keys
+            if "alpha" in sgd_cfg: params["alpha"] = float(sgd_cfg["alpha"])
+            if "eta0" in sgd_cfg: params["eta0"] = float(sgd_cfg["eta0"])
+            if "max_iter" in sgd_cfg: params["max_iter"] = int(sgd_cfg["max_iter"])
+            if "tol" in sgd_cfg: params["tol"] = float(sgd_cfg["tol"])
+            if "learning_rate" in sgd_cfg: params["learning_rate"] = sgd_cfg["learning_rate"]
+            if "power_t" in sgd_cfg: params["power_t"] = float(sgd_cfg["power_t"])
+            return params
+    except Exception:
+        pass
+
+    return DEFAULT_SGD_PARAMS.copy()
+
 def main():
     start_ts = datetime.datetime.now().isoformat()
     pid = os.getpid()
@@ -114,14 +167,7 @@ def main():
             print(f"Not enough samples: {n} < {MIN_SAMPLES}", file=sys.stderr)
             return 2
 
-        sgd_params = {
-            "loss": "squared_loss",
-            "penalty": "l2",
-            "alpha": float(1e-4),
-            "max_iter": int(1000),
-            "tol": float(1e-4),
-            "learning_rate": "invscaling"
-        }
+        sgd_params = load_sgd_params()
 
         pipeline = Pipeline([
             ("scaler", StandardScaler()),
@@ -149,7 +195,7 @@ def main():
             joblib.dump(pipeline, tmp_model)
             if os.path.exists(tmp_model):
                 os.replace(tmp_model, MODEL_PATH)
-            append_diag({"timestamp": datetime.datetime.now().isoformat(), "type": "offline_train_finished", "n_samples": int(n), "mean_val_mse": mean_val_mse})
+            append_diag({"timestamp": datetime.datetime.now().isoformat(), "type": "offline_train_finished", "n_samples": int(n), "mean_val_mse": mean_val_mse, "sgd_params": sgd_params})
             print(f"Training complete. n={n}, mean_val_mse={mean_val_mse}", file=sys.stdout)
             return 0
         except Exception as e:
@@ -165,7 +211,6 @@ def main():
 
 if __name__ == "__main__":
     code = main()
-    # ensure exit code is int and not None
     try:
         sys.exit(int(code))
     except Exception:
