@@ -23,6 +23,27 @@ MODEL_PATH = os.path.join(MODEL_DIR, cfg_default.get("model_filename", "model_pi
 DIAG_PATH = os.path.join(MODEL_DIR, cfg_default.get("diag_filename", "training_diagnostics.json"))
 FEEDBACK_PATH = os.path.join(MODEL_DIR, cfg_default.get("feedback_filename", "historical_feedback.json"))
 
+# Offline trainer config: prefer explicit env vars, fallback to config_default keys
+def _get_offline_trainer_config():
+    max_concurrent = os.environ.get("TRAIN_MAX_CONCURRENT") or cfg_default.get("offline_trainer", {}).get("max_concurrent_jobs") or cfg_default.get("max_concurrent_jobs")
+    timeout_sec = os.environ.get("TRAIN_JOB_TIMEOUT") or cfg_default.get("offline_trainer", {}).get("job_timeout_seconds") or cfg_default.get("job_timeout_seconds")
+    keep_logs = os.environ.get("TRAIN_LOGS_KEEP") or cfg_default.get("offline_trainer", {}).get("train_logs_keep") or cfg_default.get("train_logs_keep")
+
+    try:
+        max_concurrent = int(max_concurrent) if max_concurrent is not None else 1
+    except Exception:
+        max_concurrent = 1
+    try:
+        timeout_sec = int(timeout_sec) if timeout_sec is not None else 60 * 60
+    except Exception:
+        timeout_sec = 60 * 60
+    try:
+        keep_logs = int(keep_logs) if keep_logs is not None else 10
+    except Exception:
+        keep_logs = 10
+
+    return {"max_concurrent_jobs": max_concurrent, "job_timeout_seconds": timeout_sec, "train_logs_keep": keep_logs}
+
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 class APIService:
@@ -30,7 +51,20 @@ class APIService:
         self.store = FeedbackStore(FEEDBACK_PATH)
         self.trainer = Trainer(FEEDBACK_PATH)
         self.model = ModelManager(MODEL_PATH, DIAG_PATH, clamp_action=cfg_default.get("safe", {}).get("clamp_action", 3.0))
-        self.trainer_runner = OfflineTrainerRunner(here, MODEL_PATH, FEEDBACK_PATH, DIAG_PATH, min_samples=cfg_default.get("min_train_samples", 40))
+
+        # Offline trainer runner with configurable params
+        offline_cfg = _get_offline_trainer_config()
+        self.trainer_runner = OfflineTrainerRunner(
+            here,
+            MODEL_PATH,
+            FEEDBACK_PATH,
+            DIAG_PATH,
+            min_samples=cfg_default.get("min_train_samples", 40),
+            max_concurrent_jobs=offline_cfg["max_concurrent_jobs"],
+            job_timeout_seconds=offline_cfg["job_timeout_seconds"],
+            train_logs_keep=offline_cfg["train_logs_keep"]
+        )
+
         self.app = Flask(__name__)
         self._lock = threading.Lock()
         self._last_feedback = {"ts": 0, "value": None}
@@ -188,6 +222,24 @@ class APIService:
 
         @self.app.route("/train", methods=["POST"])
         def train_route():
+            # Allow overriding runner params per-request (optional)
+            req = request.get_json(silent=True) or {}
+            if req:
+                # validate and apply per-request override for this job only
+                maxc = req.get("max_concurrent_jobs")
+                timeout = req.get("job_timeout_seconds")
+                keep = req.get("train_logs_keep")
+                # override runner settings if provided (non-persistent)
+                try:
+                    if maxc is not None:
+                        self.trainer_runner.max_concurrent_jobs = int(maxc)
+                    if timeout is not None:
+                        self.trainer_runner.job_timeout_seconds = int(timeout)
+                    if keep is not None:
+                        self.trainer_runner.train_logs_keep = int(keep)
+                except Exception:
+                    pass
+
             job_id = self.trainer_runner.start_job()
             return jsonify({"ok": True, "job_id": job_id}), 202
 
@@ -198,9 +250,29 @@ class APIService:
                 return jsonify({"ok": False, "reason": "not_found"}), 404
             return jsonify({"ok": True, "job": info})
 
+        @self.app.route("/train/list", methods=["GET"])
+        def train_list_route():
+            jobs = self.trainer_runner.list_jobs()
+            return jsonify({"ok": True, "jobs": jobs})
+
+        @self.app.route("/train/cancel/<job_id>", methods=["POST"])
+        def train_cancel_route(job_id):
+            ok = self.trainer_runner.cancel_job(job_id)
+            if not ok:
+                return jsonify({"ok": False, "reason": "not_running_or_not_found"}), 400
+            self._append_diag({"timestamp": datetime.datetime.now().isoformat(), "type": "train_job_cancel_requested", "job_id": job_id})
+            return jsonify({"ok": True})
+
         @self.app.route("/health", methods=["GET"])
         def health_route():
-            return jsonify({"ok": True, "pipeline_loaded": self.model.pipeline is not None})
+            # include basic offline trainer config/status in health
+            offline_cfg = _get_offline_trainer_config()
+            return jsonify({
+                "ok": True,
+                "pipeline_loaded": self.model.pipeline is not None,
+                "offline_trainer_cfg": offline_cfg,
+                "train_jobs_running": sum(1 for j in self.trainer_runner.list_jobs().values() if j.get("status") == "running")
+            })
 
 # instantiate and expose WSGI app
 _service = APIService()
