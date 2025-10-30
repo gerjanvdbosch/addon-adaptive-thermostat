@@ -1,2 +1,2 @@
 # addon-adaptive-thermostat
-scikit-learn based adaptive thermostat HA addon
+A scikit-learn based adaptive thermostat HA addon
