@@ -2,7 +2,7 @@
   "name": "Adaptive Thermostat",
   "version": "0.1",
   "slug": "addon-adaptive-thermostat",
-  "description": "scikit-learn based adaptive thermostat HA addon",
+  "description": "A scikit-learn based adaptive thermostat HA addon",
   "arch": ["amd64", "armv7", "aarch64"],
   "startup": "services",
   "boot": "auto",
