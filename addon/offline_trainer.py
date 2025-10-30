@@ -7,10 +7,11 @@ import threading
 import shutil
 import signal
 import time
+from glob import glob
 
 class OfflineTrainerRunner:
     def __init__(self, here_dir, model_path, feedback_path, diag_path, min_samples=40,
-                 max_concurrent_jobs=1, job_timeout_seconds=60*60):
+                 max_concurrent_jobs=1, job_timeout_seconds=60*60, train_logs_keep=10):
         self.here = here_dir
         self.model_path = model_path
         self.feedback_path = feedback_path
@@ -20,6 +21,10 @@ class OfflineTrainerRunner:
         self._lock = threading.Lock()
         self.max_concurrent_jobs = int(max_concurrent_jobs)
         self.job_timeout_seconds = int(job_timeout_seconds)
+        self.train_logs_keep = int(train_logs_keep)
+        # ensure logs dir exists
+        logs_dir = os.path.join(os.path.dirname(self.diag_path), "train_logs")
+        os.makedirs(logs_dir, exist_ok=True)
 
     def _append_diag(self, entry):
         diagnostics = []
@@ -43,7 +48,28 @@ class OfflineTrainerRunner:
         with self._lock:
             return sum(1 for v in self._jobs.values() if v.get("status") == "running")
 
+    def _prune_logs(self):
+        try:
+            logs_dir = os.path.join(os.path.dirname(self.diag_path), "train_logs")
+            patterns = [os.path.join(logs_dir, "*.out"), os.path.join(logs_dir, "*.err")]
+            files = []
+            for p in patterns:
+                files.extend(glob(p))
+            # sort by modification time descending
+            files_sorted = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
+            keep = max(0, int(self.train_logs_keep) * 2)  # out+err pairs approx
+            for fpath in files_sorted[keep:]:
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def start_job(self):
+        # prune logs before starting a new job (keep space under control)
+        self._prune_logs()
+
         # Check concurrency limit
         if self._count_running() >= self.max_concurrent_jobs:
             job_id = str(int(datetime.datetime.now().timestamp() * 1000))
@@ -140,6 +166,8 @@ class OfflineTrainerRunner:
                 self._jobs[job_id] = entry
 
             self._append_diag({"timestamp": datetime.datetime.now().isoformat(), "type": "train_job_done", "job_id": job_id, "returncode": ret})
+            # prune logs after job ends
+            self._prune_logs()
         except Exception as e:
             with self._lock:
                 self._jobs[job_id] = {"status": "failed", "error": str(e)}
