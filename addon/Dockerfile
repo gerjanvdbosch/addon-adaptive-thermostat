@@ -7,10 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
 
-COPY run.sh run.sh
+RUN pip install --no-cache-dir -r requirements.txt
 RUN chmod +x run.sh
 
 ENV MODEL_DIR=/data
