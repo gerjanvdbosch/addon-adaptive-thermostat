@@ -4,7 +4,7 @@ set -eo pipefail
 # Configurable paths (omgeving kan deze overschrijven)
 MODEL_DIR="${MODEL_DIR:-/data}"
 LOG_DIR="${MODEL_DIR:-/tmp}/logs"
-MAIN_PY="${MAIN_PY:-/run_proc.py}"   # pas aan naar jouw entrypoint (bijv. /app/app.py)
+MAIN_PY="${MAIN_PY:-/app/run_proc.py}"   # pas aan naar jouw entrypoint (bijv. /app/app.py)
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 mkdir -p "${LOG_DIR}"
