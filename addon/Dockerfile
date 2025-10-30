@@ -1,4 +1,8 @@
-FROM ghcr.io/hassio-addons/base-python:16.1.4
+FROM ghcr.io/hassio-addons/base-python:17.0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libblas-dev liblapack-dev gfortran \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
