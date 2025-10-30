@@ -3,17 +3,25 @@
   "version": "0.1",
   "slug": "addon-adaptive-thermostat",
   "description": "A scikit-learn based adaptive thermostat HA addon",
-  "arch": ["amd64", "armv7", "aarch64"],
+  "arch": ["amd64", "armv7", "armhf", "aarch64"],
   "startup": "services",
   "boot": "auto",
   "options": {
-     "MODEL_DIR": "/data/adaptive_thermostat"
+    "model_dir": "/data",
+    "train_interval_hours": 24,
+    "min_train_samples": 40
   },
   "schema": {
-      "MODEL_DIR": "str?"
+    "model_dir": "str?",
+    "train_interval_hours": "int?",
+    "min_train_samples": "int?"
   },
-  "ports": {},
-  "map": ["config:rw"],
+  "ports": {
+    "5000/tcp": 5000
+  },
+  "map": ["config:rw", "ssl:ro"],
   "host_network": false,
-  "homeassistant_api": true
+  "homeassistant_api": true,
+  "ingress": false,
+  "webui": "http://[HOST]:[PORT:5000]"
 }
