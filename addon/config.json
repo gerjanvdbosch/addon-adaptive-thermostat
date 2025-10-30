@@ -7,10 +7,10 @@
   "startup": "services",
   "boot": "auto",
   "options": {
-     "model_dir": "/data/adaptive_thermostat/model"
+     "MODEL_DIR": "/data/adaptive_thermostat"
   },
   "schema": {
-      "model_dir": "str?"
+      "MODEL_DIR": "str?"
   },
   "ports": {},
   "map": ["config:rw"],
