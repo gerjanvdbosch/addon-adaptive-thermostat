@@ -1,16 +1,14 @@
-# FROM ghcr.io/hassio-addons/base-python:17.0.0
-FROM ghcr.io/hassio-addons/addon-base:18.2.1
+FROM ghcr.io/hassio-addons/addon-debian-base:8.1.4
 
-# RUN apk add --no-cache \
-#     --virtual .build-deps \
-#       build-base
-
+# system deps for scientific stack (kept minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+    
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# RUN apk del .build-deps || true
 
 COPY run.sh run.sh
 RUN chmod a+x run.sh
