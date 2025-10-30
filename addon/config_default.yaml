@@ -5,30 +5,50 @@ feedback_filename: historical_feedback.json
 min_train_samples: 40
 train_interval_hours: 24
 
+# SGD defaults tuned for conservative, stable online + offline updates
 sgd:
-  alpha: 1e-4
-  eta0: 1e-3
+  # regularization strength (smaller = less regularization)
+  alpha: 1e-05
+  # initial learning rate for invscaling
+  eta0: 5e-04
+  # learning rate schedule: invscaling or adaptive are good choices
   learning_rate: invscaling
+  # exponent for invscaling
   power_t: 0.25
-  max_iter: 1000
-  tol: 1e-4
+  # allow more iterations for stable convergence
+  max_iter: 2000
+  tol: 1e-05
 
+# Safety / update control: more conservative defaults to avoid abrupt changes
 safe:
-  max_delta: 0.5
-  min_abs_update: 0.01
-  clamp_action: 3.0
+  # maximum allowed change in predicted correction (°C) per partial_fit decision (absolute)
+  max_delta: 0.4
+  # ignore updates smaller than this absolute value (°C)
+  min_abs_update: 0.02
+  # clamp predictions to this absolute value (°C)
+  clamp_action: 2.0
 
 correction:
+  # how corrections are treated by default: "suggest" only shows suggestion; "apply" will attempt to apply
   default_mode: "suggest"
+  # method used to apply corrections: "ha_api" or "mqtt"
   apply_via: "ha_api"
+  # when using HA API, this is the target entity to call (number.set_value)
   ha_setpoint_entity: "number.thermostaat_gewenste_temperatuur"
+  # when using mqtt apply_via, publish to this topic
   mqtt_setpoint_topic: "thermostaat/thermostaat_gewenste_temperatuur/set"
+  # debounce user corrections within this many seconds
   debounce_seconds: 30
+  # when applying a correction, reset the UI slider if true
   reset_slider_on_apply: true
+  # allow direct apply via API endpoint /apply
   allow_direct_apply_via_api: true
 
 # Optional offline trainer tuning (used by APIService when present)
 offline_trainer:
+  # limit concurrent retrain jobs to avoid overload
   max_concurrent_jobs: 1
+  # kill retrain job after this many seconds
   job_timeout_seconds: 3600
+  # keep this many most-recent train logs (out+err files)
   train_logs_keep: 10
