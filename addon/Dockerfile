@@ -1,4 +1,4 @@
-FROM ghcr.io/hassio-addons/base-python:17.0.2
+FROM ghcr.io/hassio-addons/base-python:17.0.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libblas-dev liblapack-dev gfortran \
