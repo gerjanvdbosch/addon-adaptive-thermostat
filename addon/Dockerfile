@@ -1,4 +1,4 @@
-FROM ghcr.io/hassio-addons/addon-debian-base:8.1.4
+FROM python:3.11-slim
 
 # system deps for scientific stack (kept minimal)
 RUN apt-get update && apt-get install -y --no-install-recommends \
