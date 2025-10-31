@@ -5,6 +5,8 @@ import signal
 import logging
 import yaml
 
+logger.info("Test")
+
 # Zorg dat de addon root op sys.path staat (de map waarin dit bestand staat)
 HERE = os.path.dirname(__file__)
 if HERE not in sys.path:
