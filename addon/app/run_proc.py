@@ -35,7 +35,7 @@ if os.path.exists(CFG_PATH):
 try:
     # verwacht: addon/app/api_service.py bevat class APIService en/of een WSGI app object
     # api_service.py eerder geleverd exposeert 'app' (Flask instance) als: app = APIService().app
-    from app.api_service import app as flask_app
+    from api_service import app as flask_app
 except Exception as e:
     logger.exception("Failed to import app.api_service.app: %s", e)
     # extra debug informatie om te zien waarom package niet gevonden wordt
