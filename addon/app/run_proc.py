@@ -5,7 +5,7 @@ import signal
 import logging
 import yaml
 
-# Zorg dat de addon root op sys.path staat (de map waarin deze run_proc.py staat)
+# Zorg dat de addon root op sys.path staat (de map waarin dit bestand staat)
 HERE = os.path.dirname(__file__)
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -31,15 +31,20 @@ if os.path.exists(CFG_PATH):
     except Exception:
         cfg_default = {}
 
-# Zorg dat package 'app' importeerbaar is en importeer de Flask app
+# Importeer de Flask app uit het package app
 try:
+    # verwacht: addon/app/api_service.py bevat class APIService en/of een WSGI app object
+    # api_service.py eerder geleverd exposeert 'app' (Flask instance) als: app = APIService().app
     from app.api_service import app as flask_app
 except Exception as e:
     logger.exception("Failed to import app.api_service.app: %s", e)
-    # dump debug info to help locate import path issues
+    # extra debug informatie om te zien waarom package niet gevonden wordt
     logger.error("sys.path=%s", sys.path)
     logger.error("cwd=%s", os.getcwd())
-    logger.error("files=%s", os.listdir('.'))
+    try:
+        logger.error("files=%s", os.listdir(HERE))
+    except Exception:
+        pass
     raise
 
 def _handle_signal(signum, frame):
