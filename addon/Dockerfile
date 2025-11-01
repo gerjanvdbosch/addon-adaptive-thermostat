@@ -4,10 +4,11 @@ WORKDIR /app
 
 COPY . .
 
-RUN apk update && apk add --no-cache python3 py3-pip python3-dev build-base musl-dev libc-dev \
+RUN apk update && apk add --no-cache python3 py3-pip python3-dev build-base \
     && python3 -m venv /opt/venv \
     && . /opt/venv/bin/activate \
     && pip install --upgrade pip setuptools wheel \
+    && pip install --index-url https://wheels.home-assistant.io/musllinux-index/ pyyaml==6.0.3 \
     && pip install --no-cache-dir -r requirements.txt
 ENV PATH="/opt/venv/bin:$PATH"
 
