@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN apk update && apk add --no-cache python3 py3-pip python3-dev build-base \
+RUN apk update && apk add --no-cache python3 py3-pip python3-dev build-base musl-dev libc-dev \
     && python3 -m venv /opt/venv \
     && . /opt/venv/bin/activate \
     && pip install --upgrade pip setuptools wheel \
