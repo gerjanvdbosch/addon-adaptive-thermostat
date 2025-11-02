@@ -1,9 +1,9 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 
-bashio::log.info "Preparing to start..."
+bashio::log.info "Preparing to start...2"
 
-bashio::config.require 'model_dir'
+# bashio::config.require 'model_dir'
 
 # Configurable paths (omgeving kan deze overschrijven)
 # MODEL_DIR="${MODEL_DIR:-/data}"
