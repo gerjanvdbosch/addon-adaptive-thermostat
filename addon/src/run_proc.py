@@ -26,16 +26,6 @@ except Exception as e:
         pass
     raise
 
-def _handle_signal(signum, frame):
-    logger.info("Received signal %s, shutting down.", signum)
-    try:
-        sys.exit(0)
-    except SystemExit:
-        pass
-
-signal.signal(signal.SIGTERM, _handle_signal)
-signal.signal(signal.SIGINT, _handle_signal)
-
 def run():
     host = cfg_default.get("host", "0.0.0.0")
     port = int(cfg_default.get("port", 5189))
@@ -46,7 +36,5 @@ def run():
 if __name__ == "__main__":
     try:
         run()
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user, exiting.")
     except Exception:
         logger.exception("Unhandled exception, exiting.")
