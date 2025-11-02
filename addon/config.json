@@ -8,7 +8,7 @@
   "startup": "services",
   "boot": "auto",
   "options": {
-    "model_dir": "/data/adaptive_thermostat",
+    "model_dir": "/homeassistant/data/adaptive_thermostat",
     "train_interval_hours": 24,
     "min_train_samples": 40
   },
