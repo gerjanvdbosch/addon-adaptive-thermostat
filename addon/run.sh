@@ -8,4 +8,4 @@ MODEL_DIR="$(bashio::config 'model_dir' || echo '/homeassistant/data/adaptive_th
 
 mkdir -p "${MODEL_DIR}"
 
-python3 -u ./app/run_proc.py
+python3 -u ./run_proc.py
