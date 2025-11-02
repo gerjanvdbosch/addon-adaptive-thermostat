@@ -5,7 +5,7 @@ bashio::log.info "Preparing to start..."
 
 bashio::config.require 'model_dir'
 
-MODEL_DIR="$(bashio::config 'model_dir' || echo "${MODEL_DIR:-/data/adaptive_thermostat2}")"
+MODEL_DIR="$(bashio::config 'model_dir' || echo "${MODEL_DIR:-/data/adaptive_thermostat}")"
 
 bashio::log.info "dir: ${MODEL_DIR}"
 
