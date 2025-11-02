@@ -8,12 +8,10 @@ bashio::config.require 'data_path'
 
 DATA_PATH=$(bashio::config 'data_path')
 
-bashio::log.info "DATA_PATH ${DATA_PATH}"
-
 mkdir -p "${DATA_PATH}"
 if [ ! -d "${DATA_PATH}" ] || [ ! -w "${DATA_PATH}" ]; then
   bashio::log.fatal "DATA_PATH ${DATA_PATH} is not writable or cannot be created"
   exit 1
 fi
 
-python3 -u run_proc.py
+python3 -u ./app/run_proc.py
