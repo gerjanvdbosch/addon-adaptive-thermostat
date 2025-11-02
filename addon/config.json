@@ -4,6 +4,7 @@
   "slug": "addon-adaptive-thermostat",
   "description": "A scikit-learn based adaptive thermostat HA addon",
   "arch": ["amd64", "armv7", "armhf", "aarch64"],
+  "init": false,
   "startup": "services",
   "boot": "auto",
   "options": {
