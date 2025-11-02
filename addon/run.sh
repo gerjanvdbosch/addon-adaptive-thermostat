@@ -1,7 +1,7 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 
-bashio::log.info "Preparing to start...2"
+bashio::log.info "Preparing to start..."
 
 # bashio::config.require 'model_dir'
 
