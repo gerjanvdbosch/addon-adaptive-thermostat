@@ -13,5 +13,4 @@ RUN apt-get update && \
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN chmod +x run.sh
-
 CMD ["./run.sh"]
