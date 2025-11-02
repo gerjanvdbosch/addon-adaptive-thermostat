@@ -17,7 +17,7 @@ options:
   train_interval_hours: 24
   min_train_samples: 40
 schema:
-  model_dir: "str?"
+  data_path: "str?"
   train_interval_hours: "int?"
   min_train_samples: "int?"
 ports:
