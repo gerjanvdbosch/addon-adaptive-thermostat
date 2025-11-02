@@ -3,7 +3,11 @@
 
 bashio::log.info "Preparing to start..."
 
-# bashio::config.require 'model_dir'
+bashio::config.require 'model_dir'
+
+MODEL_DIR="$(bashio::config 'model_dir' || echo "${MODEL_DIR:-/data/adaptive_thermostat2}")"
+
+bashio::log.info "dir: ${MODEL_DIR}"
 
 # Configurable paths (omgeving kan deze overschrijven)
 # MODEL_DIR="${MODEL_DIR:-/data}"
