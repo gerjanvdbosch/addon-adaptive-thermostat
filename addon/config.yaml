@@ -14,6 +14,7 @@ services:
 options:
   data_path: "/config"
 schema:
+  data_path: str?
 ports:
   5000/tcp: 5000
 map:
