@@ -1,5 +1,5 @@
 name: "Adaptive Thermostat"
-version: "0.1"
+version: "0.0"
 slug: "adaptive_thermostat"
 description: "A scikit-learn based adaptive thermostat HA addon"
 arch:
@@ -11,13 +11,9 @@ arch:
 init: false
 services:
   - mqtt:need
-options:
-  data_path: "/config"
-schema:
-  data_path: str?
-ports:
-  5189/tcp: 5189
+# options:
+# schema:
+# ports:
 map:
   - addon_config:rw
 homeassistant_api: true
-webui: "http://[HOST]:[PORT:5189]"
