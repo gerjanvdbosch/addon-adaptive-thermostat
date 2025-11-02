@@ -13,16 +13,11 @@ init: false
 services:
   - mqtt:need
 options:
-  data_path: "/test"
-  train_interval_hours: 24
-  min_train_samples: 40
+  data_path: "/config"
 schema:
-  data_path: "str?"
-  train_interval_hours: "int?"
-  min_train_samples: "int?"
 ports:
-  "5000/tcp": 5000
+  "5189/tcp": 5189
 map:
   - addon_config:rw
 homeassistant_api: true
-webui: "http://[HOST]:[PORT:5000]"
+webui: "http://[HOST]:[PORT:5189]"
