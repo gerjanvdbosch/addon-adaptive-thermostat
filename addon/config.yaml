@@ -9,11 +9,6 @@ arch:
   - amd64
   - i386
 init: false
-services:
-  - mqtt:need
-# options:
-# schema:
-# ports:
 map:
   - addon_config:rw
 homeassistant_api: true
