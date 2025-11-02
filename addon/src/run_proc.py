@@ -4,19 +4,6 @@ import sys
 import signal
 import logging
 
-# ensure import paths (parent then src)
-# _here = os.path.dirname(__file__)
-# _parent = os.path.abspath(os.path.join(_here, ".."))
-# if _parent not in sys.path:
-#     sys.path.insert(0, _parent)
-# if _here not in sys.path:
-#     sys.path.insert(0, _here)
-
-# try:
-#     os.chdir(_here)
-# except Exception:
-#     pass
-
 # import centralized config
 from config import cfg_default  # CFG_PATH is available in config if needed
 
