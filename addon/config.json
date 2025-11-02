@@ -23,6 +23,5 @@
   "map": ["config:rw", "ssl:ro"],
   "host_network": false,
   "homeassistant_api": true,
-  "ingress": false,
   "webui": "http://[HOST]:[PORT:5000]"
 }
