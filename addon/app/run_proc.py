@@ -5,33 +5,31 @@ import signal
 import logging
 import yaml
 
-logger.info("Test")
-
 # # Zorg dat de addon root op sys.path staat (de map waarin dit bestand staat)
-# HERE = os.path.dirname(__file__)
-# if HERE not in sys.path:
-#     sys.path.insert(0, HERE)
+HERE = os.path.dirname(__file__)
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 
-# # Werkdirectory = addon root
-# os.chdir(HERE)
+# Werkdirectory = addon root
+os.chdir(HERE)
 
 # # Logging
-# LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-# logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
-#                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-# logger = logging.getLogger("adaptive_thermostat")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("adaptive_thermostat")
 
-# # Probeer config te laden (optioneel)
-# cfg_default = {}
-# CFG_PATH = os.path.join(HERE, "addon", "app", "config_default.yaml")
-# if not os.path.exists(CFG_PATH):
-#     CFG_PATH = os.path.join(HERE, "app", "config_default.yaml")
-# if os.path.exists(CFG_PATH):
-#     try:
-#         with open(CFG_PATH, "r") as f:
-#             cfg_default = yaml.safe_load(f) or {}
-#     except Exception:
-#         cfg_default = {}
+# Probeer config te laden (optioneel)
+cfg_default = {}
+CFG_PATH = os.path.join(HERE, "addon", "app", "config_default.yaml")
+if not os.path.exists(CFG_PATH):
+    CFG_PATH = os.path.join(HERE, "app", "config_default.yaml")
+if os.path.exists(CFG_PATH):
+    try:
+        with open(CFG_PATH, "r") as f:
+            cfg_default = yaml.safe_load(f) or {}
+    except Exception:
+        cfg_default = {}
 
 # # Importeer de Flask app uit het package app
 # try:
