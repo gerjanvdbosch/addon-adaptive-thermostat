@@ -3,46 +3,38 @@ import os
 import sys
 import signal
 import logging
-import yaml
 
-# # Zorg dat de addon root op sys.path staat (de map waarin dit bestand staat)
-HERE = os.path.dirname(__file__)
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+# ensure import paths (parent then src)
+# _here = os.path.dirname(__file__)
+# _parent = os.path.abspath(os.path.join(_here, ".."))
+# if _parent not in sys.path:
+#     sys.path.insert(0, _parent)
+# if _here not in sys.path:
+#     sys.path.insert(0, _here)
 
-# Werkdirectory = addon root
-os.chdir(HERE)
+# try:
+#     os.chdir(_here)
+# except Exception:
+#     pass
 
-# # Logging
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+# import centralized config
+from config import cfg_default  # CFG_PATH is available in config if needed
+
+# logging from config only
+LOG_LEVEL = str(cfg_default.get("log_level", "INFO")).upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("adaptive_thermostat")
 
-# Probeer config te laden (optioneel)
-cfg_default = {}
-CFG_PATH = os.path.join(HERE, "addon", "app", "config_default.yaml")
-if not os.path.exists(CFG_PATH):
-    CFG_PATH = os.path.join(HERE, "app", "config_default.yaml")
-if os.path.exists(CFG_PATH):
-    try:
-        with open(CFG_PATH, "r") as f:
-            cfg_default = yaml.safe_load(f) or {}
-    except Exception:
-        cfg_default = {}
-
-# # Importeer de Flask app uit het package app
+# import the Flask app (api_service.py expected in this directory)
 try:
-    # verwacht: addon/app/api_service.py bevat class APIService en/of een WSGI app object
-    # api_service.py eerder geleverd exposeert 'app' (Flask instance) als: app = APIService().app
     from api_service import app as flask_app
 except Exception as e:
     logger.exception("Failed to import app.api_service.app: %s", e)
-    # extra debug informatie om te zien waarom package niet gevonden wordt
     logger.error("sys.path=%s", sys.path)
     logger.error("cwd=%s", os.getcwd())
     try:
-        logger.error("files=%s", os.listdir(HERE))
+        logger.error("files=%s", os.listdir(_here))
     except Exception:
         pass
     raise
@@ -58,9 +50,9 @@ signal.signal(signal.SIGTERM, _handle_signal)
 signal.signal(signal.SIGINT, _handle_signal)
 
 def run():
-    host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", str(cfg_default.get("port", 5189))))
-    debug = os.environ.get("FLASK_DEBUG", "0") in ("1", "true", "True")
+    host = cfg_default.get("host", "0.0.0.0")
+    port = int(cfg_default.get("port", 5189))
+    debug = bool(cfg_default.get("flask_debug", False))
     logger.info("Starting Flask app on %s:%d (debug=%s).", host, port, debug)
     flask_app.run(host=host, port=port, threaded=True, debug=debug, use_reloader=False)
 
