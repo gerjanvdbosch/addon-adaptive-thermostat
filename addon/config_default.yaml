@@ -1,4 +1,4 @@
-model_dir: /data/adaptive_thermostat
+model_dir: /homeassistant/data/adaptive_thermostat
 model_filename: model_pipeline_sgd.pkl
 diag_filename: training_diagnostics.json
 feedback_filename: historical_feedback.json
