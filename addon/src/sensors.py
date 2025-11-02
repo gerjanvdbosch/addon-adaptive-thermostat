@@ -13,7 +13,7 @@ HEADERS = {
 }
 
 def states(entity_id):
-    url = f"{SUPERVISOR_URL}/states/{entity_id}"
+    url = f"{SUPERVISOR_API}/states/{entity_id}"
     resp = requests.get(url, headers=HEADERS, timeout=5)
     resp.raise_for_status()
     return resp.json()["state"]
