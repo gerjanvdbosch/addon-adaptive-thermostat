@@ -4,6 +4,7 @@ set -euo pipefail
 
 bashio::log.info "Preparing to start..."
 
-export HA_TOKEN="$(bashio::addon.supervisor.token)"
+SUPERVISOR_TOKEN="$(bashio::addon.supervisor.token)"
+export SUPERVISOR_TOKEN
 
 python3 -u ./src/run.py
