@@ -16,8 +16,8 @@ options:
 schema:
   data_path: str?
 ports:
-  5000/tcp: 5000
+  5189/tcp: 5189
 map:
   - addon_config:rw
 homeassistant_api: true
-webui: "http://[HOST]:[PORT:5000]"
+webui: "http://[HOST]:[PORT:5189]"
