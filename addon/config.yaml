@@ -1,0 +1,28 @@
+name: "Adaptive Thermostat"
+version: "0.1"
+slug: "addon-adaptive-thermostat"
+description: "A scikit-learn based adaptive thermostat HA addon"
+url: https://github.com/gerjanvdbosch/addon-adaptive-thermostat
+arch:
+  - armhf
+  - armv7
+  - aarch64
+  - amd64
+  - i386
+init: false
+services:
+  - mqtt:need
+options:
+  model_dir: "/homeassistant/data/adaptive_thermostat"
+  train_interval_hours: 24
+  min_train_samples: 40
+schema:
+  model_dir: "str?"
+  train_interval_hours: "int?"
+  min_train_samples: "int?"
+ports:
+  "5000/tcp": 5000
+map:
+  - addon_config:rw
+homeassistant_api: true
+webui: "http://[HOST]:[PORT:5000]"
