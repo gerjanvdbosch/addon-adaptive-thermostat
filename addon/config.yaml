@@ -2,7 +2,6 @@ name: "Adaptive Thermostat"
 version: "0.1"
 slug: "addon-adaptive-thermostat"
 description: "A scikit-learn based adaptive thermostat HA addon"
-url: https://github.com/gerjanvdbosch/addon-adaptive-thermostat
 arch:
   - armhf
   - armv7
