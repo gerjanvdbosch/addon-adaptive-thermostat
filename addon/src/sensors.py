@@ -12,8 +12,11 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-def states(entity_id):
+def states(entity_id, attribute=None):
     url = f"{SUPERVISOR_API}/states/{entity_id}"
     resp = requests.get(url, headers=HEADERS, timeout=5)
     resp.raise_for_status()
-    return resp.json()["state"]
+    data = resp.json()
+    if attribute:
+        return data.get("attributes", {}).get(attribute)
+    return data["state"]
