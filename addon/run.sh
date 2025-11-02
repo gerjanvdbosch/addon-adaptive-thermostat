@@ -4,8 +4,10 @@ set -euo pipefail
 
 bashio::log.info "Preparing to start..."
 
-MODEL_DIR="$(bashio::config 'model_dir' || echo '/homeassistant/data/adaptive_thermostat')"
+bashio::config.require 'data_path'
 
-mkdir -p "${MODEL_DIR}"
+DATA_PATH=$(bashio::config 'data_path')
+
+mkdir -p "${DATA_PATH}"
 
 python3 -u ./run_proc.py
