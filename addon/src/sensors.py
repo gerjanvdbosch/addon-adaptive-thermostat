@@ -1,12 +1,12 @@
 import os
-import json
 import requests
 
-HA_URL = os.environ.get("HA_URL", "http://supervisor/core/api")
-HA_TOKEN = os.environ.get("HA_TOKEN")
-HEADERS = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
+SUPERVISOR_URL = "http://supervisor/core/api"
+TOKEN = os.getenv("SUPERVISOR_TOKEN")
 
-def states(id):
-    resp = requests.get(f"{HA_URL}/states/{id}", headers=HEADERS)
+def states(entity_id):
+    headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+    url = f"{SUPERVISOR_URL}/states/{entity_id}"
+    resp = requests.get(url, headers=headers, timeout=5)
     resp.raise_for_status()
-    return resp.json()
+    return resp.json()["state"]
