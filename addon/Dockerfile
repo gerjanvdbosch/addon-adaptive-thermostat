@@ -14,5 +14,4 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN chmod +x run.sh
 
-ENV MODEL_DIR=/data
 CMD ["./run.sh"]
