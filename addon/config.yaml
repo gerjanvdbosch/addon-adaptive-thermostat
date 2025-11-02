@@ -13,7 +13,7 @@ init: false
 services:
   - mqtt:need
 options:
-  model_dir: "/homeassistant/data/adaptive_thermostat"
+  data_path: "/test"
   train_interval_hours: 24
   min_train_samples: 40
 schema:
