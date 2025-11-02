@@ -59,7 +59,7 @@ signal.signal(signal.SIGINT, _handle_signal)
 
 def run():
     host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", str(cfg_default.get("port", 5000))))
+    port = int(os.environ.get("PORT", str(cfg_default.get("port", 5189))))
     debug = os.environ.get("FLASK_DEBUG", "0") in ("1", "true", "True")
     logger.info("Starting Flask app on %s:%d (debug=%s).", host, port, debug)
     flask_app.run(host=host, port=port, threaded=True, debug=debug, use_reloader=False)
