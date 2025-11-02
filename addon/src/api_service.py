@@ -5,45 +5,32 @@ import time
 import threading
 import datetime
 import requests
-import yaml
 from flask import Flask, request, jsonify
+
+# centralized config (single source of truth)
+from config import cfg_default, get_adaptive_config
+
+# helper modules (zorg dat deze bestanden in /app/src aanwezig zijn)
 from model_utils import append_diag, atomic_save_json
 from trainer import Trainer, FEATURES
 from store import FeedbackStore
 from model_manager import ModelManager
-from config import get_adaptive_config
 from offline_trainer import OfflineTrainerRunner
 
-here = os.path.dirname(__file__)
-with open(os.path.join(here, "config_default.yaml"), "r") as f:
-    cfg_default = yaml.safe_load(f)
-
-MODEL_DIR = os.environ.get("MODEL_DIR", cfg_default.get("model_dir", "/data"))
+# compute paths from cfg_default (data_path preferred)
+MODEL_DIR = cfg_default.get("data_path") or cfg_default.get("model_dir") or "/config"
 MODEL_PATH = os.path.join(MODEL_DIR, cfg_default.get("model_filename", "model_pipeline_sgd.pkl"))
 DIAG_PATH = os.path.join(MODEL_DIR, cfg_default.get("diag_filename", "training_diagnostics.json"))
 FEEDBACK_PATH = os.path.join(MODEL_DIR, cfg_default.get("feedback_filename", "historical_feedback.json"))
 
-# Offline trainer config: prefer explicit env vars, fallback to config_default keys
 def _get_offline_trainer_config():
-    max_concurrent = os.environ.get("TRAIN_MAX_CONCURRENT") or cfg_default.get("offline_trainer", {}).get("max_concurrent_jobs") or cfg_default.get("max_concurrent_jobs")
-    timeout_sec = os.environ.get("TRAIN_JOB_TIMEOUT") or cfg_default.get("offline_trainer", {}).get("job_timeout_seconds") or cfg_default.get("job_timeout_seconds")
-    keep_logs = os.environ.get("TRAIN_LOGS_KEEP") or cfg_default.get("offline_trainer", {}).get("train_logs_keep") or cfg_default.get("train_logs_keep")
-
-    try:
-        max_concurrent = int(max_concurrent) if max_concurrent is not None else 1
-    except Exception:
-        max_concurrent = 1
-    try:
-        timeout_sec = int(timeout_sec) if timeout_sec is not None else 60 * 60
-    except Exception:
-        timeout_sec = 60 * 60
-    try:
-        keep_logs = int(keep_logs) if keep_logs is not None else 10
-    except Exception:
-        keep_logs = 10
-
+    offline = cfg_default.get("offline_trainer", {}) or {}
+    max_concurrent = int(offline.get("max_concurrent_jobs") or cfg_default.get("max_concurrent_jobs") or 1)
+    timeout_sec = int(offline.get("job_timeout_seconds") or cfg_default.get("job_timeout_seconds") or 60 * 60)
+    keep_logs = int(offline.get("train_logs_keep") or cfg_default.get("train_logs_keep") or 10)
     return {"max_concurrent_jobs": max_concurrent, "job_timeout_seconds": timeout_sec, "train_logs_keep": keep_logs}
 
+# Ensure model dir exists
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 class APIService:
@@ -52,10 +39,9 @@ class APIService:
         self.trainer = Trainer(FEEDBACK_PATH)
         self.model = ModelManager(MODEL_PATH, DIAG_PATH, clamp_action=cfg_default.get("safe", {}).get("clamp_action", 3.0))
 
-        # Offline trainer runner with configurable params
         offline_cfg = _get_offline_trainer_config()
         self.trainer_runner = OfflineTrainerRunner(
-            here,
+            os.path.dirname(__file__),
             MODEL_PATH,
             FEEDBACK_PATH,
             DIAG_PATH,
@@ -88,7 +74,12 @@ class APIService:
         except Exception:
             return False
 
-    def _ha_setpoint_via_rest(self, value, entity, ha_url, ha_token):
+    def _ha_setpoint_via_rest(self, value, entity):
+        corr_cfg = cfg_default.get("correction", {}) or {}
+        ha_url = corr_cfg.get("ha_url")
+        ha_token = corr_cfg.get("ha_token")
+        if not ha_url or not ha_token or not entity:
+            return {"ok": False, "reason": "ha_not_configured"}
         headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
         payload = {"entity_id": entity, "value": float(value)}
         try:
@@ -105,6 +96,22 @@ class APIService:
         except Exception:
             pass
         return {"ok": False, "reason": "ha_call_failed"}
+
+    def _mqtt_publish_via_ha(self, target_value, topic):
+        corr_cfg = cfg_default.get("correction", {}) or {}
+        ha_url = corr_cfg.get("ha_url")
+        ha_token = corr_cfg.get("ha_token")
+        if not ha_url or not ha_token or not topic:
+            return {"ok": False, "reason": "ha_not_configured"}
+        headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
+        payload_pub = {"topic": topic, "payload": f"{float(target_value):.1f}"}
+        try:
+            r = requests.post(f"{ha_url}/api/services/mqtt/publish", json=payload_pub, headers=headers, timeout=5)
+            if r.ok:
+                return {"ok": True, "method": "mqtt_publish"}
+            return {"ok": False, "reason": "mqtt_publish_failed"}
+        except Exception as e:
+            return {"ok": False, "reason": f"exception:{e}"}
 
     def _register_routes(self):
         @self.app.route("/predict", methods=["POST"])
@@ -179,9 +186,7 @@ class APIService:
             }
             self.store.append(entry)
 
-            corr_cfg = cfg_default.get("correction", {})
-            ha_url = os.environ.get("HA_URL")
-            ha_token = os.environ.get("HA_TOKEN")
+            corr_cfg = cfg_default.get("correction", {}) or {}
             entity = corr_cfg.get("ha_setpoint_entity")
             try:
                 idx = FEATURES.index("huidige_setpoint")
@@ -191,23 +196,15 @@ class APIService:
             target_value = current_setpoint + feedback_value if current_setpoint is not None else feedback_value
 
             apply_result = {"ok": False, "reason": "not_attempted"}
-            if corr_cfg.get("apply_via") == "ha_api" and ha_url and ha_token and entity:
-                apply_result = self._ha_setpoint_via_rest(target_value, entity, ha_url, ha_token)
-            elif corr_cfg.get("apply_via") == "mqtt":
-                HA_URL = ha_url; HA_TOKEN = ha_token
-                if HA_URL and HA_TOKEN:
-                    headers = {"Authorization": f"Bearer {HA_TOKEN}", "Content-Type": "application/json"}
-                    payload_pub = {"topic": corr_cfg.get("mqtt_setpoint_topic"), "payload": f"{float(target_value):.1f}"}
-                    try:
-                        r = requests.post(f"{HA_URL}/api/services/mqtt/publish", json=payload_pub, headers=headers, timeout=5)
-                        if r.ok:
-                            apply_result = {"ok": True, "method": "mqtt_publish"}
-                        else:
-                            apply_result = {"ok": False, "reason": "mqtt_publish_failed"}
-                    except Exception as e:
-                        apply_result = {"ok": False, "reason": f"exception:{e}"}
+            apply_via = corr_cfg.get("apply_via")
+            if apply_via == "ha_api" and entity:
+                apply_result = self._ha_setpoint_via_rest(target_value, entity)
+            elif apply_via == "mqtt":
+                topic = corr_cfg.get("mqtt_setpoint_topic")
+                if topic:
+                    apply_result = self._mqtt_publish_via_ha(target_value, topic)
                 else:
-                    apply_result = {"ok": False, "reason": "mqtt_no_ha_config"}
+                    apply_result = {"ok": False, "reason": "mqtt_topic_not_configured"}
             else:
                 apply_result = {"ok": False, "reason": "apply_method_not_configured"}
 
@@ -222,15 +219,12 @@ class APIService:
 
         @self.app.route("/train", methods=["POST"])
         def train_route():
-            # Allow overriding runner params per-request (optional)
             req = request.get_json(silent=True) or {}
             if req:
-                # validate and apply per-request override for this job only
-                maxc = req.get("max_concurrent_jobs")
-                timeout = req.get("job_timeout_seconds")
-                keep = req.get("train_logs_keep")
-                # override runner settings if provided (non-persistent)
                 try:
+                    maxc = req.get("max_concurrent_jobs")
+                    timeout = req.get("job_timeout_seconds")
+                    keep = req.get("train_logs_keep")
                     if maxc is not None:
                         self.trainer_runner.max_concurrent_jobs = int(maxc)
                     if timeout is not None:
@@ -265,7 +259,6 @@ class APIService:
 
         @self.app.route("/health", methods=["GET"])
         def health_route():
-            # include basic offline trainer config/status in health
             offline_cfg = _get_offline_trainer_config()
             return jsonify({
                 "ok": True,
