@@ -14,4 +14,4 @@ if [ ! -d "${DATA_PATH}" ] || [ ! -w "${DATA_PATH}" ]; then
   exit 1
 fi
 
-python3 -u ./app/run_proc.py
+python3 -u ./src/run_proc.py
