@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Boolean,
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
-DB_PATH = os.getenv("DB_PATH", "/db/samples.sqlite")
+DB_PATH = os.getenv("DB_PATH", "/config/db/samples.sqlite")
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 Session = sessionmaker(bind=engine)
 
