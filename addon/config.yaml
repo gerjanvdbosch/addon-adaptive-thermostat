@@ -19,7 +19,6 @@ options:
   max_setpoint: 25.0
   min_change_threshold: 0.3
   buffer_days: 30
-  webapi_port: 8000
   sensors:
     current_temp: sensor.huidige_temp
     temp_change: sensor.temp_verandering
@@ -43,7 +42,21 @@ schema:
   max_setpoint: "float?"
   min_change_threshold: "float?"
   buffer_days: "int?"
-  webapi_port: "int?"
-  sensors: "dict?"
+  sensors:
+    current_temp: "float?"
+    temp_change: "float?"
+    min_temp_today: "float?"
+    max_temp_today: "float?"
+    min_temp_tomorrow: "float?"
+    max_temp_tomorrow: "float?"
+    solar_kwh_today: "float?"
+    solar_chance_today: "float?"
+    current_setpoint: "float?"
+    wind_speed_today: "float?"
+    wind_speed_tomorrow: "float?"
+    wind_direction_today: "float?"
+    outside_temp: "float?"
+ports:
+  8000/tcp: 8000
 map:
   - addon_config:rw
