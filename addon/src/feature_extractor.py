@@ -7,14 +7,30 @@ FEATURE_ORDER = [
     "current_temp", "temp_change",
     "min_temp_today", "max_temp_today",
     "min_temp_tomorrow", "max_temp_tomorrow",
-    "solar_kwh_today", "solar_chance_today",
+    "solar_kwh_today", "solar_kwh_tomorrow",
+    "solar_chance_today", "solar_chance_tomorrow",
     "current_setpoint",
     "wind_speed_today", "wind_speed_tomorrow",
-    "wind_sin", "wind_cos", "outside_temp"
+    "wind_dir_today_sin", "wind_dir_today_cos",
+    "wind_dir_tomorrow_sin", "wind_dir_tomorrow_cos",
+    "outside_temp",
+    "thermostat_demand",
+    "operational_status"
 ]
 
 
 class FeatureExtractor:
+    OP_STATUS_CATEGORIES = [
+        "Uit",                  # index 0 -> represents off/unknown
+        "SWW",                  # index 1
+        "Legionellapreventie",  # index 2
+        "Verwarmen",            # index 3
+        "Koelen",               # index 4
+        "Vorstbescherming"      # index 5
+    ]
+    # helper dict for quick lookup (case-insensitive)
+    OP_STATUS_MAP = {cat.lower(): idx for idx, cat in enumerate(OP_STATUS_CATEGORIES)}
+    
     def __init__(self, impute_value=0.0):
         self.impute_value = impute_value
 
@@ -41,14 +57,46 @@ class FeatureExtractor:
         except Exception:
             return None
 
+    def _encode_binary_onoff(self, val):
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return 1.0 if val else 0.0
+        try:
+            f = float(val)
+            return 1.0 if f != 0.0 else 0.0
+        except Exception:
+            s = str(val).strip().lower()
+            if s in ("on", "aan", "true", "1", "yes", "y"):
+                return 1.0
+            if s in ("off", "uit", "false", "0", "no", "n"):
+                return 0.0
+        return None
+
+    def _encode_operational_status(self, status):
+        if not isinstance(status, str):
+            return 0  # Uit
+        s = status.strip().lower()
+        return self.OP_STATUS_MAP.get(s, 0)
+    
     def features_from_raw(self, sensor_dict: dict, timestamp: datetime.datetime = None) -> dict:
         ts = timestamp or datetime.datetime.utcnow()
         hx, hy = self._cyclical_hour(ts)
         dx, dy = self._cyclical_day(ts)
-        wind_dir = sensor_dict.get("wind_direction_today")
-        w_sin, w_cos = self._encode_wind(wind_dir)
 
-        return {
+        wind_dir_today = sensor_dict.get("wind_direction_today")
+        wind_dir_tomorrow = sensor_dict.get("wind_direction_tomorrow")
+
+        wtd_sin, wtd_cos = self._encode_wind(wind_dir_today)
+        wtm_sin, wtm_cos = self._encode_wind(wind_dir_tomorrow)
+
+        td_raw = sensor_dict.get("thermostat_demand")
+        td = self._encode_binary_onoff(td_raw)
+
+        op_raw = sensor_dict.get("operational_status")
+        op_idx = self._encode_operational_status(op_raw)
+
+       return {
             "hour_sin": hx,
             "hour_cos": hy,
             "day_sin": dx,
@@ -60,13 +108,19 @@ class FeatureExtractor:
             "min_temp_tomorrow": self._safe_float(sensor_dict.get("min_temp_tomorrow")),
             "max_temp_tomorrow": self._safe_float(sensor_dict.get("max_temp_tomorrow")),
             "solar_kwh_today": self._safe_float(sensor_dict.get("solar_kwh_today")),
+            "solar_kwh_tomorrow": self._safe_float(sensor_dict.get("solar_kwh_tomorrow")),
             "solar_chance_today": self._safe_float(sensor_dict.get("solar_chance_today")),
+            "solar_chance_tomorrow": self._safe_float(sensor_dict.get("solar_chance_tomorrow")),
             "current_setpoint": self._safe_float(sensor_dict.get("current_setpoint")),
             "wind_speed_today": self._safe_float(sensor_dict.get("wind_speed_today")),
             "wind_speed_tomorrow": self._safe_float(sensor_dict.get("wind_speed_tomorrow")),
-            "wind_sin": w_sin,
-            "wind_cos": w_cos,
+            "wind_dir_today_sin": wtd_sin,
+            "wind_dir_today_cos": wtd_cos,
+            "wind_dir_tomorrow_sin": wtm_sin,
+            "wind_dir_tomorrow_cos": wtm_cos,
             "outside_temp": self._safe_float(sensor_dict.get("outside_temp")),
+            "thermostat_demand": td,
+            "operational_status": float(op_idx),
         }
 
     def get_vector(self, feature_dict: dict):
