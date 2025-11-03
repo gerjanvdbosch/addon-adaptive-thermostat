@@ -30,7 +30,7 @@ options:
     solar_kwh_tomorrow: sensor.solcast_pv_forecast_forecast_tomorrow
     solar_chance_today: sensor.zonkans_1d
     solar_chance_tomorrow: sensor.zonkans_2d
-    current_setpoint: danfoss_15_temperature
+    current_setpoint: sensor.danfoss_15_temperature
     wind_speed_today: sensor.windkracht_1d
     wind_speed_tomorrow: sensor.windkracht_2
     wind_direction_today: sensor.windrichting_azimut_1d
