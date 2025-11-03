@@ -13,8 +13,8 @@ from db import fetch_training_data
 from feature_extractor import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
-MODEL_PATH_PARTIAL = "/models/partial_model.joblib"
-MODEL_PATH_FULL = "/models/full_model.joblib"
+MODEL_PATH_PARTIAL = "/config/models/partial_model.joblib"
+MODEL_PATH_FULL = "/config/models/full_model.joblib"
 
 
 class Trainer:
