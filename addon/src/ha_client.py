@@ -15,7 +15,7 @@ class HAClient:
             r = requests.get(f"{self.url}/states/{entity_id}", headers=self.headers, timeout=10)
             r.raise_for_status()
             payload = r.json()
-            logger.debug("State %s fetched: %s", entity_id, payload)
+            logger.debug("State %s fetched: %s", entity_id, payload.get("state"))
             return payload
         except Exception as e:
             logger.exception("Error getting state %s: %s", entity_id, e)
