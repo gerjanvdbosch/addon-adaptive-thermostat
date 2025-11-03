@@ -5,7 +5,6 @@ bashio::log.info "Preparing to start..."
 
 mkdir -p /config/models
 mkdir -p /config/db
-mkdir -p /config/logs
 
 export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
 export SAMPLE_INTERVAL_SECONDS="$(bashio::config 'sample_interval_seconds')"
