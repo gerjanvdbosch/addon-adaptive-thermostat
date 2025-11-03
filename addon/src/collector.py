@@ -5,28 +5,15 @@ from feature_extractor import FeatureExtractor
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SENSORS = {
-    "current_temp": "sensor.huidige_temp",
-    "temp_change": "sensor.temp_verandering",
-    "min_temp_today": "sensor.min_temp_vandaag",
-    "max_temp_today": "sensor.max_temp_vandaag",
-    "min_temp_tomorrow": "sensor.min_temp_morgen",
-    "max_temp_tomorrow": "sensor.max_temp_morgen",
-    "solar_kwh_today": "sensor.zon_kwh_vandaag",
-    "solar_chance_today": "sensor.zon_kans_vandaag",
-    "current_setpoint": "sensor.huidige_setpoint",
-    "wind_speed_today": "sensor.windkracht_vandaag",
-    "wind_speed_tomorrow": "sensor.windkracht_morgen",
-    "wind_direction_today": "sensor.windrichting_vandaag",
-    "outside_temp": "sensor.buiten_temp"
-}
-
 
 class Collector:
     def __init__(self, ha_client, opts):
         self.ha = ha_client
         self.opts = opts or {}
-        self.sensor_map = self.opts.get("sensors") or DEFAULT_SENSORS
+        # Require explicit sensor mapping in options; fail fast if not provided
+        self.sensor_map = self.opts.get("sensors")
+        if not isinstance(self.sensor_map, dict) or not self.sensor_map:
+            raise RuntimeError("Sensor mapping missing in add-on config (opts['sensors']). Please configure sensor entity IDs in the add-on options.")
         self.fe = FeatureExtractor()
 
     def read_sensors(self):
