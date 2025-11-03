@@ -52,6 +52,8 @@ class FeatureExtractor:
             return 0.0, 0.0
 
     def _safe_float(self, x):
+        if x is None:
+            return None
         try:
             return float(x)
         except Exception:
