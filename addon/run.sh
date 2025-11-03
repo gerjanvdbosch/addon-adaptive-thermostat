@@ -2,4 +2,8 @@
 
 bashio::log.info "Preparing to start..."
 
-python3 -u ./src/run.py
+mkdir -p /config/models
+mkdir -p /config/db
+mkdir -p /config/logs
+
+python3 -u ./src/main.py
