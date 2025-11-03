@@ -28,7 +28,6 @@ class FeatureExtractor:
         "Koelen",               # index 4
         "Vorstbescherming"      # index 5
     ]
-    # helper dict for quick lookup (case-insensitive)
     OP_STATUS_MAP = {cat.lower(): idx for idx, cat in enumerate(OP_STATUS_CATEGORIES)}
     
     def __init__(self, impute_value=0.0):
@@ -92,13 +91,13 @@ class FeatureExtractor:
         wtd_sin, wtd_cos = self._encode_wind(wind_dir_today)
         wtm_sin, wtm_cos = self._encode_wind(wind_dir_tomorrow)
 
-        td_raw = sensor_dict.get("thermostat_demand")
+        td_raw = sensor_dict.get("thermostat_demand") or sensor_dict.get("thermostaat_vraag")
         td = self._encode_binary_onoff(td_raw)
 
-        op_raw = sensor_dict.get("operational_status")
+        op_raw = sensor_dict.get("operational_status") or sensor_dict.get("status_bedrijf")
         op_idx = self._encode_operational_status(op_raw)
 
-       return {
+        return {
             "hour_sin": hx,
             "hour_cos": hy,
             "day_sin": dx,
