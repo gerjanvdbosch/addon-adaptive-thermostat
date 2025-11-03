@@ -2,7 +2,7 @@ import os
 import threading
 import time
 import logging
-
+import json
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -17,14 +17,10 @@ logger = logging.getLogger(__name__)
 
 def load_options():
     # Support passing sensors mapping as JSON string in SENSORS_JSON env var or via mapped config (opts injected by Supervisor)
-    sensors_env = os.getenv("SENSORS", None)
-    sensors = None
-    if sensors_env:
-        import json
-        try:
-            sensors = json.loads(sensors_env)
-        except Exception:
-            sensors = None
+    try:
+        sensors = json.loads(os.getenv("SENSORS", None))
+    except Exception:
+        sensors = None
 
     return {
         "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.woonkamer"),
