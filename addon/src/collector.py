@@ -12,7 +12,7 @@ class Collector:
         self.opts = opts or {}
 
         # Log the raw opts and sensors mapping for debugging
-        logger.info("Collector initializing; opts keys: %s", list(self.opts.keys()))
+        logger.info("Collector sensors mapping raw value: %s", repr(self.opts.get("climate_entity")))
         logger.info("Collector sensors mapping raw value: %s", repr(self.opts.get("sensors")))
         
         # Require explicit sensor mapping in options; fail fast if not provided
