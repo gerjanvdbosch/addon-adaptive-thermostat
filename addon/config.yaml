@@ -11,7 +11,7 @@ arch:
 init: false
 homeassistant_api: true
 options:
-  climate_entity: climate.woonkamer
+  climate_entity: climate.danfoss_icon_woonkamer
   sample_interval_seconds: 300
   partial_fit_interval_seconds: 3600
   full_retrain_time: "03:00"
