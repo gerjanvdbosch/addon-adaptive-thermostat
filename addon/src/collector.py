@@ -10,6 +10,11 @@ class Collector:
     def __init__(self, ha_client, opts):
         self.ha = ha_client
         self.opts = opts or {}
+
+        # Log the raw opts and sensors mapping for debugging
+        logger.info("Collector initializing; opts keys: %s", list(self.opts.keys()))
+        logger.info("Collector sensors mapping raw value: %s", repr(self.opts.get("sensors")))
+        
         # Require explicit sensor mapping in options; fail fast if not provided
         self.sensor_map = self.opts.get("sensors")
         if not isinstance(self.sensor_map, dict) or not self.sensor_map:
