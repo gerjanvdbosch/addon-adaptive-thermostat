@@ -21,18 +21,23 @@ options:
   buffer_days: 30
   sensors:
     current_temp: sensor.huidige_temp
-    temp_change: sensor.temp_verandering
-    min_temp_today: sensor.min_temp_vandaag
-    max_temp_today: sensor.max_temp_vandaag
-    min_temp_tomorrow: sensor.min_temp_morgen
-    max_temp_tomorrow: sensor.max_temp_morgen
-    solar_kwh_today: sensor.zon_kwh_vandaag
-    solar_chance_today: sensor.zon_kans_vandaag
-    current_setpoint: sensor.huidige_setpoint
-    wind_speed_today: sensor.windkracht_vandaag
-    wind_speed_tomorrow: sensor.windkracht_morgen
-    wind_direction_today: sensor.windrichting_vandaag
-    outside_temp: sensor.buiten_temp
+    temp_change: sensor.woonkamer_temperatuur_verandering
+    min_temp_today: sensor.minimale_temperatuur_1d
+    max_temp_today: sensor.temperatuur_1d
+    min_temp_tomorrow: sensor.minimale_temperatuur_2d
+    max_temp_tomorrow: sensor.temperatuur_2d
+    solar_kwh_today: sensor.solcast_pv_forecast_forecast_today
+    solar_kwh_tomorrow: sensor.solcast_pv_forecast_forecast_tomorrow
+    solar_chance_today: sensor.zonkans_1d
+    solar_chance_tomorrow: sensor.zonkans_2d
+    current_setpoint: sensor.danfoss_15_temperature
+    wind_speed_today: sensor.windkracht_1d
+    wind_speed_tomorrow: sensor.windkracht_2
+    wind_direction_today: sensor.windrichting_azimut_1d
+    wind_direction_tomorrow: sensor.windrichting_azimut_2d
+    outside_temp: sensor.temperatuur
+    thermostat_demand: binary_sensor.ecodan_heatpump_ca09ec_status_in1_thermostaat
+    operational_status: sensor.ecodan_heatpump_ca09ec_status_bedrijf
 schema:
   climate_entity: "str?"
   sample_interval_seconds: "int?"
@@ -50,12 +55,17 @@ schema:
     min_temp_tomorrow: "str?"
     max_temp_tomorrow: "str?"
     solar_kwh_today: "str?"
+    solar_kwh_tomorrow: "str?"
     solar_chance_today: "str?"
+    solar_chance_tomorrow: "str?"
     current_setpoint: "str?"
     wind_speed_today: "str?"
     wind_speed_tomorrow: "str?"
     wind_direction_today: "str?"
+    wind_direction_tomorrow: "str?"
     outside_temp: "str?"
+    thermostat_demand: "str?"
+    operational_status: "str?"
 ports:
   8000/tcp: 8000
 map:
