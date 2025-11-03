@@ -9,6 +9,41 @@ arch:
   - amd64
   - i386
 init: false
+homeassistant_api: true
+options:
+  climate_entity: climate.woonkamer
+  sample_interval_seconds: 300
+  partial_fit_interval_seconds: 3600
+  full_retrain_time: "03:00"
+  min_setpoint: 15.0
+  max_setpoint: 25.0
+  min_change_threshold: 0.3
+  buffer_days: 30
+  webapi_port: 8000
+  sensors:
+    current_temp: sensor.huidige_temp
+    temp_change: sensor.temp_verandering
+    min_temp_today: sensor.min_temp_vandaag
+    max_temp_today: sensor.max_temp_vandaag
+    min_temp_tomorrow: sensor.min_temp_morgen
+    max_temp_tomorrow: sensor.max_temp_morgen
+    solar_kwh_today: sensor.zon_kwh_vandaag
+    solar_chance_today: sensor.zon_kans_vandaag
+    current_setpoint: sensor.huidige_setpoint
+    wind_speed_today: sensor.windkracht_vandaag
+    wind_speed_tomorrow: sensor.windkracht_morgen
+    wind_direction_today: sensor.windrichting_vandaag
+    outside_temp: sensor.buiten_temp
+schema:
+  climate_entity: "str?"
+  sample_interval_seconds: "int?"
+  partial_fit_interval_seconds: "int?"
+  full_retrain_time: "str?"
+  min_setpoint: "float?"
+  max_setpoint: "float?"
+  min_change_threshold: "float?"
+  buffer_days: "int?"
+  webapi_port: "int?"
+  sensors: "dict?"
 map:
   - addon_config:rw
-homeassistant_api: true
