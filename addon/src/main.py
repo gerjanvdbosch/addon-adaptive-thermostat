@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def load_options():
     # Support passing sensors mapping as JSON string in SENSORS_JSON env var or via mapped config (opts injected by Supervisor)
-    sensors_env = os.getenv("SENSORS_JSON", None)
+    sensors_env = os.getenv("SENSORS", None)
     sensors = None
     if sensors_env:
         import json
