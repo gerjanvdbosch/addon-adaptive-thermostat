@@ -1,7 +1,7 @@
 name: "Adaptive Thermostat"
 version: "0.0"
 slug: "adaptive_thermostat"
-description: "A scikit-learn based adaptive thermostat HA addon"
+description: "A scikit-learn based adaptive thermostat addon for Home Assistant"
 arch:
   - armhf
   - armv7
