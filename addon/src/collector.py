@@ -1,5 +1,6 @@
 import logging
 import datetime
+import time
 from db import insert_sample
 from feature_extractor import FeatureExtractor
 
@@ -22,6 +23,7 @@ class Collector:
             data[feature_key] = None
             st = self.ha.get_state(entity_id)
             if not st:
+                time.sleep(0.01)
                 continue
             val = st.get("state")
             attrs = st.get("attributes", {})
@@ -33,6 +35,7 @@ class Collector:
                     data[feature_key] = float(numeric) if numeric is not None else None
                 except Exception:
                     data[feature_key] = None
+            time.sleep(0.01)
         return data
 
     def sample_and_store(self):
