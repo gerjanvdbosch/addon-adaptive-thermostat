@@ -59,7 +59,6 @@ schema:
     solar_kwh_tomorrow: "str?"
     solar_chance_today: "str?"
     solar_chance_tomorrow: "str?"
-    current_setpoint: "str?"
     wind_speed_today: "str?"
     wind_speed_tomorrow: "str?"
     wind_direction_today: "str?"
