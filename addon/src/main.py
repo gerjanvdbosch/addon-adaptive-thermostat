@@ -34,6 +34,8 @@ def load_options():
         "addon_api_token": os.getenv("ADDON_API_TOKEN", None),
         "webapi_host": os.getenv("WEBAPI_HOST", "0.0.0.0"),
         "webapi_port": int(os.getenv("WEBAPI_PORT", os.getenv("WEBAPI_PORT", 8000))),
+        "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
+        "model_path_full": os.getenv("MODEL_PATH_FULL"),
         "sensors": sensors
     }
 
