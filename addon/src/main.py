@@ -62,8 +62,8 @@ def main():
     scheduler.add_job(trainer.partial_fit_job, 'interval', seconds=opts["partial_fit_interval_seconds"], id='partial_fit')
 
     hh, mm = map(int, opts["full_retrain_time"].split(":"))
+    
     scheduler.add_job(trainer.full_retrain_job, 'cron', hour=hh, minute=mm, id='full_retrain')
-
     scheduler.add_job(inferencer.inference_job, 'interval', seconds=60, id='inference')
 
     scheduler.start()
