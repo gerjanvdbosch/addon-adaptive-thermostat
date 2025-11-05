@@ -95,7 +95,6 @@ class FeatureExtractor:
 
         op_raw = sensor_dict.get("operational_status") or sensor_dict.get("status_bedrijf")
         op_idx = self._encode_operational_status(op_raw)
-        #pred = value = int(pred * 10 + 0.5) / 10.0
 
         return {
             "hour_sin": hx,
