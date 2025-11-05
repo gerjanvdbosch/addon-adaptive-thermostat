@@ -91,7 +91,13 @@ class Inferencer:
         if abs(pred - current_sp) < threshold:
             logger.debug("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
-        climate = self.opts.get("climate_entity", "climate.woonkamer")
-        service_data = {"entity_id": climate, "temperature": float(round(pred, 1))}
-        self.ha.call_service("climate", "set_temperature", service_data)
+        #pred = value = int(pred * 10 + 0.5) / 10.0
+        if self.opts.get("shadow_mode"):
+            shadow = self.opts.get("shadow_setpoint")
+            service_data = {"entity_id": shadow, "value": float(round(pred, 1))}
+            self.ha.call_service("input_number", "set_value", service_data)
+        else:
+            climate = self.opts.get("climate_entity", "climate.woonkamer")
+            service_data = {"entity_id": climate, "temperature": float(round(pred, 1))}
+            self.ha.call_service("climate", "set_temperature", service_data)
         logger.info("Applied predicted setpoint %.1f to %s (was %.1f)", pred, climate, current_sp)
