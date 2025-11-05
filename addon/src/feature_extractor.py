@@ -4,12 +4,11 @@ import numpy as np
 
 FEATURE_ORDER = [
     "hour_sin", "hour_cos", "day_sin", "day_cos",
-    "current_temp", "temp_change",
+    "current_setpoint", "current_temp", "temp_change",
     "min_temp_today", "max_temp_today",
     "min_temp_tomorrow", "max_temp_tomorrow",
     "solar_kwh_today", "solar_kwh_tomorrow",
     "solar_chance_today", "solar_chance_tomorrow",
-    "current_setpoint",
     "wind_speed_today", "wind_speed_tomorrow",
     "wind_dir_today_sin", "wind_dir_today_cos",
     "wind_dir_tomorrow_sin", "wind_dir_tomorrow_cos",
@@ -96,6 +95,7 @@ class FeatureExtractor:
 
         op_raw = sensor_dict.get("operational_status") or sensor_dict.get("status_bedrijf")
         op_idx = self._encode_operational_status(op_raw)
+        #pred = value = int(pred * 10 + 0.5) / 10.0
 
         return {
             "hour_sin": hx,
