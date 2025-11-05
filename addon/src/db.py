@@ -4,7 +4,9 @@ from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Boolean,
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
-DB_PATH = os.getenv("DB_PATH", "/config/db/samples.sqlite")
+DB_PATH = os.getenv("DB_PATH")
+if not DB_PATH:
+    raise RuntimeError("Environment variable DB_PATH is not set. Please export DB_PATH before starting the application.")
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 Session = sessionmaker(bind=engine)
 
