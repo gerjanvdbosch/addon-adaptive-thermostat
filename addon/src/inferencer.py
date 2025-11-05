@@ -20,8 +20,8 @@ class Inferencer:
 
     def load_model(self):
         try:
-            if os.path.exists(self.opts.get("model_path_full"):
-                self.model_obj = joblib.load(self.opts.get("model_path_full")
+            if os.path.exists(self.opts.get("model_path_full")):
+                self.model_obj = joblib.load(self.opts.get("model_path_full"))
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
                     logging.warning("Full model feature_order mismatch; ignoring full model")
