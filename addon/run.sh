@@ -3,8 +3,15 @@ set -e
 
 bashio::log.info "Preparing to start..."
 
-mkdir -p /config/models
-mkdir -p /config/db
+export MODEL_DIR="/config/models"
+export DB_DIR="/config/db"
+
+mkdir -p "${MODEL_DIR}"
+mkdir -p "${DB_DIR}"
+
+export DB_PATH="${DB_DIR}/samples.sqlite"
+export MODEL_PATH_PARTIAL="${MODEL_DIR}/partial_model.joblib"
+export MODEL_PATH_FULL="${MODEL_DIR}/full_model.joblib"
 
 export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
 export SAMPLE_INTERVAL_SECONDS="$(bashio::config 'sample_interval_seconds')"
