@@ -14,9 +14,7 @@ export MODEL_PATH_PARTIAL="${MODEL_DIR}/partial_model.joblib"
 export MODEL_PATH_FULL="${MODEL_DIR}/full_model.joblib"
 
 if bashio::config.true 'shadow_mode'; then
-  export SHADOW_MODE="true"
-else
-  export SHADOW_MODE="false"
+  export SHADOW_MODE=1
 fi
 
 export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
