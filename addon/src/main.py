@@ -11,12 +11,13 @@ from trainer import Trainer
 from inferencer import Inferencer
 from ha_client import HAClient
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s: %(message)s")
+LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG")
+logging.basicConfig(level=LOGLEVEL, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def load_options():
-    # Support passing sensors mapping as JSON string in SENSORS_JSON env var or via mapped config (opts injected by Supervisor)
+    # Support passing sensors mapping as JSON string in SENSORS env var or via mapped config (opts injected by Supervisor)
     try:
         sensors = json.loads(os.getenv("SENSORS", None))
     except Exception:
