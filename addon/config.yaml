@@ -21,6 +21,7 @@ options:
   max_setpoint: 25.0
   min_change_threshold: 0.3
   buffer_days: 30
+  log_level: info
   sensors:
     temp_change: sensor.woonkamer_temperatuur_verandering
     min_temp_today: sensor.minimale_temperatuur_1d
@@ -49,6 +50,7 @@ schema:
   max_setpoint: "float?"
   min_change_threshold: "float?"
   buffer_days: "int?"
+  log_level: list(trace|debug|info|notice|warning|error|fatal)?
   sensors:
     temp_change: "str?"
     min_temp_today: "str?"
