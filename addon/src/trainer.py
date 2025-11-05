@@ -13,19 +13,18 @@ from db import fetch_training_data
 from feature_extractor import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
-MODEL_PATH_PARTIAL = "/config/models/partial_model.joblib"
-MODEL_PATH_FULL = "/config/models/full_model.joblib"
-
 
 class Trainer:
     def __init__(self, ha_client, opts):
+        if not opts.get("model_path_full") or not opts.get("model_path_partial"):
+            raise RuntimeError("model_path_full and model_path_partial must be provided in opts.")
         self.ha = ha_client
         self.opts = opts
         self.partial = None
         self.scaler = None
-        if os.path.exists(MODEL_PATH_PARTIAL):
+        if os.path.exists(self.opts.get("model_path_partial")):
             try:
-                obj = joblib.load(MODEL_PATH_PARTIAL)
+                obj = joblib.load(self.opts.get("model_path_partial"))
                 self.partial = obj.get("model")
                 self.scaler = obj.get("scaler")
                 meta = obj.get("meta", {})
@@ -69,7 +68,7 @@ class Trainer:
             self.partial.partial_fit(Xs, y)
         else:
             self.partial.partial_fit(Xs, y)
-        joblib.dump({"model": self.partial, "scaler": self.scaler, "meta": {"feature_order": FEATURE_ORDER, "trained_at": datetime.datetime.utcnow().isoformat()}}, MODEL_PATH_PARTIAL)
+        joblib.dump({"model": self.partial, "scaler": self.scaler, "meta": {"feature_order": FEATURE_ORDER, "trained_at": datetime.datetime.utcnow().isoformat()}}, self.opts.get("model_path_partial"))
         logger.info("Partial model updated with %d samples", len(X))
 
     def full_retrain_job(self):
@@ -96,5 +95,5 @@ class Trainer:
         gs.fit(X, y)
         best = gs.best_estimator_
         metadata = {"feature_order": FEATURE_ORDER, "best_params": gs.best_params_, "trained_at": datetime.datetime.utcnow().isoformat()}
-        joblib.dump({"model": best, "meta": metadata}, MODEL_PATH_FULL)
+        joblib.dump({"model": best, "meta": metadata}, self.opts.get("model_path_full"))
         logger.info("Full model trained on %d samples and saved", len(X))
