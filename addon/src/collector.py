@@ -36,6 +36,7 @@ class Collector:
             raise RuntimeError("Failed to read current_setpoint.")
         data["current_temp"] = current_temp
         data["current_setpoint"] = current_setpoint
+        logger.info("Collector: current_temp=%.1f, current_setpoint=%.1f", current_temp, current_setpoint)
         time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():
             data[feature_key] = None
