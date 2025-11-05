@@ -11,8 +11,8 @@ from trainer import Trainer
 from inferencer import Inferencer
 from ha_client import HAClient
 
-LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG")
-logging.basicConfig(level=LOGLEVEL, format="%(asctime)s %(levelname)s: %(message)s")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
