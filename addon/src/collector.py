@@ -19,6 +19,24 @@ class Collector:
 
     def read_sensors(self):
         data = {}
+        current_temperature = None
+        current_setpoint = None
+        climate = self.ha.get_state(self.opts.get("climate_entity", "climate.woonkamer"))
+        if climate:
+            attrs = climate.get("attributes", {})
+            current_temperature = float(attrs.get("current_temperature"))
+            if self.opts.get("shadow_mode") and self.opts.get("shadow_setpoint"):
+                shadow = self.ha.get_state(self.opts.get("shadow_setpoint"))
+                current_setpoint = float(shadow.get("state"))
+            else:
+                current_setpoint = float(attrs.get("temperature"))
+        if current_temperature is None:
+            raise RuntimeError("Failed to read current_temperature.")
+        if current_setpoint is None:
+            raise RuntimeError("Failed to read current_setpoint.")
+        data["current_temperature"] = current_temperature
+        data["current_setpoint"] = current_setpoint
+        time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():
             data[feature_key] = None
             st = self.ha.get_state(entity_id)
