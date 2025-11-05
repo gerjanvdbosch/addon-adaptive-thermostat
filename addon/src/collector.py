@@ -25,7 +25,7 @@ class Collector:
         if climate:
             attrs = climate.get("attributes", {})
             current_temp = float(attrs.get("current_temperature"))
-            if self.opts.get("shadow_mode") and self.opts.get("shadow_setpoint"):
+            if self.opts.get("shadow_mode"):
                 shadow = self.ha.get_state(self.opts.get("shadow_setpoint"))
                 current_setpoint = float(shadow.get("state"))
             else:
