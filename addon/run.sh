@@ -26,6 +26,7 @@ export MIN_SETPOINT="$(bashio::config 'min_setpoint')"
 export MAX_SETPOINT="$(bashio::config 'max_setpoint')"
 export MIN_CHANGE_THRESHOLD="$(bashio::config 'min_change_threshold')"
 export BUFFER_DAYS="$(bashio::config 'buffer_days')"
+export LOG_LEVEL="$(bashio::config 'log_level')"
 export SENSORS="$(bashio::config 'sensors' || echo '{}')"
 
 python3 -u ./src/main.py
