@@ -91,7 +91,6 @@ class Inferencer:
         if abs(pred - current_sp) < threshold:
             logger.debug("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
-        #pred = value = int(pred * 10 + 0.5) / 10.0
         if self.opts.get("shadow_mode"):
             shadow = self.opts.get("shadow_setpoint")
             service_data = {"entity_id": shadow, "value": float(round(pred, 1))}
