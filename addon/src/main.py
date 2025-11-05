@@ -24,6 +24,8 @@ def load_options():
 
     return {
         "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.woonkamer"),
+        "shadow_mode": bool(os.getenv("SHADOW_MODE")),
+        "shadow_setpoint": os.getenv("SHADOW_SETPOINT"),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
         "partial_fit_interval_seconds": int(os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
