@@ -8,12 +8,11 @@ from feature_extractor import FEATURE_ORDER
 from ha_client import HAClient
 
 logger = logging.getLogger(__name__)
-MODEL_PATH_PARTIAL = "/models/partial_model.joblib"
-MODEL_PATH_FULL = "/models/full_model.joblib"
-
 
 class Inferencer:
     def __init__(self, ha_client: HAClient, opts: dict):
+        if not opts.get("model_path_full") or not opts.get("model_path_partial"):
+            raise RuntimeError("model_path_full and model_path_partial must be provided in opts.")
         self.ha = ha_client
         self.opts = opts
         self.model_obj = None
@@ -21,16 +20,16 @@ class Inferencer:
 
     def load_model(self):
         try:
-            if os.path.exists(MODEL_PATH_FULL):
-                self.model_obj = joblib.load(MODEL_PATH_FULL)
+            if os.path.exists(self.opts.get("model_path_full"):
+                self.model_obj = joblib.load(self.opts.get("model_path_full")
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
                     logging.warning("Full model feature_order mismatch; ignoring full model")
                     self.model_obj = None
                 else:
                     logging.info("Loaded full model")
-            elif os.path.exists(MODEL_PATH_PARTIAL):
-                self.model_obj = joblib.load(MODEL_PATH_PARTIAL)
+            elif os.path.exists(self.opts.get("model_path_partial")):
+                self.model_obj = joblib.load(self.opts.get("model_path_partial"))
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
                     logging.warning("Partial model feature_order mismatch; ignoring partial model")
