@@ -18,6 +18,9 @@ class Inferencer:
         self.model_obj = None
         self.load_model()
 
+    def _round_half(x):
+        return round(x * 2) / 2
+        
     def load_model(self):
         try:
             if os.path.exists(self.opts.get("model_path_full")):
@@ -91,6 +94,7 @@ class Inferencer:
         if abs(pred - current_sp) < threshold:
             logger.debug("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
+        pred_setpoint = self._round_half(pred)
         if self.opts.get("shadow_mode"):
             shadow = self.opts.get("shadow_setpoint")
             service_data = {"entity_id": shadow, "value": float(round(pred, 1))}
