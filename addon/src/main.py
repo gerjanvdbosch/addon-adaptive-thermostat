@@ -49,7 +49,7 @@ def start_api(host: str, port: int):
 
 def main():
     opts = load_options()
-    ha = HAClient()
+    ha = HAClient(opts)
     collector = Collector(ha, opts)
     trainer = Trainer(ha, opts)
     inferencer = Inferencer(ha, opts)
