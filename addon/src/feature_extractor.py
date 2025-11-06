@@ -13,8 +13,7 @@ FEATURE_ORDER = [
     "wind_dir_today_sin", "wind_dir_today_cos",
     "wind_dir_tomorrow_sin", "wind_dir_tomorrow_cos",
     "outside_temp",
-    "thermostat_demand",
-    "operational_status"
+    "thermostat_demand", "operational_status", "prohibit_heat"
 ]
 
 
@@ -90,11 +89,14 @@ class FeatureExtractor:
         wtd_sin, wtd_cos = self._encode_wind(wind_dir_today)
         wtm_sin, wtm_cos = self._encode_wind(wind_dir_tomorrow)
 
-        td_raw = sensor_dict.get("thermostat_demand") or sensor_dict.get("thermostaat_vraag")
+        td_raw = sensor_dict.get("thermostat_demand")
         td = self._encode_binary_onoff(td_raw)
 
-        op_raw = sensor_dict.get("operational_status") or sensor_dict.get("status_bedrijf")
+        op_raw = sensor_dict.get("operational_status")
         op_idx = self._encode_operational_status(op_raw)
+
+        ph_raw = sensor_dict.get("prohibit_heat")
+        ph = self._encode_binary_onoff(ph_raw)
 
         return {
             "hour_sin": hx,
@@ -121,6 +123,7 @@ class FeatureExtractor:
             "outside_temp": self._safe_float(sensor_dict.get("outside_temp")),
             "thermostat_demand": td,
             "operational_status": float(op_idx),
+            "prohibit_heat": ph
         }
 
     def get_vector(self, feature_dict: dict):
