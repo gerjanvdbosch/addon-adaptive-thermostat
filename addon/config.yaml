@@ -39,6 +39,7 @@ options:
     outside_temp: sensor.temperatuur
     thermostat_demand: binary_sensor.ecodan_heatpump_ca09ec_status_in1_thermostaat
     operational_status: sensor.ecodan_heatpump_ca09ec_status_bedrijf
+    prohibit_heat: switch.ecodan_heatpump_ca09ec_server_control_zone_1_prohibit_heating
 schema:
   shadow_mode: "bool?"
   shadow_setpoint: "str?"
@@ -68,6 +69,7 @@ schema:
     outside_temp: "str?"
     thermostat_demand: "str?"
     operational_status: "str?"
+    prohibit_heat: "str?"
 ports:
   8000/tcp: 8000
 map:
