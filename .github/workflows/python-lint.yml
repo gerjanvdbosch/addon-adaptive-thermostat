@@ -13,19 +13,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install deps
+      - name: Set up pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('addon/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install deps and linters
         run: |
           python -m pip install --upgrade pip
-          pip install ruff black isort mypy
+          pip install -r addon/requirements.txt ruff black isort mypy
 
-      - name: Ruff
+      - name: Ruff (lint)
         run: ruff check .
 
-      - name: Black
+      - name: Black (format check)
         run: black --check .
 
-      - name: isort
+      - name: isort (import order)
         run: isort --check-only .
 
-      - name: Mypy
-        run: mypy .
+      - name: Mypy (type check)
+        run: mypy
