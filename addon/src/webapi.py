@@ -44,7 +44,7 @@ def receive_label(
 
         if payload.sample_id is not None:
             update_label(payload.sample_id, float(payload.new_setpoint), user_override=bool(payload.user_override))
-            logger.info("Updated label for sample_id=%s => %s", payload.sample_id, payload.new_setpoint)
+            logger.info("Updated label for sample_id=%s -> %s", payload.sample_id, payload.new_setpoint)
             return {"status": "updated", "sample_id": payload.sample_id}
 
         sensors = payload.sensors or {}
