@@ -6,6 +6,7 @@ import numpy as np
 from db import fetch_unlabeled, update_label
 from feature_extractor import FEATURE_ORDER
 from ha_client import HAClient
+from utils import round_half
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,6 @@ class Inferencer:
         self.opts = opts
         self.model_obj = None
         self.load_model()
-
-    def _round_half(x):
-        return round(x * 2) / 2
 
     def check_and_label_user_override(self):
         rows = fetch_unlabeled(limit=1)
@@ -38,6 +36,15 @@ class Inferencer:
         if sample_sp is None:
             logger.warning("Latest unlabeled sample %s has no current_setpoint", getattr(row, "id"))
             return False
+        current_sp, current_temp = self.ha.get_setpoint()
+        rounded_sample = round(round_half(sample_sp), 1)
+        rounded_current = round(round_half(current_sp), 1)
+        
+        if rounded_sample != rounded_current:
+            update_label(row.id, float(current_sp), user_override=True)
+            logger.info("Detected external setpoint change; updated label for sample_id=%s as user override -> %.2f", row.id, current_sp)
+            return True
+        return False
     
     def load_model(self):
         try:
@@ -118,13 +125,5 @@ class Inferencer:
         if abs(pred - current_sp) < threshold:
             logger.info("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
-        pred_setpoint = self._round_half(pred)
-        if self.opts.get("shadow_mode"):
-            shadow = self.opts.get("shadow_setpoint")
-            service_data = {"entity_id": shadow, "value": float(round(pred, 1))}
-            self.ha.call_service("input_number", "set_value", service_data)
-        else:
-            climate = self.opts.get("climate_entity", "climate.woonkamer")
-            service_data = {"entity_id": climate, "temperature": float(round(pred, 1))}
-            self.ha.call_service("climate", "set_temperature", service_data)
+        self.ha.set_setpoint(pred)
         logger.info("Applied predicted setpoint %.1f to %s (was %.1f)", pred, climate, current_sp)
