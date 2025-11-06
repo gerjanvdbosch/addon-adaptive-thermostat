@@ -1,7 +1,7 @@
 import os
 import requests
 import logging
-from utils import round_half
+from utils import round_half, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ class HAClient:
         climate = self.get_state(self.opts.get("climate_entity"))
         if climate:
             attrs = climate.get("attributes", {})
-            current_temp = self._safe_float(attrs.get("current_temperature"))
+            current_temp = safe_float(attrs.get("current_temperature"))
             if self.opts.get("shadow_mode"):
                 shadow = self.get_state(self.opts.get("shadow_setpoint"))
-                current_setpoint = self._safe_float(shadow.get("state"))
+                current_setpoint = safe_float(shadow.get("state"))
             else:
-                current_setpoint = self._safe_float(attrs.get("temperature"))
+                current_setpoint = safe_float(attrs.get("temperature"))
         if current_setpoint is None:
             raise RuntimeError("Failed to read current_setpoint.")
         if current_temp is None:
@@ -60,13 +60,17 @@ class HAClient:
         return current_setpoint, current_temp
 
     def set_setpoint(self, value):
-        setpoint = round_half(value)
+        try:
+            setpoint = float(round(round_half(float(value)), 1))
+        except Exception:
+            logger.exception("Invalid setpoint value provided: %s", value)
+            return None
         if self.opts.get("shadow_mode"):
             shadow = self.opts.get("shadow_setpoint")
-            service_data = {"entity_id": shadow, "value": float(round(setpoint, 1)}
+            service_data = {"entity_id": shadow, "value": setpoint}
             self.call_service("input_number", "set_value", service_data)
         else:
             climate = self.opts.get("climate_entity")
-            service_data = {"entity_id": climate, "temperature": float(round(setpoint, 1))}
+            service_data = {"entity_id": climate, "temperature": setpoint}
             self.call_service("climate", "set_temperature", service_data)
         logger.debug("Applied setpoint %.1f to %s", setpoint, climate)
