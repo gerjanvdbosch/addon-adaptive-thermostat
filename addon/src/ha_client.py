@@ -69,5 +69,4 @@ class HAClient:
             climate = self.opts.get("climate_entity")
             service_data = {"entity_id": climate, "temperature": float(round(setpoint, 1))}
             self.call_service("climate", "set_temperature", service_data)
-        logger.info("Applied setpoint %.1f to %s", setpoint, climate)
-        
+        logger.debug("Applied setpoint %.1f to %s", setpoint, climate)
