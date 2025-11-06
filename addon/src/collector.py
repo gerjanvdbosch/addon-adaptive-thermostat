@@ -17,33 +17,9 @@ class Collector:
             raise RuntimeError("Sensor mapping missing in add-on config (opts['sensors']). Please configure sensor entity IDs in the add-on options.")
         self.fe = FeatureExtractor()
 
-    def _safe_float(self, x):
-        if x is None:
-            return None
-        try:
-            return float(x)
-        except Exception:
-            return None
-
     def read_sensors(self):
-        data = {}
-        current_temp = None
-        current_setpoint = None
-        climate = self.ha.get_state(self.opts.get("climate_entity", "climate.woonkamer"))
-        if climate:
-            attrs = climate.get("attributes", {})
-            current_temp = self._safe_float(attrs.get("current_temperature"))
-            if self.opts.get("shadow_mode"):
-                shadow = self.ha.get_state(self.opts.get("shadow_setpoint"))
-                current_setpoint = self._safe_float(shadow.get("state"))
-            else:
-                current_setpoint = self._safe_float(attrs.get("temperature"))
-        if current_temp is None:
-            raise RuntimeError("Failed to read current_temp.")
-        if current_setpoint is None:
-            raise RuntimeError("Failed to read current_setpoint.")
-        data["current_temp"] = current_temp
-        data["current_setpoint"] = current_setpoint
+        current_setpoint, current_temp = self.ha.get_setpoint()
+        data = {"current_setpoint": current_setpoint, "current_temp": current_temp}
         time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():
             data[feature_key] = None
