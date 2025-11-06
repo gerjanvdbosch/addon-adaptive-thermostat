@@ -17,6 +17,14 @@ class Collector:
             raise RuntimeError("Sensor mapping missing in add-on config (opts['sensors']). Please configure sensor entity IDs in the add-on options.")
         self.fe = FeatureExtractor()
 
+    def _safe_float(self, x):
+        if x is None:
+            return None
+        try:
+            return float(x)
+        except Exception:
+            return None
+
     def read_sensors(self):
         data = {}
         current_temp = None
@@ -24,19 +32,18 @@ class Collector:
         climate = self.ha.get_state(self.opts.get("climate_entity", "climate.woonkamer"))
         if climate:
             attrs = climate.get("attributes", {})
-            current_temp = float(attrs.get("current_temperature"))
+            current_temp = self._safe_float((attrs.get("current_temperature"))
             if self.opts.get("shadow_mode"):
                 shadow = self.ha.get_state(self.opts.get("shadow_setpoint"))
-                current_setpoint = float(shadow.get("state"))
+                current_setpoint = self._safe_float((shadow.get("state"))
             else:
-                current_setpoint = float(attrs.get("temperature"))
+                current_setpoint = self._safe_float((attrs.get("temperature"))
         if current_temp is None:
             raise RuntimeError("Failed to read current_temp.")
         if current_setpoint is None:
             raise RuntimeError("Failed to read current_setpoint.")
         data["current_temp"] = current_temp
         data["current_setpoint"] = current_setpoint
-        logger.info("Collector: current_temp=%.1f, current_setpoint=%.1f", current_temp, current_setpoint)
         time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():
             data[feature_key] = None
@@ -59,7 +66,11 @@ class Collector:
 
     def sample_and_store(self):
         ts = datetime.datetime.utcnow()
-        sensors = self.read_sensors()
-        features = self.fe.features_from_raw(sensors, timestamp=ts)
-        insert_sample({"timestamp": ts.isoformat(), "sensors": sensors, "features": features})
-        logger.info("Sample stored at %s", ts.isoformat())
+        try:
+            sensors = self.read_sensors()
+            features = self.fe.features_from_raw(sensors, timestamp=ts)
+            insert_sample({"timestamp": ts.isoformat(), "sensors": sensors, "features": features})
+            logger.info("Sample stored: current_setpoint=%.1f current_temp=%.1f",
+                        sensors.get("current_setpoint"), sensors.get("current_temp"))
+        except Exception:
+            logger.exception("Unexpected error while reading sensors; skipping this sample")
