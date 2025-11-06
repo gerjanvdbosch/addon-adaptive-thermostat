@@ -3,7 +3,7 @@ import logging
 import joblib
 import numpy as np
 
-from db import fetch_unlabeled
+from db import fetch_unlabeled, update_label
 from feature_extractor import FEATURE_ORDER
 from ha_client import HAClient
 
@@ -20,7 +20,25 @@ class Inferencer:
 
     def _round_half(x):
         return round(x * 2) / 2
-        
+
+    def check_and_label_user_override(self):
+        rows = fetch_unlabeled(limit=1)
+        if not rows:
+            return False
+        row = rows[0]
+        interval = int(self.opts.get("sample_interval_seconds"))
+        sample_ts = getattr(row, "timestamp", None)
+        if sample_ts:
+            age = (datetime.datetime.utcnow() - sample_ts).total_seconds()
+            if age > interval:
+                logger.info("Latest unlabeled sample is older than interval (%ds > %ds); skipping override check", age, interval)
+                return False
+        feat = row.data.get("features") if row.data else None
+        sample_sp = feat.get("current_setpoint") if feat else None
+        if sample_sp is None:
+            logger.warning("Latest unlabeled sample %s has no current_setpoint", getattr(row, "id"))
+            return False
+    
     def load_model(self):
         try:
             if os.path.exists(self.opts.get("model_path_full")):
@@ -55,6 +73,12 @@ class Inferencer:
         return None, None
 
     def inference_job(self):
+        try:
+            if self.check_and_label_user_override():
+                return
+        except Exception:
+            logger.exception("Error during override check; continuing with inference")
+            
         self.load_model()
         if not self.model_obj:
             return
@@ -92,7 +116,7 @@ class Inferencer:
             return
         pred = max(min(pred, max_sp), min_sp)
         if abs(pred - current_sp) < threshold:
-            logger.debug("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
+            logger.info("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
         pred_setpoint = self._round_half(pred)
         if self.opts.get("shadow_mode"):
