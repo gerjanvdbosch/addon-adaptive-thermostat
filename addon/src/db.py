@@ -1,6 +1,6 @@
 import os
 import datetime
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Boolean, JSON
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Boolean, JSON, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -18,7 +18,17 @@ class Sample(Base):
     data = Column(JSON)
     label_setpoint = Column(Float, nullable=True)
     user_override = Column(Boolean, default=False)
+    predicted_setpoint = Column(Float, nullable=True)
+    prediction_error = Column(Float, nullable=True)
 
+class Metric(Base):
+    __tablename__ = "metrics"
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    model_type = Column(String)
+    mae = Column(Float)
+    n_samples = Column(Integer)
+    meta = Column(JSON)
 
 Base.metadata.create_all(engine)
 
@@ -54,5 +64,34 @@ def update_label(sample_id, label_setpoint, user_override=False):
     if row:
         row.label_setpoint = label_setpoint
         row.user_override = user_override
+        if getattr(row, "predicted_setpoint", None) is not None:
+            try:
+                row.prediction_error = abs(float(row.predicted_setpoint) - float(label_setpoint))
+            except Exception:
+                row.prediction_error = None
         s.commit()
+    s.close()
+
+def update_sample_prediction(sample_id, predicted_setpoint=None, prediction_error=None):
+    s = Session()
+    row = s.get(Sample, sample_id)
+    if row:
+        if predicted_setpoint is not None:
+            try:
+                row.predicted_setpoint = float(predicted_setpoint)
+            except Exception:
+                row.predicted_setpoint = None
+        if prediction_error is not None:
+            try:
+                row.prediction_error = float(prediction_error)
+            except Exception:
+                row.prediction_error = None
+        s.commit()
+    s.close()
+
+def insert_metric(model_type, mae, n_samples, meta=None):
+    s = Session()
+    m = Metric(model_type=model_type, mae=mae, n_samples=n_samples, meta=meta or {})
+    s.add(m)
+    s.commit()
     s.close()
