@@ -25,28 +25,53 @@ class Inferencer:
         if not rows:
             return False
         row = rows[0]
-        interval = int(self.opts.get("sample_interval_seconds"))
-        sample_ts = getattr(row, "timestamp", None)
-        if sample_ts:
-            age = (datetime.datetime.utcnow() - sample_ts).total_seconds()
-            if age > interval:
-                logger.info("Latest unlabeled sample is older than interval (%ds > %ds); skipping override check", age, interval)
-                return False
-        feat = row.data.get("features") if row.data else None
-        sample_sp = feat.get("current_setpoint") if feat else None
-        if sample_sp is None:
-            logger.warning("Latest unlabeled sample %s has no current_setpoint", getattr(row, "id"))
-            return False
-        current_sp, current_temp = self.ha.get_setpoint()
-        rounded_sample = round(round_half(sample_sp), 1)
-        rounded_current = round(round_half(current_sp), 1)
-        
-        if rounded_sample != rounded_current:
-            update_label(row.id, float(current_sp), user_override=True)
-            logger.info("Detected external setpoint change; updated label for sample_id=%s as user override -> %.2f", row.id, current_sp)
-            return True
-        return False
     
+        interval = int(self.opts.get("sample_interval_seconds", 300))
+        sample_ts = getattr(row, "timestamp", None)
+        age = (datetime.datetime.utcnow() - sample_ts).total_seconds() if sample_ts else None
+    
+        try:
+            current_sp, _ = self.ha.get_setpoint()
+        except Exception:
+            return False
+    
+        def safe_round(v):
+            try:
+                return round(float(v), 1)
+            except Exception:
+                return None
+    
+        rounded_current = safe_round(current_sp)
+        predicted = getattr(row, "predicted_setpoint", None)
+    
+        if predicted is not None:
+            rounded_pred = safe_round(predicted)
+            if rounded_current is not None and rounded_pred is not None:
+                if rounded_current == rounded_pred:
+                    return False
+                else:
+                    update_label(row.id, float(current_sp), user_override=True)
+                    return True
+    
+        # fallback: compare sample snapshot if recent
+        sample_sp = None
+        if row.data and isinstance(row.data, dict):
+            feat = row.data.get("features")
+            if isinstance(feat, dict):
+                sample_sp = feat.get("current_setpoint")
+            else:
+                sensors = row.data.get("sensors") if isinstance(row.data.get("sensors"), dict) else {}
+                sample_sp = sensors.get("current_setpoint")
+    
+        rounded_sample = safe_round(sample_sp)
+        if age is not None and age <= interval * 1.5:
+            if rounded_sample is not None and rounded_current is not None and rounded_sample != rounded_current:
+                update_label(row.id, float(current_sp), user_override=True)
+                return True
+            return False
+    
+        return False
+
     def load_model(self):
         try:
             if os.path.exists(self.opts.get("model_path_full")):
@@ -126,5 +151,47 @@ class Inferencer:
         if abs(pred - current_sp) < threshold:
             logger.info("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
+        # persist prediction: update recent unlabeled sample else insert new
+        now = datetime.datetime.utcnow()
+        age_thresh = float(self.opts.get("sample_interval_seconds", 300)) * 1.5
+        
+        # snapshot current states
+        snapshot = {}
+        try:
+            cs, ct = self.ha.get_setpoint()
+            snapshot["current_setpoint"] = cs
+            snapshot["current_temp"] = ct
+        except Exception:
+            snapshot = {}
+        
+        for key, ent in (self.opts.get("sensors") or {}).items():
+            try:
+                st = self.ha.get_state(ent)
+                snapshot[key] = float(st.get("state")) if st and "state" in st else None
+            except Exception:
+                snapshot[key] = None
+        
+        try:
+            unl = fetch_unlabeled(limit=1)
+            if unl:
+                latest = unl[0]
+                sample_ts = getattr(latest, "timestamp", None)
+                age = (now - sample_ts).total_seconds() if sample_ts else float("inf")
+                if age <= age_thresh:
+                    update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
+                    sid = latest.id
+                else:
+                    fe = FeatureExtractor()
+                    features_for_pred = fe.features_from_raw(snapshot, timestamp=now)
+                    sid = insert_sample({"timestamp": now.isoformat(), "sensors": snapshot, "features": features_for_pred})
+                    update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
+            else:
+                fe = FeatureExtractor()
+                features_for_pred = fe.features_from_raw(snapshot, timestamp=now)
+                sid = insert_sample({"timestamp": now.isoformat(), "sensors": snapshot, "features": features_for_pred})
+                update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
+        except Exception:
+            logger.exception("Failed to persist predicted_setpoint; continuing")
+
         self.ha.set_setpoint(pred)
         logger.info("Applied predicted setpoint %.1f (was %.1f)", pred, current_sp)
