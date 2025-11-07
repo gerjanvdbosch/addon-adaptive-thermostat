@@ -2,6 +2,7 @@ import os
 import logging
 import joblib
 import numpy as np
+import datetime
 
 from db import fetch_unlabeled, update_label
 from feature_extractor import FEATURE_ORDER
@@ -52,23 +53,23 @@ class Inferencer:
                 self.model_obj = joblib.load(self.opts.get("model_path_full"))
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
-                    logging.warning("Full model feature_order mismatch; ignoring full model")
+                    logger.warning("Full model feature_order mismatch; ignoring full model")
                     self.model_obj = None
                 else:
-                    logging.info("Loaded full model")
+                    logger.info("Loaded full model")
             elif os.path.exists(self.opts.get("model_path_partial")):
                 self.model_obj = joblib.load(self.opts.get("model_path_partial"))
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
-                    logging.warning("Partial model feature_order mismatch; ignoring partial model")
+                    logger.warning("Partial model feature_order mismatch; ignoring partial model")
                     self.model_obj = None
                 else:
-                    logging.info("Loaded partial model")
+                    logger.info("Loaded partial model")
             else:
                 self.model_obj = None
-                logging.info("No model present, inference skipped")
+                logger.info("No model present, inference skipped")
         except Exception:
-            logging.exception("Error loading model")
+            logger.exception("Error loading model")
             self.model_obj = None
 
     def get_current_features(self):
@@ -126,4 +127,4 @@ class Inferencer:
             logger.info("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
             return
         self.ha.set_setpoint(pred)
-        logger.info("Applied predicted setpoint %.1f to %s (was %.1f)", pred, climate, current_sp)
+        logger.info("Applied predicted setpoint %.1f (was %.1f)", pred, current_sp)
