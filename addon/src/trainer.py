@@ -39,6 +39,7 @@ class Trainer:
 
     def partial_fit_job(self):
         rows = fetch_training_data(days=self.opts.get("buffer_days", 30))
+        rows = [r for r in rows if (r.label_setpoint is not None and getattr(r, "user_override", False) == True)]
         if not rows:
             logger.info("No training rows available for partial_fit")
             return
@@ -73,27 +74,68 @@ class Trainer:
 
     def full_retrain_job(self):
         rows = fetch_training_data(days=self.opts.get("buffer_days", 30))
+        rows = [r for r in rows if (r.label_setpoint is not None and getattr(r, "user_override", False) == True)]
         if not rows:
             logger.info("No training rows available for full retrain")
             return
-        X = []
-        y = []
+        # used_rows holds the corresponding ORM rows used for X,y
+        used_rows = []
         for r in rows:
             feat = r.data.get("features") if r.data else None
-            if feat and r.label_setpoint is not None:
+            if feat:
                 X.append([feat[k] for k in FEATURE_ORDER])
                 y.append(r.label_setpoint)
+                used_rows.append(r)
+        
         if not X:
             logger.info("No labeled rows for full retrain")
             return
+        
         X = np.array(X)
         y = np.array(y)
+        
         pipe = Pipeline([("scaler", StandardScaler()), ("model", Ridge())])
         param_grid = {"model__alpha": [0.1, 1.0, 10.0]}
-        tss = TimeSeriesSplit(n_splits=min(5, max(2, len(X)//10)))
+        n_splits = min(5, max(2, len(X)//10))
+        tss = TimeSeriesSplit(n_splits=n_splits)
         gs = GridSearchCV(pipe, param_grid, cv=tss, scoring="neg_mean_absolute_error", n_jobs=1)
         gs.fit(X, y)
         best = gs.best_estimator_
-        metadata = {"feature_order": FEATURE_ORDER, "best_params": gs.best_params_, "trained_at": datetime.datetime.utcnow().isoformat()}
+        
+        # produce out-of-fold predictions for MAE estimate
+        oof_preds = np.zeros_like(y, dtype=float)
+        tss_oof = TimeSeriesSplit(n_splits=n_splits)
+        for train_idx, test_idx in tss_oof.split(X):
+            clone = gs.best_estimator_
+            clone.fit(X[train_idx], y[train_idx])
+            oof_preds[test_idx] = clone.predict(X[test_idx])
+        
+        try:
+            mae = float(mean_absolute_error(y, oof_preds))
+        except Exception:
+            preds_all = best.predict(X)
+            mae = float(mean_absolute_error(y, preds_all))
+        
+        metadata = {"feature_order": FEATURE_ORDER, "best_params": gs.best_params_, "trained_at": datetime.datetime.utcnow().isoformat(), "mae": mae}
         joblib.dump({"model": best, "meta": metadata}, self.opts.get("model_path_full"))
-        logger.info("Full model trained on %d samples and saved", len(X))
+        logger.info("Full model trained on %d labeled user samples (OOF MAE=%.3f) and saved", len(X), mae)
+        
+        # persist metric record
+        try:
+            insert_metric(model_type="full", mae=mae, n_samples=len(X), meta=metadata)
+        except Exception:
+            logger.exception("Failed to insert metric record")
+        
+        # update per-sample predicted_setpoint and prediction_error
+        try:
+            preds_all = best.predict(X)
+            for i, row in enumerate(used_rows):
+                try:
+                    pred = float(preds_all[i])
+                    err = abs(pred - float(y[i]))
+                    update_sample_prediction(row.id, predicted_setpoint=pred, prediction_error=err)
+                except Exception:
+                    logger.exception("Failed updating sample prediction for sample %s", getattr(row, "id", None))
+        except Exception:
+            logger.exception("Failed to compute/update per-sample predictions")
+
