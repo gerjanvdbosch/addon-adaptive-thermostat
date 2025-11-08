@@ -113,7 +113,7 @@ class Trainer:
         
         pipe = Pipeline([("scaler", StandardScaler()), ("model", Ridge())])
         # Breder grid voor robuuste bias-variance
-        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0]}
+        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0, 100.0]}
         # Beperk splits bij weinig data (min 2, max 3)
         n_splits = min(3, max(2, len(X)//10))
         tss = TimeSeriesSplit(n_splits=n_splits)
