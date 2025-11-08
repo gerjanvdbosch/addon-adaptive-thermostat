@@ -56,21 +56,35 @@ class Trainer:
             return
         X = np.array(X)
         y = np.array(y)
+        
+        # Scaler: fit op batch i.p.v. partial_fit
         if self.scaler is None:
             self.scaler = StandardScaler()
-            self.scaler.fit(X)
-        else:
-            try:
-                self.scaler.partial_fit(X)
-            except Exception:
-                self.scaler.fit(X)
+        self.scaler.fit(X)
         Xs = self.scaler.transform(X)
+        
+        # Model: stabiele instellingen
         if self.partial is None:
-            self.partial = SGDRegressor(max_iter=1, tol=None, learning_rate="invscaling")
-            self.partial.partial_fit(Xs, y)
-        else:
-            self.partial.partial_fit(Xs, y)
-        joblib.dump({"model": self.partial, "scaler": self.scaler, "meta": {"feature_order": FEATURE_ORDER, "trained_at": datetime.datetime.utcnow().isoformat()}}, self.opts.get("model_path_partial"))
+            self.partial = SGDRegressor(
+                max_iter=1,
+                tol=None,
+                learning_rate="constant",
+                eta0=0.01,       # test eventueel 0.005 of 0.001
+                penalty="l2",
+                alpha=0.0001,
+                warm_start=True
+            )
+        
+        self.partial.partial_fit(Xs, y)
+        
+        joblib.dump({
+            "model": self.partial,
+            "scaler": self.scaler,
+            "meta": {
+                "feature_order": FEATURE_ORDER,
+                "trained_at": datetime.datetime.utcnow().isoformat()
+            }
+        }, self.opts.get("model_path_partial"))
         logger.info("Partial model updated with %d samples", len(X))
 
     def full_retrain_job(self):
@@ -98,8 +112,10 @@ class Trainer:
         y = np.array(y)
         
         pipe = Pipeline([("scaler", StandardScaler()), ("model", Ridge())])
-        param_grid = {"model__alpha": [0.1, 1.0, 10.0]}
-        n_splits = min(5, max(2, len(X)//10))
+        # Breder grid voor robuuste bias-variance
+        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0, 100.0]}
+        # Beperk splits bij weinig data (min 2, max 3)
+        n_splits = min(3, max(2, len(X)//10))
         tss = TimeSeriesSplit(n_splits=n_splits)
         gs = GridSearchCV(pipe, param_grid, cv=tss, scoring="neg_mean_absolute_error", n_jobs=1)
         gs.fit(X, y)
