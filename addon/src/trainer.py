@@ -8,8 +8,9 @@ from sklearn.linear_model import SGDRegressor, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
+from sklearn.metrics import mean_absolute_error
 
-from db import fetch_training_data
+from db import fetch_training_data, insert_metric, update_sample_prediction
 from feature_extractor import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,8 @@ class Trainer:
         if not rows:
             logger.info("No training rows available for full retrain")
             return
+        X = []
+        y = []
         # used_rows holds the corresponding ORM rows used for X,y
         used_rows = []
         for r in rows:
