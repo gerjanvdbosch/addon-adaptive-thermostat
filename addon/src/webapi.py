@@ -50,7 +50,7 @@ def receive_label(
         sensors = payload.sensors or {}
         features = fe.features_from_raw(sensors, timestamp=ts)
         insert_sample(
-            {"timestamp": (ts or datetime.datetime.utcnow()).isoformat(), "sensors": sensors, "features": features},
+            {"timestamp": (ts or datetime.datetime.utcnow()).isoformat(), "features": features},
             label_setpoint=float(payload.new_setpoint),
             user_override=bool(payload.user_override),
         )
