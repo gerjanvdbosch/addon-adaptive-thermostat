@@ -12,10 +12,11 @@ from utils import round_half
 logger = logging.getLogger(__name__)
 
 class Inferencer:
-    def __init__(self, ha_client: HAClient, opts: dict):
+    def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
         if not opts.get("model_path_full") or not opts.get("model_path_partial"):
             raise RuntimeError("model_path_full and model_path_partial must be provided in opts.")
         self.ha = ha_client
+        self.collector = collector
         self.opts = opts
         self.model_obj = None
         self.load_model()
@@ -59,9 +60,6 @@ class Inferencer:
             feat = row.data.get("features")
             if isinstance(feat, dict):
                 sample_sp = feat.get("current_setpoint")
-            else:
-                sensors = row.data.get("sensors") if isinstance(row.data.get("sensors"), dict) else {}
-                sample_sp = sensors.get("current_setpoint")
     
         rounded_sample = safe_round(sample_sp)
         if age is not None and age <= interval * 1.5:
@@ -181,14 +179,12 @@ class Inferencer:
                     update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
                     sid = latest.id
                 else:
-                    fe = FeatureExtractor()
-                    features_for_pred = fe.features_from_raw(snapshot, timestamp=now)
-                    sid = insert_sample({"timestamp": now.isoformat(), "features": features_for_pred})
+                    features = collector.get_features(ts=now)
+                    sid = insert_sample({"timestamp": now.isoformat(), "features": features})
                     update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
             else:
-                fe = FeatureExtractor()
-                features_for_pred = fe.features_from_raw(snapshot, timestamp=now)
-                sid = insert_sample({"timestamp": now.isoformat(), "features": features_for_pred})
+                features = collector.get_features(ts=now)
+                sid = insert_sample({"timestamp": now.isoformat(), "features": features})
                 update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
