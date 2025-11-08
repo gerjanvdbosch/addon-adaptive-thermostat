@@ -152,23 +152,7 @@ class Inferencer:
         # persist prediction: update recent unlabeled sample else insert new
         now = datetime.datetime.utcnow()
         age_thresh = float(self.opts.get("sample_interval_seconds", 300)) * 1.5
-        
-        # snapshot current states
-        snapshot = {}
-        try:
-            cs, ct = self.ha.get_setpoint()
-            snapshot["current_setpoint"] = cs
-            snapshot["current_temp"] = ct
-        except Exception:
-            snapshot = {}
-        
-        for key, ent in (self.opts.get("sensors") or {}).items():
-            try:
-                st = self.ha.get_state(ent)
-                snapshot[key] = float(st.get("state")) if st and "state" in st else None
-            except Exception:
-                snapshot[key] = None
-        
+
         try:
             unl = fetch_unlabeled(limit=1)
             if unl:
