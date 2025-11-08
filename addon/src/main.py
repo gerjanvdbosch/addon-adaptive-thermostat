@@ -52,7 +52,7 @@ def main():
     ha = HAClient(opts)
     collector = Collector(ha, opts)
     trainer = Trainer(ha, opts)
-    inferencer = Inferencer(ha, opts)
+    inferencer = Inferencer(ha, collector, opts)
 
     api_thread = threading.Thread(target=start_api, args=(opts["webapi_host"], opts["webapi_port"]), daemon=True)
     api_thread.start()
