@@ -40,6 +40,13 @@ class Collector:
             time.sleep(0.01)
         return data
 
+    def get_features(self, ts):
+        try:
+            sensors = self.read_sensors()
+            features = self.fe.features_from_raw(sensors, timestamp=ts)
+        except Exception:
+            logger.exception("Unexpected error while reading sensors")
+
     def sample_and_store(self):
         ts = datetime.datetime.utcnow()
         try:
