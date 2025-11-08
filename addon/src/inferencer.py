@@ -163,11 +163,11 @@ class Inferencer:
                     update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
                     sid = latest.id
                 else:
-                    features = collector.get_features(ts=now)
+                    features = self.collector.get_features(ts=now)
                     sid = insert_sample({"timestamp": now.isoformat(), "features": features})
                     update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
             else:
-                features = collector.get_features(ts=now)
+                features = self.collector.get_features(ts=now)
                 sid = insert_sample({"timestamp": now.isoformat(), "features": features})
                 update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
         except Exception:
