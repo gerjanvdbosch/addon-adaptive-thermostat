@@ -4,7 +4,7 @@ import joblib
 import numpy as np
 import datetime
 
-from db import fetch_unlabeled, update_label
+from db import fetch_unlabeled, update_label, update_sample_prediction
 from feature_extractor import FEATURE_ORDER
 from ha_client import HAClient
 from utils import round_half
