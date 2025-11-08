@@ -11,7 +11,7 @@ from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import mean_absolute_error
 
 from db import fetch_training_data, insert_metric, update_sample_prediction
-from feature_extractor import FEATURE_ORDER
+from collector import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
 
