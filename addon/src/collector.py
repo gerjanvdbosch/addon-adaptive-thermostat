@@ -44,6 +44,7 @@ class Collector:
         try:
             sensors = self.read_sensors()
             features = self.fe.features_from_raw(sensors, timestamp=ts)
+            return features
         except Exception:
             logger.exception("Unexpected error while reading sensors")
 
