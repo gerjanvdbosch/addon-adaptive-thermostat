@@ -100,8 +100,14 @@ class Inferencer:
         if unl:
             last = unl[0]
             feat = last.data.get("features") if last.data else None
-            return [feat[k] for k in FEATURE_ORDER] if feat else None, feat
+            if not feat:
+                return None, None
+            for k in FEATURE_ORDER:
+                if k not in feat:
+                    feat[k] = 0.0
+            return [feat[k] for k in FEATURE_ORDER], feat
         return None, None
+
 
     def inference_job(self):
         try:
