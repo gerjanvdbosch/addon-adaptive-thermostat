@@ -20,6 +20,8 @@ class Inferencer:
         self.opts = opts
         self.model_obj = None
         self.load_model()
+        self.last_pred_ts = None
+        self.last_pred_value = None
 
     def check_and_label_user_override(self):
         rows = fetch_unlabeled(limit=1)
@@ -143,10 +145,11 @@ class Inferencer:
         except Exception:
             logger.exception("Inference failed")
             return
-
+        logger.debug("Prediction: %.2f", pred)
         min_sp = self.opts.get("min_setpoint", 15.0)
         max_sp = self.opts.get("max_setpoint", 24.0)
         threshold = self.opts.get("min_change_threshold", 0.3)
+        stable_seconds = float(self.opts.get("stable_seconds", 600))
         current_sp = featdict.get("current_setpoint", None) if featdict else None
         if current_sp is None:
             logger.warning("Current setpoint unknown, skipping action")
@@ -159,6 +162,11 @@ class Inferencer:
         now = datetime.datetime.utcnow()
         age_thresh = float(self.opts.get("sample_interval_seconds", 300)) * 1.5
 
+        if self.last_pred_value is not None:
+            if abs(self.last_pred_value - pred) < threshold and self.last_pred_ts:
+                if (now - self.last_pred_ts).total_seconds() < stable_seconds:
+                    logger.info("Change not yet stable; skipping apply")
+                    return
         try:
             unl = fetch_unlabeled(limit=1)
             if unl:
@@ -180,4 +188,6 @@ class Inferencer:
             logger.exception("Failed to persist predicted_setpoint; continuing")
 
         self.ha.set_setpoint(pred)
+        self.last_pred_ts = now
+        self.last_pred_value = pred
         logger.info("Applied predicted setpoint %.1f (was %.1f)", pred, current_sp)
