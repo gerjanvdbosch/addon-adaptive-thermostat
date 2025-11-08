@@ -45,7 +45,7 @@ class Collector:
         try:
             sensors = self.read_sensors()
             features = self.fe.features_from_raw(sensors, timestamp=ts)
-            insert_sample({"timestamp": ts.isoformat(), "sensors": sensors, "features": features})
+            insert_sample({"timestamp": ts.isoformat(), "features": features})
             logger.info("Sample stored: current_setpoint=%.1f current_temp=%.2f",
                         sensors.get("current_setpoint"), sensors.get("current_temp"))
         except Exception:
