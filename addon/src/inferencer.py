@@ -183,12 +183,12 @@ class Inferencer:
                 else:
                     fe = FeatureExtractor()
                     features_for_pred = fe.features_from_raw(snapshot, timestamp=now)
-                    sid = insert_sample({"timestamp": now.isoformat(), "sensors": snapshot, "features": features_for_pred})
+                    sid = insert_sample({"timestamp": now.isoformat(), "features": features_for_pred})
                     update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
             else:
                 fe = FeatureExtractor()
                 features_for_pred = fe.features_from_raw(snapshot, timestamp=now)
-                sid = insert_sample({"timestamp": now.isoformat(), "sensors": snapshot, "features": features_for_pred})
+                sid = insert_sample({"timestamp": now.isoformat(), "features": features_for_pred})
                 update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
