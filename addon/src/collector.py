@@ -1,14 +1,16 @@
 import logging
 import datetime
-import math
 import time
+from typing import Optional, Dict, Any, List
+
 import numpy as np
+
 from utils import safe_float, cyclical_hour, cyclical_day, encode_wind, encode_binary_onoff
 from db import insert_sample
 
 logger = logging.getLogger(__name__)
 
-FEATURE_ORDER = [
+FEATURE_ORDER: List[str] = [
     "hour_sin", "hour_cos", "day_sin", "day_cos",
     "current_setpoint", "current_temp", "temp_change",
     "min_temp_today", "max_temp_today",
@@ -33,19 +35,26 @@ class Collector:
         "Vorstbescherming"      # index 5
     ]
     OP_STATUS_MAP = {cat.lower(): idx for idx, cat in enumerate(OP_STATUS_CATEGORIES)}
-    
-    def __init__(self, ha_client, opts, impute_value=0.0)):
+
+    def __init__(self, ha_client, opts: dict, impute_value: float = 0.0):
         self.ha = ha_client
         self.opts = opts or {}
         self.impute_value = impute_value
         # Require explicit sensor mapping in options; fail fast if not provided
         self.sensor_map = self.opts.get("sensors")
         if not isinstance(self.sensor_map, dict) or not self.sensor_map:
-            raise RuntimeError("Sensor mapping missing in add-on config (opts['sensors']). Please configure sensor entity IDs in the add-on options.")
+            raise RuntimeError(
+                "Sensor mapping missing in add-on config (opts['sensors']). "
+                "Please configure sensor entity IDs in the add-on options."
+            )
 
-    def read_sensors(self):
+    def read_sensors(self) -> Dict[str, Optional[float]]:
+        """
+        Read current setpoint/temp from HA client and then each mapped sensor.
+        Returns a dict with raw numeric values or None.
+        """
         current_setpoint, current_temp = self.ha.get_setpoint()
-        data = {"current_setpoint": current_setpoint, "current_temp": current_temp}
+        data: Dict[str, Optional[float]] = {"current_setpoint": current_setpoint, "current_temp": current_temp}
         time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():
             data[feature_key] = None
@@ -56,27 +65,35 @@ class Collector:
             val = st.get("state")
             attrs = st.get("attributes", {})
             numeric = attrs.get("value") if isinstance(attrs.get("value"), (int, float)) else None
+            parsed = None
             try:
-                data[feature_key] = float(val)
+                parsed = float(val)
             except Exception:
-                try:
-                    data[feature_key] = float(numeric) if numeric is not None else None
-                except Exception:
-                    data[feature_key] = None
+                if numeric is not None:
+                    try:
+                        parsed = float(numeric)
+                    except Exception:
+                        parsed = None
+            data[feature_key] = parsed
             time.sleep(0.01)
         return data
 
-    def _encode_operational_status(self, status):
+    def _encode_operational_status(self, status: Optional[str]) -> int:
         if not isinstance(status, str):
             return 0  # Uit
         s = status.strip().lower()
         return self.OP_STATUS_MAP.get(s, 0)
-    
-    def features_from_raw(self, sensor_dict: dict, timestamp: datetime.datetime = None) -> dict:
+
+    def features_from_raw(self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+        """
+        Convert raw sensor dict into feature dictionary following FEATURE_ORDER keys.
+        Defensive: uses safe_float and encoding helpers.
+        """
         ts = timestamp or datetime.datetime.utcnow()
         hx, hy = cyclical_hour(ts)
         dx, dy = cyclical_day(ts)
 
+        # these keys are optional in sensor_dict; keep names consistent with what you write into DB
         wind_dir_today = sensor_dict.get("wind_direction_today")
         wind_dir_tomorrow = sensor_dict.get("wind_direction_tomorrow")
 
@@ -120,14 +137,17 @@ class Collector:
             "prohibit_heat": ph
         }
 
-
-    def get_features(self, ts):
+    def get_features(self, ts: datetime.datetime) -> Optional[Dict[str, Any]]:
+        """
+        Public method used by inferencer/trainer to obtain a features dict for timestamp ts.
+        """
         try:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)
             return features
         except Exception:
             logger.exception("Unexpected error while reading sensors")
+            return None
 
     def sample_and_store(self):
         ts = datetime.datetime.utcnow()
@@ -135,15 +155,21 @@ class Collector:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)
             insert_sample({"timestamp": ts.isoformat(), "features": features})
-            logger.info("Sample stored: current_setpoint=%.1f current_temp=%.2f",
-                        sensors.get("current_setpoint"), sensors.get("current_temp"))
+            logger.info(
+                "Sample stored: current_setpoint=%s current_temp=%s",
+                sensors.get("current_setpoint"),
+                sensors.get("current_temp")
+            )
         except Exception:
             logger.exception("Unexpected error while reading sensors; skipping this sample")
 
-    def get_vector(self, feature_dict: dict):
+    def get_vector(self, feature_dict: Dict[str, Any]) -> np.ndarray:
+        """
+        Convert a feature dict into a numpy vector following FEATURE_ORDER.
+        Missing values are imputed with self.impute_value.
+        """
         vec = []
         for k in FEATURE_ORDER:
             v = feature_dict.get(k, None)
             vec.append(self.impute_value if v is None else v)
         return np.array(vec, dtype=float)
-    
