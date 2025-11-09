@@ -58,7 +58,14 @@ class Inferencer:
                 if rounded_current == rounded_pred:
                     return False
                 else:
-                    update_label(row.id, float(current_sp), user_override=True)
+                    #                     update_label(row.id, float(current_sp), user_override=True)
+                    now = datetime.utcnow()
+                    features = self.collector.get_features(ts=now)
+                    insert_sample(
+                        {"timestamp": now.isoformat(), "features": features},
+                        flabel_setpoint=loat(current_sp),
+                        user_override=True,
+                    )
                     return True
 
         sample_sp = None
@@ -74,7 +81,14 @@ class Inferencer:
                 and rounded_current is not None
                 and rounded_sample != rounded_current
             ):
-                update_label(row.id, float(current_sp), user_override=True)
+                #                 update_label(row.id, float(current_sp), user_override=True)
+                now = datetime.utcnow()
+                features = self.collector.get_features(ts=now)
+                insert_sample(
+                    {"timestamp": now.isoformat(), "features": features},
+                    flabel_setpoint=loat(current_sp),
+                    user_override=True,
+                )
                 return True
             return False
 
