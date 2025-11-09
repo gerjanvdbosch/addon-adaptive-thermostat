@@ -63,7 +63,7 @@ class Inferencer:
                     features = self.collector.get_features(ts=now)
                     logger.debug(
                         "Labeling sample as user_override because sample (%.1f) != current (%.1f); inserting labeled sample",
-                        rounded_sample,
+                        rounded_pred,
                         rounded_current,
                     )
                     insert_sample(
