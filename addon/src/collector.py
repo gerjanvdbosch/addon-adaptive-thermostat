@@ -185,14 +185,3 @@ class Collector:
             logger.exception(
                 "Unexpected error while reading sensors; skipping this sample"
             )
-
-    def get_vector(self, feature_dict: Dict[str, Any]) -> np.ndarray:
-        """
-        Convert a feature dict into a numpy vector following FEATURE_ORDER.
-        Missing values are imputed with self.impute_value.
-        """
-        vec = []
-        for k in FEATURE_ORDER:
-            v = feature_dict.get(k, None)
-            vec.append(self.impute_value if v is None else v)
-        return np.array(vec, dtype=float)
