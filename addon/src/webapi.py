@@ -387,12 +387,18 @@ def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
                     coef = getattr(final_model, "coef_", None)
                     try:
                         est_info["coef_shape"] = getattr(coef, "shape", None)
-                        est_info["coef_sample"] = coef.tolist() if getattr(coef, "size", 0) <= 20 else f"array(len={getattr(coef,'size',0)})"
+                        est_info["coef_sample"] = (
+                            coef.tolist()
+                            if getattr(coef, "size", 0) <= 20
+                            else f"array(len={getattr(coef,'size',0)})"
+                        )
                     except Exception:
                         est_info["coef_sample"] = "unserializable"
                 if hasattr(final_model, "intercept_"):
                     try:
-                        est_info["intercept"] = float(getattr(final_model, "intercept_"))
+                        est_info["intercept"] = float(
+                            getattr(final_model, "intercept_")
+                        )
                     except Exception:
                         est_info["intercept"] = str(getattr(final_model, "intercept_"))
                 for attr in ("alpha", "eta0", "learning_rate", "max_iter"):
@@ -475,13 +481,21 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
                     try:
                         coef = getattr(final_model, "coef_")
                         est_info["coef_shape"] = getattr(coef, "shape", None)
-                        est_info["coef_sample"] = coef.tolist() if getattr(coef, "size", 0) <= 20 else f"array(len={getattr(coef,'size',0)})"
+                        est_info["coef_sample"] = (
+                            coef.tolist()
+                            if getattr(coef, "size", 0) <= 20
+                            else f"array(len={getattr(coef,'size',0)})"
+                        )
                     except Exception:
                         est_info["coef_sample"] = "unserializable"
                 if hasattr(final_model, "intercept_"):
                     try:
                         intercept = getattr(final_model, "intercept_")
-                        est_info["intercept"] = float(intercept) if hasattr(intercept, "__float__") else str(intercept)
+                        est_info["intercept"] = (
+                            float(intercept)
+                            if hasattr(intercept, "__float__")
+                            else str(intercept)
+                        )
                     except Exception:
                         pass
                 for attr in ("alpha", "fit_intercept", "normalize"):
