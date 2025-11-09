@@ -204,6 +204,10 @@ class Inferencer:
             logger.warning("Current setpoint unknown, skipping action")
             return
 
+        if pred < min_sp or pred > max_sp:
+            logger.warning("Predicted setpoint outside plausible range: %s", pred)
+            return
+
         pred = max(min(pred, max_sp), min_sp)
 
         if abs(pred - current_sp) < threshold:
@@ -215,7 +219,7 @@ class Inferencer:
             return
 
         now = datetime.utcnow()
-        age_thresh = float(self.opts.get("sample_interval_seconds", 300)) * 1.5
+        age_thresh = float(self.opts.get("sample_interval_seconds", 300))
 
         if self.last_pred_value is not None and self.last_pred_ts:
             if abs(self.last_pred_value - pred) < threshold:
