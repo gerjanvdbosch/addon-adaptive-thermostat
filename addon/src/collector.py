@@ -175,7 +175,7 @@ class Collector:
         try:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)
-            insert_sample({"timestamp": ts.isoformat(), "features": features})
+            insert_sample({"features": features})
             logger.info(
                 "Sample stored: current_setpoint=%s current_temp=%s",
                 sensors.get("current_setpoint"),
