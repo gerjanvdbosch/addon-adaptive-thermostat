@@ -202,7 +202,10 @@ class Inferencer:
             logger.exception("Inference failed")
             return
 
-        logger.debug("Raw prediction: %s", pred)
+        logger.debug(
+            "Prediction debug raw=%s last_pred=%s last_ts=%s",
+            pred, self.last_pred_value, self.last_pred_ts
+        )
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 24.0))
         threshold = float(self.opts.get("min_change_threshold", 0.3))
