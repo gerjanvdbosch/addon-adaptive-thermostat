@@ -2,6 +2,7 @@ import os
 import json
 from typing import Dict, Any, Optional
 
+
 def load_options() -> Dict[str, Any]:
     # Support passing sensors mapping as JSON string in SENSORS env var or via mapped config (opts injected by Supervisor)
     try:
