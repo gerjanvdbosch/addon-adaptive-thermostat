@@ -62,8 +62,8 @@ class Inferencer:
                     now = datetime.utcnow()
                     features = self.collector.get_features(ts=now)
                     insert_sample(
-                        {"timestamp": now.isoformat(), "features": features},
-                        flabel_setpoint=float(current_sp),
+                        {"features": features},
+                        label_setpoint=float(current_sp),
                         user_override=True,
                     )
                     return True
@@ -85,8 +85,8 @@ class Inferencer:
                 now = datetime.utcnow()
                 features = self.collector.get_features(ts=now)
                 insert_sample(
-                    {"timestamp": now.isoformat(), "features": features},
-                    flabel_setpoint=float(current_sp),
+                    {"features": features},
+                    label_setpoint=float(current_sp),
                     user_override=True,
                 )
                 return True
@@ -225,7 +225,7 @@ class Inferencer:
                 else:
                     features = self.collector.get_features(ts=now)
                     sid = insert_sample(
-                        {"timestamp": now.isoformat(), "features": features}
+                        {"features": features}
                     )
                     update_sample_prediction(
                         sid, predicted_setpoint=pred, prediction_error=None
@@ -233,7 +233,7 @@ class Inferencer:
             else:
                 features = self.collector.get_features(ts=now)
                 sid = insert_sample(
-                    {"timestamp": now.isoformat(), "features": features}
+                    {"features": features}
                 )
                 update_sample_prediction(
                     sid, predicted_setpoint=pred, prediction_error=None
