@@ -5,10 +5,9 @@ import numpy as np
 import datetime
 from typing import Optional, Tuple, List
 
-from db import fetch_unlabeled, update_label, update_sample_prediction
+from db import fetch_unlabeled, update_label, update_sample_prediction, insert_sample
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import round_half
 
 logger = logging.getLogger(__name__)
 
