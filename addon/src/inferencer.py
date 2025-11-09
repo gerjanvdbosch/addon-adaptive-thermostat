@@ -36,11 +36,7 @@ class Inferencer:
 
         interval = int(self.opts.get("sample_interval_seconds", 300))
         sample_ts = getattr(row, "timestamp", None)
-        age = (
-            (datetime.utcnow() - sample_ts).total_seconds()
-            if sample_ts
-            else None
-        )
+        age = (datetime.utcnow() - sample_ts).total_seconds() if sample_ts else None
 
         try:
             current_sp, _ = self.ha.get_setpoint()
