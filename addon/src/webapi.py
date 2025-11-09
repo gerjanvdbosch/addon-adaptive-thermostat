@@ -360,7 +360,7 @@ def _load_model_meta_from_path(path: Optional[str]) -> ModelMetaOut:
     return out
 
 
-@app.get("/model_summary", response_model=ModelSummaryOut)
+@app.get("/summary", response_model=ModelSummaryOut)
 def model_summary(x_addon_token: Optional[str] = Header(None)):
     """
     Returns a summary of available models and the most recent full-model metric (OOF MAE).
