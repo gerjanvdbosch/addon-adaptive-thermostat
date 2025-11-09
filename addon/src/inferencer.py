@@ -58,7 +58,9 @@ class Inferencer:
                 if rounded_current == rounded_pred:
                     return False
                 else:
-                    #                     update_label(row.id, float(current_sp), user_override=True)
+                    # temp disable
+                    return False
+                    #update_label(row.id, float(current_sp), user_override=True)
                     now = datetime.utcnow()
                     features = self.collector.get_features(ts=now)
                     logger.debug(
@@ -80,13 +82,13 @@ class Inferencer:
                 sample_sp = feat.get("current_setpoint")
 
         rounded_sample = safe_round(sample_sp)
-        if age is not None and age <= interval * 1.5:
+        if age is not None and age <= interval
             if (
                 rounded_sample is not None
                 and rounded_current is not None
                 and rounded_sample != rounded_current
             ):
-                #                 update_label(row.id, float(current_sp), user_override=True)
+                #update_label(row.id, float(current_sp), user_override=True)
                 now = datetime.utcnow()
                 features = self.collector.get_features(ts=now)
                 logger.debug(
