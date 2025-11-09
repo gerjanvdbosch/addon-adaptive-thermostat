@@ -42,9 +42,9 @@ def load_options():
         "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
         "model_path_full": os.getenv("MODEL_PATH_FULL"),
         "use_unlabeled": bool(os.getenv("USE_UNLABELED")),
-        "pseudo_limit": int(os.getenv("PSEUDO_LIMIT", "1000")),
-        "weight_label": float(os.getenv("WEIGHT_LABEL", "1.0")),
-        "weight_pseudo": float(os.getenv("WEIGHT_PSEUDO", "0.25")),
+        "pseudo_limit": int(os.getenv("PSEUDO_LIMIT", 1000)),
+        "weight_label": float(os.getenv("WEIGHT_LABEL", 1.0)),
+        "weight_pseudo": float(os.getenv("WEIGHT_PSEUDO", 0.25)),
         "sensors": sensors,
     }
 
