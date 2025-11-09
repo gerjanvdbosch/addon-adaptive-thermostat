@@ -2,7 +2,7 @@ import os
 import logging
 import joblib
 import numpy as np
-import datetime
+from datetime import datetime
 from typing import Optional, Tuple, List
 
 from db import fetch_unlabeled, update_label, update_sample_prediction, insert_sample
@@ -24,7 +24,7 @@ class Inferencer:
                 "model_path_full and model_path_partial must be provided in opts."
             )
         self.model_obj = None
-        self.last_pred_ts: Optional[datetime.datetime.datetime] = None
+        self.last_pred_ts: Optional[datetime] = None
         self.last_pred_value: Optional[float] = None
         self.load_model()
 
@@ -37,7 +37,7 @@ class Inferencer:
         interval = int(self.opts.get("sample_interval_seconds", 300))
         sample_ts = getattr(row, "timestamp", None)
         age = (
-            (datetime.datetime.datetime.utcnow() - sample_ts).total_seconds()
+            (datetime.utcnow() - sample_ts).total_seconds()
             if sample_ts
             else None
         )
@@ -192,7 +192,7 @@ class Inferencer:
             )
             return
 
-        now = datetime.datetime.datetime.utcnow()
+        now = datetime.utcnow()
         age_thresh = float(self.opts.get("sample_interval_seconds", 300)) * 1.5
 
         if self.last_pred_value is not None and self.last_pred_ts:
