@@ -7,6 +7,7 @@ import numpy as np
 
 from utils import (
     safe_float,
+    round_half,
     cyclical_hour,
     cyclical_day,
     encode_wind,
@@ -86,21 +87,6 @@ class Collector:
                 time.sleep(0.01)
                 continue
             val = st.get("state")
-            # attrs = st.get("attributes", {})
-            # numeric = (
-            #     attrs.get("value")
-            #     if isinstance(attrs.get("value"), (int, float))
-            #     else None
-            # )
-            # parsed = None
-            # try:
-            #     parsed = float(val)
-            # except Exception:
-            #     if numeric is not None:
-            #         try:
-            #             parsed = float(numeric)
-            #         except Exception:
-            #             parsed = None
             data[feature_key] = val
             time.sleep(0.01)
         return data
@@ -150,8 +136,8 @@ class Collector:
             "max_temp_today": safe_float(sensor_dict.get("max_temp_today")),
             "min_temp_tomorrow": safe_float(sensor_dict.get("min_temp_tomorrow")),
             "max_temp_tomorrow": safe_float(sensor_dict.get("max_temp_tomorrow")),
-            "solar_kwh_today": safe_float(sensor_dict.get("solar_kwh_today")),
-            "solar_kwh_tomorrow": safe_float(sensor_dict.get("solar_kwh_tomorrow")),
+            "solar_kwh_today": round(round_half(safe_float(sensor_dict.get("solar_kwh_today"))), 1),
+            "solar_kwh_tomorrow": round(round_half(safe_float(sensor_dict.get("solar_kwh_tomorrow"))), 1),
             "solar_chance_today": safe_float(sensor_dict.get("solar_chance_today")),
             "solar_chance_tomorrow": safe_float(
                 sensor_dict.get("solar_chance_tomorrow")
