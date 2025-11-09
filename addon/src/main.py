@@ -28,7 +28,9 @@ def load_options():
         "shadow_mode": bool(os.getenv("SHADOW_MODE")),
         "shadow_setpoint": os.getenv("SHADOW_SETPOINT"),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
-        "partial_fit_interval_seconds": int(os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)),
+        "partial_fit_interval_seconds": int(
+            os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)
+        ),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
         "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),
@@ -39,7 +41,7 @@ def load_options():
         "webapi_port": int(os.getenv("WEBAPI_PORT", os.getenv("WEBAPI_PORT", 8000))),
         "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
         "model_path_full": os.getenv("MODEL_PATH_FULL"),
-        "sensors": sensors
+        "sensors": sensors,
     }
 
 
@@ -54,18 +56,34 @@ def main():
     trainer = Trainer(ha, opts)
     inferencer = Inferencer(ha, collector, opts)
 
-    api_thread = threading.Thread(target=start_api, args=(opts["webapi_host"], opts["webapi_port"]), daemon=True)
+    api_thread = threading.Thread(
+        target=start_api, args=(opts["webapi_host"], opts["webapi_port"]), daemon=True
+    )
     api_thread.start()
-    logger.info("Started internal web API on %s:%s", opts["webapi_host"], opts["webapi_port"])
+    logger.info(
+        "Started internal web API on %s:%s", opts["webapi_host"], opts["webapi_port"]
+    )
 
     scheduler = BackgroundScheduler()
-    scheduler.add_job(collector.sample_and_store, 'interval', seconds=opts["sample_interval_seconds"], id='collector')
-    scheduler.add_job(trainer.partial_fit_job, 'interval', seconds=opts["partial_fit_interval_seconds"], id='partial_fit')
+    scheduler.add_job(
+        collector.sample_and_store,
+        "interval",
+        seconds=opts["sample_interval_seconds"],
+        id="collector",
+    )
+    scheduler.add_job(
+        trainer.partial_fit_job,
+        "interval",
+        seconds=opts["partial_fit_interval_seconds"],
+        id="partial_fit",
+    )
 
     hh, mm = map(int, opts["full_retrain_time"].split(":"))
-    
-    scheduler.add_job(trainer.full_retrain_job, 'cron', hour=hh, minute=mm, id='full_retrain')
-    scheduler.add_job(inferencer.inference_job, 'interval', seconds=60, id='inference')
+
+    scheduler.add_job(
+        trainer.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
+    )
+    scheduler.add_job(inferencer.inference_job, "interval", seconds=60, id="inference")
 
     scheduler.start()
     logger.info("Adaptive Thermostat add-on started")
@@ -79,4 +97,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
