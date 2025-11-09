@@ -82,7 +82,7 @@ class Inferencer:
                 sample_sp = feat.get("current_setpoint")
 
         rounded_sample = safe_round(sample_sp)
-        if age is not None and age <= interval
+        if age is not None and age <= interval:
             if (
                 rounded_sample is not None
                 and rounded_current is not None
