@@ -129,15 +129,15 @@ def list_samples(
     try:
         q = s.query(Sample)
         if labeled is True:
-            q = q.filter(Sample.label_setpoint != None)
+            q = q.filter(Sample.label_setpoint.isnot(None))
         elif labeled is False:
-            q = q.filter(Sample.label_setpoint == None)
+            q = q.filter(Sample.label_setpoint.is_(None))
         if user_override is not None:
             q = q.filter(Sample.user_override == bool(user_override))
         if has_prediction is True:
-            q = q.filter(Sample.predicted_setpoint != None)
+            q = q.filter(Sample.predicted_setpoint.isnot(None))
         elif has_prediction is False:
-            q = q.filter(Sample.predicted_setpoint == None)
+            q = q.filter(Sample.predicted_setpoint.is_(None))
 
         rows = q.order_by(Sample.timestamp.desc()).limit(limit).offset(offset).all()
         out = []
@@ -187,7 +187,7 @@ def list_predictions(
     _check_token(x_addon_token)
     s = Session()
     try:
-        q = s.query(Sample).filter(Sample.predicted_setpoint != None)
+        q = s.query(Sample).filter(Sample.predicted_setpoint.isnot(None))
         if since:
             try:
                 dt = datetime.datetime.fromisoformat(since)
@@ -221,7 +221,7 @@ def latest_prediction(x_addon_token: Optional[str] = Header(None)):
     _check_token(x_addon_token)
     s = Session()
     try:
-        row = s.query(Sample).filter(Sample.predicted_setpoint != None).order_by(Sample.timestamp.desc()).first()
+        row = s.query(Sample).filter(Sample.predicted_setpoint.isnot(None)).order_by(Sample.timestamp.desc()).first()
         if not row:
             return None
         features = None
