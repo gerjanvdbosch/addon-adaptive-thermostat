@@ -61,7 +61,7 @@ class Trainer:
         if not rows:
             logger.info("No training rows available for partial_fit")
             return
-
+    
         X = []
         y = []
         for r in rows:
@@ -81,20 +81,20 @@ class Trainer:
                 logger.exception(
                     "Skipping corrupt row %s in partial_fit", getattr(r, "id", None)
                 )
-
+    
         if not X:
             logger.info("No labeled rows after filtering for partial_fit")
             return
-
+    
         X = np.array(X, dtype=float)
         y = np.array(y, dtype=float)
-
+    
         # fit scaler on batch (safer than partial fitting scaler)
         if self.scaler is None:
             self.scaler = StandardScaler()
         self.scaler.fit(X)
         Xs = self.scaler.transform(X)
-
+    
         if self.partial is None:
             self.partial = SGDRegressor(
                 max_iter=1,
@@ -105,29 +105,32 @@ class Trainer:
                 alpha=float(self.opts.get("partial_alpha", 0.0001)),
                 warm_start=True,
             )
-
+    
         try:
             self.partial.partial_fit(Xs, y)
         except Exception:
             logger.exception("partial_fit failed")
             return
-
-        # persist partial model + scaler + meta
+    
+        # persist partial model + scaler + meta (including n_samples)
         try:
+            meta = {
+                "feature_order": FEATURE_ORDER,
+                "trained_at": (datetime.utcnow().isoformat()),
+                "n_samples": int(len(X)),
+            }
             joblib.dump(
                 {
                     "model": self.partial,
                     "scaler": self.scaler,
-                    "meta": {
-                        "feature_order": FEATURE_ORDER,
-                        "trained_at": (datetime.utcnow().isoformat()),
-                    },
+                    "meta": meta,
                 },
                 self.opts.get("model_path_partial"),
             )
             logger.info("Partial model updated with %d samples", len(X))
         except Exception:
             logger.exception("Failed saving partial model")
+
 
     def full_retrain_job(self):
         use_unlabeled = bool(self.opts.get("use_unlabeled", True))
