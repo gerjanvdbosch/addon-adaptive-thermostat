@@ -5,8 +5,12 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Header, Query, Path
 from pydantic import BaseModel, Field
 import joblib
+import threading
+import json
 
 from db import Session, Sample, Metric, insert_sample, update_label
+from ha_client import HAClient
+from trainer import Trainer
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="Adaptive Thermostat API")
@@ -18,6 +22,44 @@ def _check_token(x_addon_token: Optional[str]):
         if not x_addon_token or x_addon_token != expected_token:
             logger.warning("Rejected request due to invalid token")
             raise HTTPException(status_code=403, detail="Invalid addon token")
+
+
+def _load_opts_from_env() -> dict:
+    """
+    Minimal options loader for on-demand train endpoints.
+    Mirrors main.load_options keys used by Trainer/HAClient.
+    """
+    sensors = None
+    s = os.getenv("SENSORS", None)
+    if s:
+        try:
+            sensors = json.loads(s)
+        except Exception:
+            sensors = None
+
+    return {
+        "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.woonkamer"),
+        "shadow_mode": bool(os.getenv("SHADOW_MODE")),
+        "shadow_setpoint": os.getenv("SHADOW_SETPOINT"),
+        "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
+        "partial_fit_interval_seconds": int(os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)),
+        "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
+        "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
+        "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),
+        "min_change_threshold": float(os.getenv("MIN_CHANGE_THRESHOLD", 0.3)),
+        "buffer_days": int(os.getenv("BUFFER_DAYS", 30)),
+        "addon_api_token": os.getenv("ADDON_API_TOKEN", None),
+        "webapi_host": os.getenv("WEBAPI_HOST", "0.0.0.0"),
+        "webapi_port": int(os.getenv("WEBAPI_PORT", os.getenv("WEBAPI_PORT", 8000))),
+        "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
+        "model_path_full": os.getenv("MODEL_PATH_FULL"),
+        "sensors": sensors,
+        # pseudo options for trainer (optional)
+        "use_unlabeled": bool(os.getenv("ENABLE_USE_UNLABELED", "true").lower() in ("1","true","yes")),
+        "pseudo_limit": int(os.getenv("PSEUDO_LIMIT", "1000")),
+        "weight_label": float(os.getenv("WEIGHT_LABEL", "1.0")),
+        "weight_pseudo": float(os.getenv("WEIGHT_PSEUDO", "0.25")),
+    }
 
 
 class LabelPayload(BaseModel):
@@ -258,7 +300,6 @@ def list_predictions(
         s.close()
 
 
-
 # Model summary endpoint (reads model paths from environment variables)
 class ModelMetaOut(BaseModel):
     model_type: Optional[str] = None
@@ -341,6 +382,7 @@ def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
         "model_type": None,
         "has_scaler": False,
         "estimator_summary": None,
+        "n_samples": None,
         "note": None,
     }
     if not path:
@@ -363,6 +405,12 @@ def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
             model = obj
             out["meta"] = {}
             out["has_scaler"] = False
+
+        # expose n_samples from meta if present
+        try:
+            out["n_samples"] = int(out["meta"].get("n_samples")) if out["meta"].get("n_samples") is not None else None
+        except Exception:
+            out["n_samples"] = None
 
         out["model_type"] = type(model).__name__ if model is not None else None
 
@@ -427,6 +475,7 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
         "is_pipeline": False,
         "has_scaler": False,
         "estimator_summary": None,
+        "n_samples": None,
         "note": None,
     }
     if not path:
@@ -449,6 +498,12 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
             model = obj
             out["meta"] = {}
             out["has_scaler"] = False
+
+        # expose n_samples from meta if present
+        try:
+            out["n_samples"] = int(out["meta"].get("n_samples")) if out["meta"].get("n_samples") is not None else None
+        except Exception:
+            out["n_samples"] = None
 
         out["model_type"] = type(model).__name__ if model is not None else None
 
@@ -505,3 +560,49 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
         out["loaded"] = False
         out["note"] = f"failed to load: {e}"
         return out
+
+
+@app.post("/train/full")
+def trigger_full_train(x_addon_token: Optional[str] = Header(None)):
+    """
+    Trigger a full retrain in background. Returns immediately with a job status.
+    """
+    _check_token(x_addon_token)
+    opts = _load_opts_from_env()
+    ha = HAClient(opts)
+    trainer = Trainer(ha, opts)
+
+    def _run():
+        try:
+            logger.info("Triggered full retrain via API")
+            trainer.full_retrain_job()
+            logger.info("Full retrain job finished (API-triggered)")
+        except Exception:
+            logger.exception("Exception in API-triggered full retrain")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return {"status": "started", "job": "full_retrain"}
+
+
+@app.post("/train/partial")
+def trigger_partial_train(x_addon_token: Optional[str] = Header(None)):
+    """
+    Trigger a partial_fit job in background. Returns immediately.
+    """
+    _check_token(x_addon_token)
+    opts = _load_opts_from_env()
+    ha = HAClient(opts)
+    trainer = Trainer(ha, opts)
+
+    def _run():
+        try:
+            logger.info("Triggered partial_fit via API")
+            trainer.partial_fit_job()
+            logger.info("Partial fit job finished (API-triggered)")
+        except Exception:
+            logger.exception("Exception in API-triggered partial fit")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return {"status": "started", "job": "partial_fit"}
