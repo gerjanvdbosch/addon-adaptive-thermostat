@@ -3,8 +3,6 @@ import datetime
 import time
 from typing import Optional, Dict, Any, List
 
-import numpy as np
-
 from utils import (
     safe_float,
     round_half,
