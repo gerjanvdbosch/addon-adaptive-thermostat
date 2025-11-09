@@ -42,7 +42,7 @@ def load_options():
         "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
         "model_path_full": os.getenv("MODEL_PATH_FULL"),
         "partial_eta0": float(os.getenv("PARTIAL_ETA0", 0.01)),
-        "partial_alpha": float(os.getenv("PARTIAL_EALPHA", 0.0001)),
+        "partial_alpha": float(os.getenv("PARTIAL_ALPHA", 0.0001)),
         "use_unlabeled": bool(os.getenv("USE_UNLABELED")),
         "pseudo_limit": int(os.getenv("PSEUDO_LIMIT", 1000)),
         "weight_label": float(os.getenv("WEIGHT_LABEL", 1.0)),
