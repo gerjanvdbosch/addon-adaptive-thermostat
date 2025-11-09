@@ -5,34 +5,54 @@ from typing import Optional, Dict, Any, List
 
 import numpy as np
 
-from utils import safe_float, cyclical_hour, cyclical_day, encode_wind, encode_binary_onoff
+from utils import (
+    safe_float,
+    cyclical_hour,
+    cyclical_day,
+    encode_wind,
+    encode_binary_onoff,
+)
 from db import insert_sample
 
 logger = logging.getLogger(__name__)
 
 FEATURE_ORDER: List[str] = [
-    "hour_sin", "hour_cos", "day_sin", "day_cos",
-    "current_setpoint", "current_temp", "temp_change",
-    "min_temp_today", "max_temp_today",
-    "min_temp_tomorrow", "max_temp_tomorrow",
-    "solar_kwh_today", "solar_kwh_tomorrow",
-    "solar_chance_today", "solar_chance_tomorrow",
-    "wind_speed_today", "wind_speed_tomorrow",
-    "wind_dir_today_sin", "wind_dir_today_cos",
-    "wind_dir_tomorrow_sin", "wind_dir_tomorrow_cos",
+    "hour_sin",
+    "hour_cos",
+    "day_sin",
+    "day_cos",
+    "current_setpoint",
+    "current_temp",
+    "temp_change",
+    "min_temp_today",
+    "max_temp_today",
+    "min_temp_tomorrow",
+    "max_temp_tomorrow",
+    "solar_kwh_today",
+    "solar_kwh_tomorrow",
+    "solar_chance_today",
+    "solar_chance_tomorrow",
+    "wind_speed_today",
+    "wind_speed_tomorrow",
+    "wind_dir_today_sin",
+    "wind_dir_today_cos",
+    "wind_dir_tomorrow_sin",
+    "wind_dir_tomorrow_cos",
     "outside_temp",
-    "thermostat_demand", "operational_status", "prohibit_heat"
+    "thermostat_demand",
+    "operational_status",
+    "prohibit_heat",
 ]
 
 
 class Collector:
     OP_STATUS_CATEGORIES = [
-        "Uit",                  # index 0 -> represents off/unknown
-        "SWW",                  # index 1
+        "Uit",  # index 0 -> represents off/unknown
+        "SWW",  # index 1
         "Legionellapreventie",  # index 2
-        "Verwarmen",            # index 3
-        "Koelen",               # index 4
-        "Vorstbescherming"      # index 5
+        "Verwarmen",  # index 3
+        "Koelen",  # index 4
+        "Vorstbescherming",  # index 5
     ]
     OP_STATUS_MAP = {cat.lower(): idx for idx, cat in enumerate(OP_STATUS_CATEGORIES)}
 
@@ -54,7 +74,10 @@ class Collector:
         Returns a dict with raw numeric values or None.
         """
         current_setpoint, current_temp = self.ha.get_setpoint()
-        data: Dict[str, Optional[float]] = {"current_setpoint": current_setpoint, "current_temp": current_temp}
+        data: Dict[str, Optional[float]] = {
+            "current_setpoint": current_setpoint,
+            "current_temp": current_temp,
+        }
         time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():
             data[feature_key] = None
@@ -64,7 +87,11 @@ class Collector:
                 continue
             val = st.get("state")
             attrs = st.get("attributes", {})
-            numeric = attrs.get("value") if isinstance(attrs.get("value"), (int, float)) else None
+            numeric = (
+                attrs.get("value")
+                if isinstance(attrs.get("value"), (int, float))
+                else None
+            )
             parsed = None
             try:
                 parsed = float(val)
@@ -84,7 +111,9 @@ class Collector:
         s = status.strip().lower()
         return self.OP_STATUS_MAP.get(s, 0)
 
-    def features_from_raw(self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+    def features_from_raw(
+        self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime.datetime] = None
+    ) -> Dict[str, Any]:
         """
         Convert raw sensor dict into feature dictionary following FEATURE_ORDER keys.
         Defensive: uses safe_float and encoding helpers.
@@ -124,7 +153,9 @@ class Collector:
             "solar_kwh_today": safe_float(sensor_dict.get("solar_kwh_today")),
             "solar_kwh_tomorrow": safe_float(sensor_dict.get("solar_kwh_tomorrow")),
             "solar_chance_today": safe_float(sensor_dict.get("solar_chance_today")),
-            "solar_chance_tomorrow": safe_float(sensor_dict.get("solar_chance_tomorrow")),
+            "solar_chance_tomorrow": safe_float(
+                sensor_dict.get("solar_chance_tomorrow")
+            ),
             "wind_speed_today": safe_float(sensor_dict.get("wind_speed_today")),
             "wind_speed_tomorrow": safe_float(sensor_dict.get("wind_speed_tomorrow")),
             "wind_dir_today_sin": wtd_sin,
@@ -134,7 +165,7 @@ class Collector:
             "outside_temp": safe_float(sensor_dict.get("outside_temp")),
             "thermostat_demand": td,
             "operational_status": float(op_idx),
-            "prohibit_heat": ph
+            "prohibit_heat": ph,
         }
 
     def get_features(self, ts: datetime.datetime) -> Optional[Dict[str, Any]]:
@@ -158,10 +189,12 @@ class Collector:
             logger.info(
                 "Sample stored: current_setpoint=%s current_temp=%s",
                 sensors.get("current_setpoint"),
-                sensors.get("current_temp")
+                sensors.get("current_temp"),
             )
         except Exception:
-            logger.exception("Unexpected error while reading sensors; skipping this sample")
+            logger.exception(
+                "Unexpected error while reading sensors; skipping this sample"
+            )
 
     def get_vector(self, feature_dict: Dict[str, Any]) -> np.ndarray:
         """
