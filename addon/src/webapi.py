@@ -258,36 +258,6 @@ def list_predictions(
         s.close()
 
 
-@app.get("/predictions/latest", response_model=Optional[PredictionOut])
-def latest_prediction(x_addon_token: Optional[str] = Header(None)):
-    _check_token(x_addon_token)
-    s = Session()
-    try:
-        row = (
-            s.query(Sample)
-            .filter(Sample.predicted_setpoint.isnot(None))
-            .order_by(Sample.timestamp.desc())
-            .first()
-        )
-        if not row:
-            return None
-        features = None
-        current_sp = None
-        if row.data and isinstance(row.data, dict):
-            features = row.data.get("features") or row.data
-            if isinstance(features, dict):
-                current_sp = features.get("current_setpoint")
-        return PredictionOut(
-            sample_id=row.id,
-            timestamp=row.timestamp,
-            predicted_setpoint=row.predicted_setpoint,
-            prediction_error=row.prediction_error,
-            current_setpoint=current_sp,
-            features=features,
-        )
-    finally:
-        s.close()
-
 
 # Model summary endpoint (reads model paths from environment variables)
 class ModelMetaOut(BaseModel):
