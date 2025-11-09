@@ -63,7 +63,7 @@ class Inferencer:
                     features = self.collector.get_features(ts=now)
                     insert_sample(
                         {"timestamp": now.isoformat(), "features": features},
-                        flabel_setpoint=loat(current_sp),
+                        flabel_setpoint=float(current_sp),
                         user_override=True,
                     )
                     return True
@@ -86,7 +86,7 @@ class Inferencer:
                 features = self.collector.get_features(ts=now)
                 insert_sample(
                     {"timestamp": now.isoformat(), "features": features},
-                    flabel_setpoint=loat(current_sp),
+                    flabel_setpoint=float(current_sp),
                     user_override=True,
                 )
                 return True
