@@ -99,10 +99,10 @@ class Trainer:
             self.partial = SGDRegressor(
                 max_iter=1,
                 tol=None,
-                learning_rate=self.opts.get("partial_learning_rate", "adaptive"),
-                eta0=float(self.opts.get("partial_eta0", 0.005)),
+                learning_rate=self.opts.get("partial_learning_rate", "constant"),
+                eta0=float(self.opts.get("partial_eta0", 0.01))),
                 penalty="l2",
-                alpha=float(self.opts.get("partial_alpha", 0.001)),
+                alpha=float(self.opts.get("partial_alpha", 0.0001)),
                 warm_start=True,
             )
     
