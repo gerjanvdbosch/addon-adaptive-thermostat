@@ -359,61 +359,6 @@ def _load_model_meta_from_path(path: Optional[str]) -> ModelMetaOut:
     return out
 
 
-@app.get("/summary", response_model=ModelSummaryOut)
-def model_summary(x_addon_token: Optional[str] = Header(None)):
-    """
-    Returns a summary of available models and the most recent full-model metric (OOF MAE).
-    """
-    _check_token(x_addon_token)
-
-    full_path = os.getenv("MODEL_PATH_FULL")
-    partial_path = os.getenv("MODEL_PATH_PARTIAL")
-
-    full_meta = _load_model_meta_from_path(full_path)
-    partial_meta = _load_model_meta_from_path(partial_path)
-
-    # prefer DB metric for authoritative OOF MAE if available (full model)
-    s = Session()
-    try:
-        latest_metric = (
-            s.query(Metric)
-            .filter(Metric.model_type == "full")
-            .order_by(Metric.timestamp.desc())
-            .first()
-        )
-        if latest_metric:
-            try:
-                full_meta.mae = (
-                    float(latest_metric.mae)
-                    if latest_metric.mae is not None
-                    else full_meta.mae
-                )
-                full_meta.n_samples = (
-                    int(latest_metric.n_samples)
-                    if latest_metric.n_samples is not None
-                    else full_meta.n_samples
-                )
-                full_meta.trained_at = latest_metric.timestamp
-                full_meta.note = (full_meta.note or "") + " ; metric_record_used"
-            except Exception:
-                pass
-    finally:
-        s.close()
-
-    best = None
-    if full_meta.present and (full_meta.meta or full_meta.mae is not None):
-        best = "full"
-    elif partial_meta.present and (partial_meta.meta or partial_meta.mae is not None):
-        best = "partial"
-
-    return ModelSummaryOut(
-        full=full_meta,
-        partial=partial_meta,
-        best_source=best,
-        retrieved_at=datetime.datetime.utcnow(),
-    )
-
-
 @app.get("/model/partial", response_model=Dict[str, Any])
 def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
     _check_token(x_addon_token)
