@@ -224,17 +224,13 @@ class Inferencer:
                     sid = latest.id
                 else:
                     features = self.collector.get_features(ts=now)
-                    sid = insert_sample(
-                        {"features": features}
-                    )
+                    sid = insert_sample({"features": features})
                     update_sample_prediction(
                         sid, predicted_setpoint=pred, prediction_error=None
                     )
             else:
                 features = self.collector.get_features(ts=now)
-                sid = insert_sample(
-                    {"features": features}
-                )
+                sid = insert_sample({"features": features})
                 update_sample_prediction(
                     sid, predicted_setpoint=pred, prediction_error=None
                 )
