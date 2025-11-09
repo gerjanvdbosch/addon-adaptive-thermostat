@@ -49,8 +49,16 @@ class Inferencer:
             except Exception:
                 return None
 
+        min_sp = float(self.opts.get("min_setpoint", 15.0))
+        max_sp = float(self.opts.get("max_setpoint", 24.0))
+
+        if current_sp < min_sp or current_sp > max_sp:
+            logger.warning("Setpoint outside plausible range: %s", current_sp)
+            return
+
         rounded_current = safe_round(current_sp)
         predicted = getattr(row, "predicted_setpoint", None)
+        
 
         if predicted is not None:
             rounded_pred = safe_round(predicted)
