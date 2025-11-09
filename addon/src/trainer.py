@@ -47,7 +47,7 @@ class Trainer:
     def partial_fit_job(self):
         rows = fetch_training_data(days=self.opts.get("buffer_days", 30))
         # only keep labeled user overrides
-        rows = [r for r in rows if (r.label_setpoint is not None and getattr(r, "user_override", False) == True)]
+        rows = [r for r in rows if (r.label_setpoint is not None and getattr(r, "user_override", False))]
         if not rows:
             logger.info("No training rows available for partial_fit")
             return
@@ -111,7 +111,7 @@ class Trainer:
 
     def full_retrain_job(self):
         rows = fetch_training_data(days=self.opts.get("buffer_days", 30))
-        rows = [r for r in rows if (r.label_setpoint is not None and getattr(r, "user_override", False) == True)]
+        rows = [r for r in rows if (r.label_setpoint is not None and getattr(r, "user_override", False))]
         if not rows:
             logger.info("No training rows available for full retrain")
             return
