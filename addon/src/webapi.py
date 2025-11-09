@@ -3,7 +3,6 @@ import datetime
 import logging
 import joblib
 import threading
-import json
 
 from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Header, Query, Path
