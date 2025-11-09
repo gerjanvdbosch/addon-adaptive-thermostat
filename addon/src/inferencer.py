@@ -58,7 +58,6 @@ class Inferencer:
 
         rounded_current = safe_round(current_sp)
         predicted = getattr(row, "predicted_setpoint", None)
-        
 
         if predicted is not None:
             rounded_pred = safe_round(predicted)
@@ -68,7 +67,7 @@ class Inferencer:
                 else:
                     # temp disable
                     return False
-                    #update_label(row.id, float(current_sp), user_override=True)
+                    # update_label(row.id, float(current_sp), user_override=True)
                     now = datetime.utcnow()
                     features = self.collector.get_features(ts=now)
                     logger.debug(
@@ -96,7 +95,7 @@ class Inferencer:
                 and rounded_current is not None
                 and rounded_sample != rounded_current
             ):
-                #update_label(row.id, float(current_sp), user_override=True)
+                # update_label(row.id, float(current_sp), user_override=True)
                 now = datetime.utcnow()
                 features = self.collector.get_features(ts=now)
                 logger.debug(
@@ -204,7 +203,9 @@ class Inferencer:
 
         logger.debug(
             "Prediction debug raw=%s last_pred=%s last_ts=%s",
-            pred, self.last_pred_value, self.last_pred_ts
+            pred,
+            self.last_pred_value,
+            self.last_pred_ts,
         )
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 24.0))
