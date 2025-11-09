@@ -2,7 +2,7 @@ import os
 import logging
 import joblib
 import numpy as np
-import datetime
+from datetime import datetime
 
 from sklearn.linear_model import SGDRegressor, Ridge
 from sklearn.preprocessing import StandardScaler
@@ -120,11 +120,7 @@ class Trainer:
                     "scaler": self.scaler,
                     "meta": {
                         "feature_order": FEATURE_ORDER,
-                        "trained_at": (
-                            datetime.datetime.datetime.utcnow().isoformat()
-                            if hasattr(datetime, "datetime")
-                            else datetime.datetime.utcnow().isoformat()
-                        ),
+                        "trained_at": (datetime.utcnow().isoformat()),
                     },
                 },
                 self.opts.get("model_path_partial"),
@@ -212,7 +208,7 @@ class Trainer:
             "feature_order": FEATURE_ORDER,
             "best_params": getattr(gs, "best_params_", None),
             "trained_at": (
-                datetime.datetime.datetime.utcnow().isoformat()
+                datetime.utcnow().isoformat()
                 if hasattr(datetime, "datetime")
                 else datetime.datetime.utcnow().isoformat()
             ),
