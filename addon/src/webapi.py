@@ -1,8 +1,7 @@
 import os
 import datetime
 import logging
-from typing import List, Optional
-
+from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Header, Query, Path
 from pydantic import BaseModel, Field
 import joblib
@@ -413,3 +412,181 @@ def model_summary(x_addon_token: Optional[str] = Header(None)):
         best_source=best,
         retrieved_at=datetime.datetime.utcnow(),
     )
+
+
+@app.get("/model/partial", response_model=Dict[str, Any])
+def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
+    _check_token(x_addon_token)
+    path = os.getenv("MODEL_PATH_PARTIAL")
+    out: Dict[str, Any] = {
+        "file_path": path,
+        "present": False,
+        "loaded": False,
+        "meta": None,
+        "model_type": None,
+        "has_scaler": False,
+        "estimator_summary": None,
+        "note": None,
+    }
+    if not path:
+        out["note"] = "MODEL_PATH_PARTIAL not configured"
+        return out
+    if not os.path.exists(path):
+        out["note"] = "file not found"
+        return out
+    try:
+        obj = joblib.load(path)
+        out["present"] = True
+
+        if isinstance(obj, dict):
+            meta = obj.get("meta", {})
+            model = obj.get("model")
+            scaler = obj.get("scaler")
+            out["meta"] = meta or {}
+            out["has_scaler"] = scaler is not None
+        else:
+            model = obj
+            out["meta"] = {}
+            out["has_scaler"] = False
+
+        out["model_type"] = type(model).__name__ if model is not None else None
+
+        est_info = {}
+        try:
+            if hasattr(model, "named_steps"):
+                est_info["is_pipeline"] = True
+                steps = list(model.named_steps.keys())
+                est_info["pipeline_steps"] = steps
+                final = model.named_steps.get(steps[-1]) if steps else None
+                final_model = final
+            else:
+                est_info["is_pipeline"] = False
+                final_model = model
+
+            if final_model is not None:
+                if hasattr(final_model, "coef_"):
+                    coef = getattr(final_model, "coef_", None)
+                    try:
+                        est_info["coef_shape"] = getattr(coef, "shape", None)
+                        est_info["coef_sample"] = coef.tolist() if getattr(coef, "size", 0) <= 20 else f"array(len={getattr(coef,'size',0)})"
+                    except Exception:
+                        est_info["coef_sample"] = "unserializable"
+                if hasattr(final_model, "intercept_"):
+                    try:
+                        est_info["intercept"] = float(getattr(final_model, "intercept_"))
+                    except Exception:
+                        est_info["intercept"] = str(getattr(final_model, "intercept_"))
+                for attr in ("alpha", "eta0", "learning_rate", "max_iter"):
+                    if hasattr(final_model, attr):
+                        est_info[attr] = getattr(final_model, attr)
+                if isinstance(obj, dict) and obj.get("scaler") is not None:
+                    sc = obj.get("scaler")
+                    try:
+                        est_info["scaler_mean_shape"] = getattr(sc, "mean_").shape
+                    except Exception:
+                        pass
+            out["estimator_summary"] = est_info
+        except Exception as e:
+            out["estimator_summary"] = {"error": str(e)}
+
+        out["loaded"] = True
+        out["note"] = "loaded"
+        return out
+    except Exception as e:
+        logger.exception("Failed loading partial model %s: %s", path, e)
+        out["loaded"] = False
+        out["note"] = f"failed to load: {e}"
+        return out
+
+
+@app.get("/model/full", response_model=Dict[str, Any])
+def debug_full_model(x_addon_token: Optional[str] = Header(None)):
+    _check_token(x_addon_token)
+    path = os.getenv("MODEL_PATH_FULL")
+    out: Dict[str, Any] = {
+        "file_path": path,
+        "present": False,
+        "loaded": False,
+        "meta": None,
+        "model_type": None,
+        "is_pipeline": False,
+        "has_scaler": False,
+        "estimator_summary": None,
+        "note": None,
+    }
+    if not path:
+        out["note"] = "MODEL_PATH_FULL not configured"
+        return out
+    if not os.path.exists(path):
+        out["note"] = "file not found"
+        return out
+    try:
+        obj = joblib.load(path)
+        out["present"] = True
+
+        if isinstance(obj, dict):
+            meta = obj.get("meta", {})
+            model = obj.get("model")
+            scaler = obj.get("scaler")
+            out["meta"] = meta or {}
+            out["has_scaler"] = scaler is not None
+        else:
+            model = obj
+            out["meta"] = {}
+            out["has_scaler"] = False
+
+        out["model_type"] = type(model).__name__ if model is not None else None
+
+        est_info = {}
+        try:
+            if hasattr(model, "named_steps"):
+                est_info["is_pipeline"] = True
+                steps = list(model.named_steps.keys())
+                est_info["pipeline_steps"] = steps
+                final = model.named_steps.get(steps[-1]) if steps else None
+                final_model = final
+                if "scaler" in steps:
+                    out["has_scaler"] = True
+            else:
+                est_info["is_pipeline"] = False
+                final_model = model
+
+            if final_model is not None:
+                if hasattr(final_model, "coef_"):
+                    try:
+                        coef = getattr(final_model, "coef_")
+                        est_info["coef_shape"] = getattr(coef, "shape", None)
+                        est_info["coef_sample"] = coef.tolist() if getattr(coef, "size", 0) <= 20 else f"array(len={getattr(coef,'size',0)})"
+                    except Exception:
+                        est_info["coef_sample"] = "unserializable"
+                if hasattr(final_model, "intercept_"):
+                    try:
+                        intercept = getattr(final_model, "intercept_")
+                        est_info["intercept"] = float(intercept) if hasattr(intercept, "__float__") else str(intercept)
+                    except Exception:
+                        pass
+                for attr in ("alpha", "fit_intercept", "normalize"):
+                    if hasattr(final_model, attr):
+                        try:
+                            est_info[attr] = getattr(final_model, attr)
+                        except Exception:
+                            pass
+                if isinstance(obj, dict) and obj.get("scaler") is not None:
+                    sc = obj.get("scaler")
+                    try:
+                        est_info["scaler_mean_shape"] = getattr(sc, "mean_").shape
+                    except Exception:
+                        pass
+
+            out["estimator_summary"] = est_info
+        except Exception as e:
+            out["estimator_summary"] = {"error": str(e)}
+
+        out["loaded"] = True
+        out["note"] = "loaded"
+        return out
+    except Exception as e:
+        logger.exception("Failed loading full model %s: %s", path, e)
+        out["loaded"] = False
+        out["note"] = f"failed to load: {e}"
+        return out
