@@ -382,7 +382,6 @@ def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
         "model_type": None,
         "has_scaler": False,
         "estimator_summary": None,
-        "n_samples": None,
         "note": None,
     }
     if not path:
@@ -405,12 +404,6 @@ def debug_partial_model(x_addon_token: Optional[str] = Header(None)):
             model = obj
             out["meta"] = {}
             out["has_scaler"] = False
-
-        # expose n_samples from meta if present
-        try:
-            out["n_samples"] = int(out["meta"].get("n_samples")) if out["meta"].get("n_samples") is not None else None
-        except Exception:
-            out["n_samples"] = None
 
         out["model_type"] = type(model).__name__ if model is not None else None
 
@@ -475,7 +468,6 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
         "is_pipeline": False,
         "has_scaler": False,
         "estimator_summary": None,
-        "n_samples": None,
         "note": None,
     }
     if not path:
@@ -498,12 +490,6 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
             model = obj
             out["meta"] = {}
             out["has_scaler"] = False
-
-        # expose n_samples from meta if present
-        try:
-            out["n_samples"] = int(out["meta"].get("n_samples")) if out["meta"].get("n_samples") is not None else None
-        except Exception:
-            out["n_samples"] = None
 
         out["model_type"] = type(model).__name__ if model is not None else None
 
