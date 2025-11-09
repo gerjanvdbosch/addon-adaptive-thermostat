@@ -207,11 +207,7 @@ class Trainer:
         metadata = {
             "feature_order": FEATURE_ORDER,
             "best_params": getattr(gs, "best_params_", None),
-            "trained_at": (
-                datetime.utcnow().isoformat()
-                if hasattr(datetime, "datetime")
-                else datetime.datetime.utcnow().isoformat()
-            ),
+            "trained_at": (datetime.utcnow().isoformat()),
             "mae": mae,
         }
 
