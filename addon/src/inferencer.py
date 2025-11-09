@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, List
 
-from db import fetch_unlabeled, update_label, update_sample_prediction, insert_sample
+from db import fetch_unlabeled, update_sample_prediction, insert_sample
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
 
