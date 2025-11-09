@@ -17,8 +17,12 @@ class Inferencer:
         self.ha = ha_client
         self.collector = collector
         self.opts = opts or {}
-        if not self.opts.get("model_path_full") or not self.opts.get("model_path_partial"):
-            raise RuntimeError("model_path_full and model_path_partial must be provided in opts.")
+        if not self.opts.get("model_path_full") or not self.opts.get(
+            "model_path_partial"
+        ):
+            raise RuntimeError(
+                "model_path_full and model_path_partial must be provided in opts."
+            )
         self.model_obj = None
         self.last_pred_ts: Optional[datetime.datetime.datetime] = None
         self.last_pred_value: Optional[float] = None
@@ -32,7 +36,11 @@ class Inferencer:
 
         interval = int(self.opts.get("sample_interval_seconds", 300))
         sample_ts = getattr(row, "timestamp", None)
-        age = (datetime.datetime.datetime.utcnow() - sample_ts).total_seconds() if sample_ts else None
+        age = (
+            (datetime.datetime.datetime.utcnow() - sample_ts).total_seconds()
+            if sample_ts
+            else None
+        )
 
         try:
             current_sp, _ = self.ha.get_setpoint()
@@ -65,7 +73,11 @@ class Inferencer:
 
         rounded_sample = safe_round(sample_sp)
         if age is not None and age <= interval * 1.5:
-            if rounded_sample is not None and rounded_current is not None and rounded_sample != rounded_current:
+            if (
+                rounded_sample is not None
+                and rounded_current is not None
+                and rounded_sample != rounded_current
+            ):
                 update_label(row.id, float(current_sp), user_override=True)
                 return True
             return False
@@ -80,7 +92,9 @@ class Inferencer:
                 self.model_obj = joblib.load(full_path)
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
-                    logger.warning("Full model feature_order mismatch; ignoring full model")
+                    logger.warning(
+                        "Full model feature_order mismatch; ignoring full model"
+                    )
                     self.model_obj = None
                 else:
                     logger.info("Loaded full model from %s", full_path)
@@ -89,12 +103,16 @@ class Inferencer:
                 self.model_obj = joblib.load(partial_path)
                 meta = self.model_obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
-                    logger.warning("Partial model feature_order mismatch; ignoring partial model")
+                    logger.warning(
+                        "Partial model feature_order mismatch; ignoring partial model"
+                    )
                     self.model_obj = None
                 else:
                     logger.info("Loaded partial model from %s", partial_path)
                     return
-            logger.info("No compatible model loaded; inference will be skipped until a model is available")
+            logger.info(
+                "No compatible model loaded; inference will be skipped until a model is available"
+            )
             self.model_obj = None
         except Exception:
             logger.exception("Error loading model")
@@ -105,7 +123,11 @@ class Inferencer:
         if not unl:
             return None, None
         last = unl[0]
-        feat = last.data.get("features") if last.data and isinstance(last.data, dict) else None
+        feat = (
+            last.data.get("features")
+            if last.data and isinstance(last.data, dict)
+            else None
+        )
         if not feat:
             return None, None
         # ensure all keys present
@@ -163,7 +185,11 @@ class Inferencer:
         pred = max(min(pred, max_sp), min_sp)
 
         if abs(pred - current_sp) < threshold:
-            logger.info("Predicted change below threshold (%.2f < %.2f)", abs(pred - current_sp), threshold)
+            logger.info(
+                "Predicted change below threshold (%.2f < %.2f)",
+                abs(pred - current_sp),
+                threshold,
+            )
             return
 
         now = datetime.datetime.datetime.utcnow()
@@ -182,16 +208,26 @@ class Inferencer:
                 sample_ts = getattr(latest, "timestamp", None)
                 age = (now - sample_ts).total_seconds() if sample_ts else float("inf")
                 if age <= age_thresh:
-                    update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
+                    update_sample_prediction(
+                        latest.id, predicted_setpoint=pred, prediction_error=None
+                    )
                     sid = latest.id
                 else:
                     features = self.collector.get_features(ts=now)
-                    sid = insert_sample({"timestamp": now.isoformat(), "features": features})
-                    update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
+                    sid = insert_sample(
+                        {"timestamp": now.isoformat(), "features": features}
+                    )
+                    update_sample_prediction(
+                        sid, predicted_setpoint=pred, prediction_error=None
+                    )
             else:
                 features = self.collector.get_features(ts=now)
-                sid = insert_sample({"timestamp": now.isoformat(), "features": features})
-                update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
+                sid = insert_sample(
+                    {"timestamp": now.isoformat(), "features": features}
+                )
+                update_sample_prediction(
+                    sid, predicted_setpoint=pred, prediction_error=None
+                )
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
 
