@@ -86,22 +86,22 @@ class Collector:
                 time.sleep(0.01)
                 continue
             val = st.get("state")
-            attrs = st.get("attributes", {})
-            numeric = (
-                attrs.get("value")
-                if isinstance(attrs.get("value"), (int, float))
-                else None
-            )
-            parsed = None
-            try:
-                parsed = float(val)
-            except Exception:
-                if numeric is not None:
-                    try:
-                        parsed = float(numeric)
-                    except Exception:
-                        parsed = None
-            data[feature_key] = parsed
+            # attrs = st.get("attributes", {})
+            # numeric = (
+            #     attrs.get("value")
+            #     if isinstance(attrs.get("value"), (int, float))
+            #     else None
+            # )
+            # parsed = None
+            # try:
+            #     parsed = float(val)
+            # except Exception:
+            #     if numeric is not None:
+            #         try:
+            #             parsed = float(numeric)
+            #         except Exception:
+            #             parsed = None
+            data[feature_key] = val
             time.sleep(0.01)
         return data
 
