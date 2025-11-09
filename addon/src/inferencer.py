@@ -58,8 +58,8 @@ class Inferencer:
 
         rounded_current = safe_round(current_sp)
         predicted = getattr(row, "predicted_setpoint", None)
-
-        if predicted is not None:
+        
+        if predicted is not None:    
             rounded_pred = safe_round(predicted)
             if rounded_current is not None and rounded_pred is not None:
                 if rounded_current == rounded_pred:
@@ -91,7 +91,8 @@ class Inferencer:
         rounded_sample = safe_round(sample_sp)
         if age is not None and age <= interval:
             if (
-                rounded_sample is not None
+                predicted is None
+                and rounded_sample is not None
                 and rounded_current is not None
                 and rounded_sample != rounded_current
             ):
