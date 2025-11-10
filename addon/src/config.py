@@ -13,7 +13,9 @@ def load_options() -> Dict[str, Any]:
         "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.woonkamer"),
         "shadow_mode": bool(os.getenv("SHADOW_MODE")),
         "shadow_setpoint": os.getenv("SHADOW_SETPOINT"),
-        "inferencer_interval_seconds": int(os.getenv("INFERENCER_INTERVAL_SECONDS", 60)),
+        "inferencer_interval_seconds": int(
+            os.getenv("INFERENCER_INTERVAL_SECONDS", 60)
+        ),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
         "partial_fit_interval_seconds": int(
             os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)
