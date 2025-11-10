@@ -298,7 +298,11 @@ class Trainer:
                 oof_preds = np.zeros(n_labeled, dtype=float)
                 tss_oof = TimeSeriesSplit(n_splits=n_splits)
                 for train_idx, test_idx in tss_oof.split(X[:n_labeled]):
-                    clone = gs.best_estimator_ if (gs is not None and hasattr(gs, "best_estimator_")) else best
+                    clone = (
+                        gs.best_estimator_
+                        if (gs is not None and hasattr(gs, "best_estimator_"))
+                        else best
+                    )
                     try:
                         clone.fit(
                             X[train_idx],
@@ -325,7 +329,9 @@ class Trainer:
 
         metadata = {
             "feature_order": FEATURE_ORDER,
-            "best_params": (getattr(gs, "best_params_", None) if gs is not None else None),
+            "best_params": (
+                getattr(gs, "best_params_", None) if gs is not None else None
+            ),
             "trained_at": (datetime.utcnow().isoformat()),
             "mae": mae,
             "n_samples": n_labeled,
