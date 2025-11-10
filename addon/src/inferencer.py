@@ -51,7 +51,7 @@ class Inferencer:
             return False
     
         if sample_rounded is not None and sample_rounded != current_rounded:
-            features = self.collector.get_features()
+            features = self.collector.get_features(ts=datetime.utcnow())
             insert_sample(
                 {"features": features},
                 label_setpoint=current_sp,
