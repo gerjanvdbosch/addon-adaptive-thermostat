@@ -250,20 +250,25 @@ class Trainer:
         X = np.array(X, dtype=float)
         y = np.array(y, dtype=float)
 
+        # Correct: n_labeled is the number of labeled rows actually used (used_rows)
+        n_labeled = len(used_rows)
+        n_total = len(y)
+
         # Prepare sample weights: labeled rows get weight_label, pseudo rows get weight_pseudo
-        n_labeled = len(labeled_rows)
-        sample_weight = np.ones(len(y), dtype=float) * weight_label
-        if pseudo_X:
-            n_total = len(y)
+        sample_weight = np.ones(n_total, dtype=float) * weight_label
+        if n_total > n_labeled:
             sample_weight[n_labeled:n_total] = weight_pseudo
 
         pipe = Pipeline([("scaler", StandardScaler()), ("model", Ridge())])
         param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0, 100.0]}
 
         # Determine sensible n_splits for TimeSeriesSplit (based on labeled count)
-        n_splits = min(3, max(2, n_labeled // 10))
-        if n_splits >= max(2, n_labeled):
+        if n_labeled < 10:
             n_splits = None
+        else:
+            n_splits = min(3, max(2, n_labeled // 10))
+            if n_splits >= n_labeled:
+                n_splits = None
 
         if n_splits:
             tss = TimeSeriesSplit(n_splits=n_splits)
@@ -295,18 +300,22 @@ class Trainer:
 
         # OOF MAE estimate: evaluate only on labeled samples
         try:
-            if n_splits:
+            if n_labeled == 0:
+                mae = None
+            elif n_splits:
                 oof_preds = np.zeros(n_labeled, dtype=float)
                 tss_oof = TimeSeriesSplit(n_splits=n_splits)
                 for train_idx, test_idx in tss_oof.split(X[:n_labeled]):
-                    clone = (
-                        gs.best_estimator_ if hasattr(gs, "best_estimator_") else best
-                    )
-                    clone.fit(
-                        X[train_idx],
-                        y[train_idx],
-                        model__sample_weight=sample_weight[train_idx],
-                    )
+                    clone = gs.best_estimator_ if (gs is not None and hasattr(gs, "best_estimator_")) else best
+                    try:
+                        clone.fit(
+                            X[train_idx],
+                            y[train_idx],
+                            model__sample_weight=sample_weight[train_idx],
+                        )
+                    except TypeError:
+                        # fallback if clone.fit doesn't accept pipeline-style kwargs
+                        clone.fit(X[train_idx], y[train_idx])
                     oof_preds[test_idx] = clone.predict(X[test_idx])
                 mae = float(mean_absolute_error(y[:n_labeled], oof_preds[:n_labeled]))
             else:
@@ -314,16 +323,17 @@ class Trainer:
                 mae = float(mean_absolute_error(y[:n_labeled], preds_all))
         except Exception:
             try:
-                preds_all = best.predict(X[:n_labeled])
-                mae = float(mean_absolute_error(y[:n_labeled], preds_all))
+                if n_labeled == 0:
+                    mae = None
+                else:
+                    preds_all = best.predict(X[:n_labeled])
+                    mae = float(mean_absolute_error(y[:n_labeled], preds_all))
             except Exception:
                 mae = None
 
         metadata = {
             "feature_order": FEATURE_ORDER,
-            "best_params": (
-                getattr(gs, "best_params_", None) if gs is not None else None
-            ),
+            "best_params": (getattr(gs, "best_params_", None) if gs is not None else None),
             "trained_at": (datetime.utcnow().isoformat()),
             "mae": mae,
             "n_samples": n_labeled,
@@ -354,18 +364,19 @@ class Trainer:
 
         # update per-sample predictions for the labeled rows
         try:
-            preds_labeled = best.predict(X[:n_labeled])
-            for i, row in enumerate(used_rows):
-                try:
-                    pred = float(preds_labeled[i])
-                    err = abs(pred - float(y[i])) if y is not None else None
-                    update_sample_prediction(
-                        row.id, predicted_setpoint=pred, prediction_error=err
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed updating sample prediction for sample %s",
-                        getattr(row, "id", None),
-                    )
+            if n_labeled > 0:
+                preds_labeled = best.predict(X[:n_labeled])
+                for i, row in enumerate(used_rows):
+                    try:
+                        pred = float(preds_labeled[i])
+                        err = abs(pred - float(y[i])) if y is not None else None
+                        update_sample_prediction(
+                            row.id, predicted_setpoint=pred, prediction_error=err
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed updating sample prediction for sample %s",
+                            getattr(row, "id", None),
+                        )
         except Exception:
             logger.exception("Failed to compute/update per-sample predictions")
