@@ -13,7 +13,7 @@ def safe_float(x):
     except Exception:
         return None
 
-        
+
 def safe_round(v):
     try:
         return round(float(v), 1)
