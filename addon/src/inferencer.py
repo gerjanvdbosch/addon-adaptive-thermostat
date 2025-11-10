@@ -8,6 +8,7 @@ from typing import Optional, Tuple, List
 from db import fetch_unlabeled, update_sample_prediction, insert_sample
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
+from utils import safe_round
 
 logger = logging.getLogger(__name__)
 
@@ -27,92 +28,44 @@ class Inferencer:
         self.last_pred_ts: Optional[datetime] = None
         self.last_pred_value: Optional[float] = None
         self.load_model()
-
+    
     def check_and_label_user_override(self) -> bool:
         rows = fetch_unlabeled(limit=1)
         if not rows:
             return False
         row = rows[0]
-
-        interval = int(self.opts.get("sample_interval_seconds", 300))
-        sample_ts = getattr(row, "timestamp", None)
-        age = (datetime.utcnow() - sample_ts).total_seconds() if sample_ts else None
-
-        try:
-            current_sp, _ = self.ha.get_setpoint()
-        except Exception:
-            return False
-
-        def safe_round(v):
-            try:
-                return round(float(v), 1)
-            except Exception:
-                return None
-
+    
+        current_sp, _ = self.ha.get_setpoint()
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 24.0))
-
         if current_sp < min_sp or current_sp > max_sp:
             logger.warning("Setpoint outside plausible range: %s", current_sp)
-            return
-
-        rounded_current = safe_round(current_sp)
-        predicted = getattr(row, "predicted_setpoint", None)
-        
-        if predicted is not None:    
-            rounded_pred = safe_round(predicted)
-            if rounded_current is not None and rounded_pred is not None:
-                if rounded_current == rounded_pred:
-                    return False
-                else:
-                    # temp disable
-                    return False
-                    # update_label(row.id, float(current_sp), user_override=True)
-                    now = datetime.utcnow()
-                    features = self.collector.get_features(ts=now)
-                    logger.debug(
-                        "Labeling sample as user_override because sample (%.1f) != current (%.1f); inserting labeled sample",
-                        rounded_pred,
-                        rounded_current,
-                    )
-                    insert_sample(
-                        {"features": features},
-                        label_setpoint=float(current_sp),
-                        user_override=True,
-                    )
-                    return True
-
-        sample_sp = None
-        if row.data and isinstance(row.data, dict):
-            feat = row.data.get("features")
-            if isinstance(feat, dict):
-                sample_sp = feat.get("current_setpoint")
-
-        rounded_sample = safe_round(sample_sp)
-        if age is not None and age <= interval:
-            if (
-                predicted is None
-                and rounded_sample is not None
-                and rounded_current is not None
-                and rounded_sample != rounded_current
-            ):
-                # update_label(row.id, float(current_sp), user_override=True)
-                now = datetime.utcnow()
-                features = self.collector.get_features(ts=now)
-                logger.debug(
-                    "Labeling sample as user_override because sample (%.1f) != current (%.1f); inserting labeled sample",
-                    rounded_sample,
-                    rounded_current,
-                )
-                insert_sample(
-                    {"features": features},
-                    label_setpoint=float(current_sp),
-                    user_override=True,
-                )
-                return True
             return False
-
+            
+        current_rounded = round(current_sp, 1)
+        predicted = getattr(row, "predicted_setpoint", None)
+        sample_sp = row.data.get("features", {}).get("current_setpoint") if row.data else None
+        sample_rounded = round(sample_sp, 1) if sample_sp is not None else None
+    
+        if predicted is not None and sample_rounded == round(predicted, 1):
+            return False
+    
+        if sample_rounded is not None and sample_rounded != current_rounded:
+            features = self.collector.get_features()
+            insert_sample(
+                {"features": features},
+                label_setpoint=current_sp,
+                user_override=True
+            )
+            logger.debug(
+                "Labeled sample as user_override: sample %.1f != current %.1f",
+                sample_rounded,
+                current_rounded,
+            )
+            return True
+    
         return False
+
 
     def load_model(self):
         try:
@@ -223,7 +176,6 @@ class Inferencer:
 
         pred = max(min(pred, max_sp), min_sp)
         now = datetime.utcnow()
-        age_thresh = float(self.opts.get("sample_interval_seconds", 300))
 
         if self.last_pred_value is not None and self.last_pred_ts:
             if abs(self.last_pred_value - pred) < threshold:
@@ -237,23 +189,24 @@ class Inferencer:
                 latest = unl[0]
                 sample_ts = getattr(latest, "timestamp", None)
                 age = (now - sample_ts).total_seconds() if sample_ts else float("inf")
+                age_thresh = float(self.opts.get("sample_interval_seconds", 300))
                 if age <= age_thresh:
-                    update_sample_prediction(
-                        latest.id, predicted_setpoint=pred, prediction_error=None
-                    )
-                    sid = latest.id
+                    #update_sample_prediction(
+                    #    latest.id, predicted_setpoint=pred, prediction_error=None
+                    #)
+                    #sid = latest.id
                 else:
-                    features = self.collector.get_features(ts=now)
-                    sid = insert_sample({"features": features})
-                    update_sample_prediction(
-                        sid, predicted_setpoint=pred, prediction_error=None
-                    )
+                    #features = self.collector.get_features(ts=now)
+                    #sid = insert_sample({"features": features})
+                    #update_sample_prediction(
+                    #    sid, predicted_setpoint=pred, prediction_error=None
+                    #)
             else:
-                features = self.collector.get_features(ts=now)
-                sid = insert_sample({"features": features})
-                update_sample_prediction(
-                    sid, predicted_setpoint=pred, prediction_error=None
-                )
+                #features = self.collector.get_features(ts=now)
+                #sid = insert_sample({"features": features})
+                #update_sample_prediction(
+                #    sid, predicted_setpoint=pred, prediction_error=None
+                #)
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
 
