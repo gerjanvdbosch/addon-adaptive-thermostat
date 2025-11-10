@@ -1,3 +1,0 @@
-scikit-learn-stubs==0.0.3
-types-requests==2.32.4.20250913
-sqlalchemy-stubs==0.4
