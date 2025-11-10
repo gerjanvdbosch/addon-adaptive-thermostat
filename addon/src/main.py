@@ -54,7 +54,12 @@ def main():
     scheduler.add_job(
         trainer.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
     )
-    scheduler.add_job(inferencer.inference_job, "interval", seconds=60, id="inference")
+    scheduler.add_job(
+        inferencer.inference_job, 
+        "interval", 
+        seconds=opts["inferencer_interval_seconds"], 
+        id="inference"
+    )
 
     scheduler.start()
     logger.info("Adaptive Thermostat add-on started")
