@@ -204,11 +204,11 @@ class Inferencer:
                 else:
                     features = self.collector.get_features(ts=now)
                     sid = insert_sample({"features": features})
-                    update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
+                    update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
             else:
                 features = self.collector.get_features(ts=now)
                 sid = insert_sample({"features": features})
-                update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
+                update_sample_prediction(sid, predicted_setpoint=pred, prediction_error=None)
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
             
