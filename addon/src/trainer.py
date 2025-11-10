@@ -99,10 +99,11 @@ class Trainer:
             self.partial = SGDRegressor(
                 max_iter=1,
                 tol=None,
-                learning_rate=self.opts.get("partial_learning_rate", "constant"),
-                eta0=float(self.opts.get("partial_eta0", 0.01)),
+                learning_rate="invscaling",
+                eta0=0.002,
+                alpha=0.001,
+                power_t=0.25,
                 penalty="l2",
-                alpha=float(self.opts.get("partial_alpha", 0.0001)),
                 warm_start=True,
             )
 
@@ -135,7 +136,7 @@ class Trainer:
         use_unlabeled = bool(self.opts.get("use_unlabeled", True))
         pseudo_limit = int(self.opts.get("pseudo_limit", 1000))
         weight_label = float(self.opts.get("weight_label", 1.0))
-        weight_pseudo = float(self.opts.get("weight_pseudo", 0.25))
+        weight_pseudo = float(self.opts.get("weight_pseudo", 0.1))
 
         rows = fetch_training_data(days=self.opts.get("buffer_days", 30))
 
@@ -260,7 +261,7 @@ class Trainer:
             sample_weight[n_labeled:n_total] = weight_pseudo
 
         pipe = Pipeline([("scaler", StandardScaler()), ("model", Ridge())])
-        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0, 100.0]}
+        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0]}
 
         # Determine sensible n_splits for TimeSeriesSplit (based on labeled count)
         if n_labeled < 10:
