@@ -191,22 +191,16 @@ class Inferencer:
                 age = (now - sample_ts).total_seconds() if sample_ts else float("inf")
                 age_thresh = float(self.opts.get("sample_interval_seconds", 300))
                 if age <= age_thresh:
-                    #update_sample_prediction(
-                    #    latest.id, predicted_setpoint=pred, prediction_error=None
-                    #)
-                    #sid = latest.id
+                    #update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
+                    sid = latest.id
                 else:
-                    #features = self.collector.get_features(ts=now)
-                    #sid = insert_sample({"features": features})
-                    #update_sample_prediction(
-                    #    sid, predicted_setpoint=pred, prediction_error=None
-                    #)
+                    features = self.collector.get_features(ts=now)
+                    sid = insert_sample({"features": features})
+                    #update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
             else:
-                #features = self.collector.get_features(ts=now)
-                #sid = insert_sample({"features": features})
-                #update_sample_prediction(
-                #    sid, predicted_setpoint=pred, prediction_error=None
-                #)
+                features = self.collector.get_features(ts=now)
+                sid = insert_sample({"features": features})
+                #update_sample_prediction(latest.id, predicted_setpoint=pred, prediction_error=None)
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
 
