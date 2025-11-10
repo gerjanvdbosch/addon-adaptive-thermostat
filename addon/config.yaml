@@ -14,16 +14,14 @@ options:
   shadow_mode: false
   shadow_setpoint: input_number.adaptive_thermostat_setpoint
   climate_entity: climate.danfoss_icon_woonkamer
-  sample_interval_seconds: 300
-  partial_fit_interval_seconds: 3600
+  inferencer_interval_seconds: 900
+  sample_interval_seconds: 900
+  partial_fit_interval_seconds: 21600
   full_retrain_time: "03:00"
   min_setpoint: 15.0
   max_setpoint: 25.0
-  min_change_threshold: 0.3
+  min_change_threshold: 0.4
   buffer_days: 30
-  partial_learning_rate: constant
-  partial_eta0: 0.01
-  partial_alpha: 0.0001
   use_unlabeled: true
   pseudo_limit: 1000
   weight_label: 1.0
@@ -51,6 +49,7 @@ schema:
   shadow_mode: "bool?"
   shadow_setpoint: "str?"
   climate_entity: "str?"
+  inferencer_interval_seconds: "int?"
   sample_interval_seconds: "int?"
   partial_fit_interval_seconds: "int?"
   full_retrain_time: "str?"
@@ -58,9 +57,6 @@ schema:
   max_setpoint: "float?"
   min_change_threshold: "float?"
   buffer_days: "int?"
-  partial_learning_rate: list(adaptive|constant|invscaling)?
-  partial_eta0: "float?"
-  partial_alpha: "float?"
   use_unlabeled: "bool?"
   pseudo_limit: "int?"
   weight_label: "float?"
