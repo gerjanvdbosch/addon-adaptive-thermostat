@@ -23,6 +23,7 @@ fi
 
 export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
 export SHADOW_SETPOINT="$(bashio::config 'shadow_setpoint')"
+export INFERENCER_INTERVAL_SECONDS="$(bashio::config 'inferencer_interval_seconds')"
 export SAMPLE_INTERVAL_SECONDS="$(bashio::config 'sample_interval_seconds')"
 export PARTIAL_FIT_INTERVAL_SECONDS="$(bashio::config 'partial_fit_interval_seconds')"
 export FULL_RETRAIN_TIME="$(bashio::config 'full_retrain_time')"
