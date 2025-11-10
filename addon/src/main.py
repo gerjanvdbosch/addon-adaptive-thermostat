@@ -55,10 +55,10 @@ def main():
         trainer.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
     )
     scheduler.add_job(
-        inferencer.inference_job, 
-        "interval", 
-        seconds=opts["inferencer_interval_seconds"], 
-        id="inference"
+        inferencer.inference_job,
+        "interval",
+        seconds=opts["inferencer_interval_seconds"],
+        id="inference",
     )
 
     scheduler.start()
