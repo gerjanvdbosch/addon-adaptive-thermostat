@@ -202,8 +202,8 @@ class Inferencer:
             logger.exception("Inference failed")
             return
 
-        logger.debug(
-            "Prediction debug raw=%s last_pred=%s last_ts=%s",
+        logger.info(
+            "Prediction raw=%s last_pred=%s last_ts=%s",
             pred,
             self.last_pred_value,
             self.last_pred_ts,
@@ -222,15 +222,6 @@ class Inferencer:
             return
 
         pred = max(min(pred, max_sp), min_sp)
-
-        if abs(pred - current_sp) < threshold:
-            logger.info(
-                "Predicted change below threshold (%.2f < %.2f)",
-                abs(pred - current_sp),
-                threshold,
-            )
-            return
-
         now = datetime.utcnow()
         age_thresh = float(self.opts.get("sample_interval_seconds", 300))
 
@@ -266,6 +257,14 @@ class Inferencer:
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
 
+        if abs(pred - current_sp) < threshold:
+            logger.info(
+                "Predicted change below threshold (%.2f < %.2f)",
+                abs(pred - current_sp),
+                threshold,
+            )
+            return
+            
         # apply setpoint
         try:
             self.ha.set_setpoint(pred)
