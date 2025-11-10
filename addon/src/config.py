@@ -22,6 +22,7 @@ def load_options() -> Dict[str, Any]:
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
         "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),
         "min_change_threshold": float(os.getenv("MIN_CHANGE_THRESHOLD", 0.3)),
+        "stable_seconds": int(os.getenv("STABLE_SECONDS", 60)),
         "buffer_days": int(os.getenv("BUFFER_DAYS", 30)),
         "webapi_host": os.getenv("WEBAPI_HOST", "0.0.0.0"),
         "webapi_port": int(os.getenv("WEBAPI_PORT", 8000)),
