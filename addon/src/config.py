@@ -4,7 +4,6 @@ from typing import Dict, Any
 
 
 def load_options() -> Dict[str, Any]:
-    # Support passing sensors mapping as JSON string in SENSORS env var or via mapped config (opts injected by Supervisor)
     try:
         sensors = json.loads(os.getenv("SENSORS", None))
     except Exception:
@@ -14,6 +13,7 @@ def load_options() -> Dict[str, Any]:
         "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.woonkamer"),
         "shadow_mode": bool(os.getenv("SHADOW_MODE")),
         "shadow_setpoint": os.getenv("SHADOW_SETPOINT"),
+        "inferencer_interval_seconds": int(os.getenv("INFERENCER_INTERVAL_SECONDS", 60)),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
         "partial_fit_interval_seconds": int(
             os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)
@@ -23,10 +23,6 @@ def load_options() -> Dict[str, Any]:
         "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),
         "min_change_threshold": float(os.getenv("MIN_CHANGE_THRESHOLD", 0.3)),
         "buffer_days": int(os.getenv("BUFFER_DAYS", 30)),
-        "partial_learning_rate": os.getenv("PARTIAL_LEARNING_RATE", "constant"),
-        "partial_eta0": float(os.getenv("PARTIAL_ETA0", 0.01)),
-        "partial_alpha": float(os.getenv("PARTIAL_ALPHA", 0.0001)),
-        "addon_api_token": os.getenv("ADDON_API_TOKEN", None),
         "webapi_host": os.getenv("WEBAPI_HOST", "0.0.0.0"),
         "webapi_port": int(os.getenv("WEBAPI_PORT", os.getenv("WEBAPI_PORT", 8000))),
         "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
