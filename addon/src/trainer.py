@@ -174,7 +174,6 @@ class Trainer:
                 )
 
         # Collect pseudo-labeled samples from unlabeled rows using current_setpoint only.
-        # Never use predicted_setpoint as a target for training.
         pseudo_X = []
         pseudo_y = []
         pseudo_count = 0
@@ -186,14 +185,6 @@ class Trainer:
                 for r in unlabeled_rows:
                     # Skip rows that already have an explicit label
                     if getattr(r, "label_setpoint", None) is not None:
-                        continue
-
-                    # Never use predicted_setpoint as training target
-                    if getattr(r, "predicted_setpoint", None) is not None:
-                        logger.debug(
-                            "Skipping unlabeled row %s because predicted_setpoint is present (never train on predictions)",
-                            getattr(r, "id", None),
-                        )
                         continue
 
                     feat = (
