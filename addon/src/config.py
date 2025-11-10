@@ -24,7 +24,7 @@ def load_options() -> Dict[str, Any]:
         "min_change_threshold": float(os.getenv("MIN_CHANGE_THRESHOLD", 0.3)),
         "buffer_days": int(os.getenv("BUFFER_DAYS", 30)),
         "webapi_host": os.getenv("WEBAPI_HOST", "0.0.0.0"),
-        "webapi_port": int(os.getenv("WEBAPI_PORT", os.getenv("WEBAPI_PORT", 8000))),
+        "webapi_port": int(os.getenv("WEBAPI_PORT", 8000)),
         "model_path_partial": os.getenv("MODEL_PATH_PARTIAL"),
         "model_path_full": os.getenv("MODEL_PATH_FULL"),
         "use_unlabeled": bool(os.getenv("USE_UNLABELED")),
