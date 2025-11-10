@@ -21,6 +21,7 @@ options:
   min_setpoint: 15.0
   max_setpoint: 25.0
   min_change_threshold: 0.4
+  stable_seconds: 900
   buffer_days: 30
   use_unlabeled: true
   pseudo_limit: 1000
@@ -56,6 +57,7 @@ schema:
   min_setpoint: "float?"
   max_setpoint: "float?"
   min_change_threshold: "float?"
+  stable_seconds: "int?"
   buffer_days: "int?"
   use_unlabeled: "bool?"
   pseudo_limit: "int?"
