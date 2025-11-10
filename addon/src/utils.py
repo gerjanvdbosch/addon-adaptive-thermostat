@@ -13,6 +13,13 @@ def safe_float(x):
     except Exception:
         return None
 
+        
+def safe_round(v):
+    try:
+        return round(float(v), 1)
+    except Exception:
+        return None
+
 
 def cyclical_hour(ts):
     h = ts.hour + ts.minute / 60.0
