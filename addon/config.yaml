@@ -16,6 +16,7 @@ options:
   climate_entity: climate.danfoss_icon_woonkamer
   inferencer_interval_seconds: 60
   sample_interval_seconds: 600
+  cooldown_seconds: 3600
   partial_fit_interval_seconds: 21600
   full_retrain_time: "03:00"
   min_setpoint: 15.0
@@ -52,6 +53,7 @@ schema:
   climate_entity: "str?"
   inferencer_interval_seconds: "int?"
   sample_interval_seconds: "int?"
+  cooldown_seconds: "int?"
   partial_fit_interval_seconds: "int?"
   full_retrain_time: "str?"
   min_setpoint: "float?"
