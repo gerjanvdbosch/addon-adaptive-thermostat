@@ -219,6 +219,29 @@ def get_sample(
         s.close()
 
 
+@app.delete("/samples/{sample_id}")
+def delete_sample(
+    sample_id: int = Path(..., ge=1), x_addon_token: Optional[str] = Header(None)
+):
+    _check_token(x_addon_token)
+    s = Session()
+    try:
+        sample = s.get(Sample, sample_id)
+        if not sample:
+            raise HTTPException(status_code=404, detail="Sample not found")
+        s.delete(sample)
+        s.commit()
+        return {"status": "deleted", "sample_id": sample_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error deleting sample %s: %s", sample_id, e)
+        s.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        s.close()
+
+
 @app.get("/predictions", response_model=List[PredictionOut])
 def list_predictions(
     limit: int = Query(100, ge=1, le=2000),
