@@ -201,7 +201,10 @@ class Inferencer:
             logger.warning("No valid model prediction found")
             return
 
-        self.last_pred_model = model_used
+        cooldown = float(self.opts.get("cooldown_seconds", 3600))
+        if self.last_pred_ts and (now - self.last_pred_ts).total_seconds() < cooldown:
+            logger.info("Cooldown active; skipping predicted setpoint %.1f", pred)
+            return
 
         try:
             unl = fetch_unlabeled(limit=1)
@@ -235,6 +238,8 @@ class Inferencer:
             self.ha.set_setpoint(pred)
             self.last_pred_ts = now
             self.last_pred_value = pred
+            self.last_pred_model = model_used
+
             logger.info(
                 "Applied predicted setpoint %.1f (was %.1f) using model %s",
                 pred,
