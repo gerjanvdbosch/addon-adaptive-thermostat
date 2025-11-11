@@ -15,7 +15,7 @@ options:
   shadow_setpoint: input_number.adaptive_thermostat_setpoint
   climate_entity: climate.danfoss_icon_woonkamer
   inferencer_interval_seconds: 60
-  sample_interval_seconds: 900
+  sample_interval_seconds: 600
   partial_fit_interval_seconds: 21600
   full_retrain_time: "03:00"
   min_setpoint: 15.0
