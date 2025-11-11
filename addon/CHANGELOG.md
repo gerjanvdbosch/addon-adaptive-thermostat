@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1 – Initial Version
+## Version 0.1
 
 ### Features
 
