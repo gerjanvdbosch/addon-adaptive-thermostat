@@ -327,6 +327,27 @@ class Trainer:
             except Exception:
                 mae = None
 
+        # Check existing model MAE
+        existing_mae = None
+        full_path = self.opts.get("model_path_full")
+        if full_path and os.path.exists(full_path):
+            try:
+                obj = joblib.load(full_path)
+                existing_mae = obj.get("meta", {}).get("mae")
+            except Exception:
+                logger.exception(
+                    "Failed reading existing full model for MAE comparison"
+                )
+
+        # Return immediately if new MAE is not better
+        if mae is None or (existing_mae is not None and mae >= existing_mae):
+            logger.info(
+                "New model: MAE %.3f not better than existing %.3f; skipping overwrite",
+                mae,
+                existing_mae,
+            )
+            return
+
         metadata = {
             "feature_order": FEATURE_ORDER,
             "best_params": (
@@ -340,15 +361,15 @@ class Trainer:
         }
 
         try:
-            joblib.dump(
-                {"model": best, "meta": metadata}, self.opts.get("model_path_full")
-            )
+            joblib.dump({"model": best, "meta": metadata}, full_path)
             logger.info(
-                "Full model trained on %d labeled user samples (OOF MAE=%s) and saved (with %d pseudo samples)",
-                n_labeled,
+                "Full model updated: OOF-MAE %.3f improved over %.3f (trained on %d labeled user samples and %d pseudo samples)",
                 mae,
+                existing_mae,
+                n_labeled,
                 pseudo_count,
             )
+
         except Exception:
             logger.exception("Failed saving full model")
 
