@@ -17,6 +17,7 @@ def load_options() -> Dict[str, Any]:
             os.getenv("INFERENCER_INTERVAL_SECONDS", 60)
         ),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
+        "cooldown_seconds": int(os.getenv("COOLDOWN_SECONDS", 3600)),
         "partial_fit_interval_seconds": int(
             os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)
         ),
