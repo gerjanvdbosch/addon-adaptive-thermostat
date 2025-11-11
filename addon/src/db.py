@@ -98,6 +98,15 @@ def fetch_unlabeled(limit: int = 1) -> List[Sample]:
         s.close()
 
 
+def fetch(limit: int = 1) -> List[Sample]:
+    s: SASession = Session()
+    try:
+        rows = s.query(Sample).order_by(Sample.timestamp.desc()).limit(limit).all()
+        return rows
+    finally:
+        s.close()
+
+
 def update_label(
     sample_id: int, label_setpoint: float, user_override: bool = False
 ) -> None:
