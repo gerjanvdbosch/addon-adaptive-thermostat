@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, List
 
-from db import fetch_unlabeled, update_sample_prediction, insert_sample
+from db import fetch, fetch_unlabeled, update_sample_prediction, insert_sample
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
 from utils import safe_round
@@ -18,19 +18,22 @@ class Inferencer:
         self.ha = ha_client
         self.collector = collector
         self.opts = opts or {}
-        if not self.opts.get("model_path_full") or not self.opts.get(
-            "model_path_partial"
-        ):
-            raise RuntimeError(
-                "model_path_full and model_path_partial must be provided in opts."
-            )
-        self.model_obj = None
+        self.models = {}  # {'full': {...}, 'partial': {...}}
         self.last_pred_ts: Optional[datetime] = None
         self.last_pred_value: Optional[float] = None
-        self.load_model()
+        self.last_pred_model: Optional[str] = None
+        self.load_models()
 
     def check_and_label_user_override(self) -> bool:
-        rows = fetch_unlabeled(limit=1)
+        now = datetime.utcnow()
+        interval = float(self.opts.get("sample_interval_seconds", 300))
+        if (
+            self.last_pred_ts is not None
+            and (now - self.last_pred_ts).total_seconds() < interval
+        ):
+            return False
+
+        rows = fetch(limit=1)
         if not rows:
             return False
         row = rows[0]
@@ -38,68 +41,62 @@ class Inferencer:
         current_sp, _ = self.ha.get_setpoint()
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 24.0))
-        if current_sp < min_sp or current_sp > max_sp:
+        if not (min_sp <= current_sp <= max_sp):
             logger.warning("Setpoint outside plausible range: %s", current_sp)
             return False
 
-        current_rounded = safe_round(current_sp)
-        predicted = getattr(row, "predicted_setpoint", None)
-        sample_sp = (
+        last_sample_sp = (
             row.data.get("features", {}).get("current_setpoint") if row.data else None
         )
-        sample_rounded = safe_round(sample_sp) if sample_sp is not None else None
-        predicted_rounded = safe_round(predicted) if predicted is not None else None
-
-        if predicted is not None and sample_rounded == predicted_rounded:
+        if last_sample_sp is None:
             return False
 
-        if sample_rounded is not None and sample_rounded != current_rounded:
-            features = self.collector.get_features(ts=datetime.utcnow())
-            insert_sample(
-                {"features": features}, label_setpoint=current_sp, user_override=True
-            )
-            logger.debug(
-                "Labeled sample as user_override: sample %.1f != current %.1f",
-                sample_rounded,
-                current_rounded,
-            )
-            return True
+        current_rounded = safe_round(current_sp)
+        last_sample_rounded = safe_round(last_sample_sp)
+        last_pred_rounded = (
+            safe_round(self.last_pred_value)
+            if self.last_pred_value is not None
+            else None
+        )
 
-        return False
+        if current_rounded == last_sample_rounded:
+            return False
 
-    def load_model(self):
-        try:
-            full_path = self.opts.get("model_path_full")
-            partial_path = self.opts.get("model_path_partial")
-            if full_path and os.path.exists(full_path):
-                self.model_obj = joblib.load(full_path)
-                meta = self.model_obj.get("meta", {})
-                if meta.get("feature_order") != FEATURE_ORDER:
-                    logger.warning(
-                        "Full model feature_order mismatch; ignoring full model"
-                    )
-                    self.model_obj = None
-                else:
-                    logger.info("Loaded full model from %s", full_path)
-                    return
-            if partial_path and os.path.exists(partial_path):
-                self.model_obj = joblib.load(partial_path)
-                meta = self.model_obj.get("meta", {})
-                if meta.get("feature_order") != FEATURE_ORDER:
-                    logger.warning(
-                        "Partial model feature_order mismatch; ignoring partial model"
-                    )
-                    self.model_obj = None
-                else:
-                    logger.info("Loaded partial model from %s", partial_path)
-                    return
+        if last_pred_rounded is not None and current_rounded == last_pred_rounded:
             logger.info(
-                "No compatible model loaded; inference will be skipped until a model is available"
+                "Current setpoint matches last predicted value; not user override"
             )
-            self.model_obj = None
+            return False
+
+        features = self.collector.get_features(ts=now)
+        insert_sample(
+            {"features": features}, label_setpoint=current_sp, user_override=True
+        )
+        logger.info(
+            "Detected user override: last %.1f, current %.1f",
+            last_sample_rounded,
+            current_rounded,
+        )
+        return True
+
+    def load_models(self):
+        try:
+            for name, path in (
+                ("full", self.opts.get("model_path_full")),
+                ("partial", self.opts.get("model_path_partial")),
+            ):
+                if path and os.path.exists(path):
+                    obj = joblib.load(path)
+                    meta = obj.get("meta", {})
+                    if meta.get("feature_order") != FEATURE_ORDER:
+                        logger.warning(
+                            "%s model feature_order mismatch; ignoring", name
+                        )
+                        continue
+                    self.models[name] = obj
+                    logger.debug("Loaded %s model from %s", name, path)
         except Exception:
-            logger.exception("Error loading model")
-            self.model_obj = None
+            logger.exception("Error loading models")
 
     def _fetch_current_vector(self) -> Tuple[Optional[List[float]], Optional[dict]]:
         unl = fetch_unlabeled(limit=1)
@@ -117,79 +114,94 @@ class Inferencer:
         vec = [feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER]
         return vec, feat
 
+    def _predict_with_model(self, name, obj, X):
+        try:
+            model = obj.get("model")
+            scaler = obj.get("scaler")
+            if model is None:
+                return None
+            if scaler is not None:
+                Xs = scaler.transform(X)
+                p = model.predict(Xs)[0]
+            else:
+                p = model.predict(X)[0]
+            mae = obj.get("meta", {}).get("mae")
+            logger.info("Model %s predicted %.2f (MAE=%s)", name, p, mae)
+            return p
+        except Exception:
+            logger.exception("Prediction failed for model %s", name)
+            return None
+
     def inference_job(self):
         try:
             if self.check_and_label_user_override():
                 return
         except Exception:
-            logger.exception("Error during override check; continuing with inference")
+            logger.exception("Error during override check; continuing")
 
-        # reload model each run to pick up new full model
-        self.load_model()
-        if not self.model_obj:
+        self.load_models()
+        if not self.models:
             return
 
-        obj = self.model_obj
-        model = obj.get("model")
-        scaler = obj.get("scaler")
-
-        try:
-            Xvec, featdict = self._fetch_current_vector()
-            if Xvec is None:
-                logger.info("No current features for inference")
-                return
-
-            X = np.array([Xvec], dtype=float)
-
-            # if model is a pipeline predict directly
-            if hasattr(model, "predict") and scaler is None:
-                pred = model.predict(X)[0]
-            else:
-                # expect scaler + model stored separately
-                if scaler is None or model is None:
-                    logger.warning("Model object incomplete; skipping inference")
-                    return
-                Xs = scaler.transform(X)
-                pred = model.predict(Xs)[0]
-        except Exception:
-            logger.exception("Inference failed")
+        Xvec, featdict = self._fetch_current_vector()
+        if Xvec is None:
+            logger.info("No current features for inference")
             return
+        X = np.array([Xvec], dtype=float)
 
-        logger.info(
-            "Prediction raw=%s last_pred=%s last_ts=%s",
-            pred,
-            self.last_pred_value,
-            self.last_pred_ts,
-        )
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 24.0))
         threshold = float(self.opts.get("min_change_threshold", 0.3))
         stable_seconds = float(self.opts.get("stable_seconds", 600))
-        current_sp = featdict.get("current_setpoint", None) if featdict else None
+        current_sp = featdict.get("current_setpoint") if featdict else None
         if current_sp is None:
             logger.warning("Current setpoint unknown, skipping action")
             return
-
-        if pred < min_sp or pred > max_sp:
-            logger.warning("Predicted setpoint outside plausible range: %s", pred)
-            return
-
-        pred = max(min(pred, max_sp), min_sp)
         now = datetime.utcnow()
 
-        if self.last_pred_value is not None and self.last_pred_ts:
-            if abs(self.last_pred_value - pred) < threshold:
-                if (now - self.last_pred_ts).total_seconds() < stable_seconds:
-                    logger.info("Change not yet stable; skipping apply")
-                    return
+        # sort models by MAE ascending
+        sorted_models = sorted(
+            self.models.items(), key=lambda kv: kv[1].get("meta", {}).get("mae", np.inf)
+        )
 
-        if abs(pred - current_sp) < threshold:
-            logger.info(
-                "Predicted change below threshold (%.2f < %.2f)",
-                abs(pred - current_sp),
-                threshold,
-            )
+        pred = None
+        model_used = None
+
+        for name, obj in sorted_models:
+            p = self._predict_with_model(name, obj, X)
+            if p is None or p < min_sp or p > max_sp:
+                logger.warning("Predicted change outside plausible range: %s", p)
+                continue
+            p = max(min(p, max_sp), min_sp)
+
+            # threshold & stability check
+            if self.last_pred_value is not None and self.last_pred_ts:
+                if (
+                    abs(self.last_pred_value - p) < threshold
+                    and (now - self.last_pred_ts).total_seconds() < stable_seconds
+                ):
+                    logger.info(
+                        "Predicted change from %s model not yet stable; skipping", name
+                    )
+                    continue
+            if abs(p - current_sp) < threshold:
+                logger.info(
+                    "Predicted change from %s below threshold (%.2f < %.2f); skipping",
+                    name,
+                    abs(p - current_sp),
+                    threshold,
+                )
+                continue
+
+            pred = p
+            model_used = name
+            break
+
+        if pred is None:
+            logger.warning("No valid model prediction found")
             return
+
+        self.last_pred_model = model_used
 
         try:
             unl = fetch_unlabeled(limit=1)
@@ -223,6 +235,11 @@ class Inferencer:
             self.ha.set_setpoint(pred)
             self.last_pred_ts = now
             self.last_pred_value = pred
-            logger.info("Applied predicted setpoint %.1f (was %.1f)", pred, current_sp)
+            logger.info(
+                "Applied predicted setpoint %.1f (was %.1f) using model %s",
+                pred,
+                current_sp,
+                model_used,
+            )
         except Exception:
             logger.exception("Failed to apply setpoint via HAClient")
