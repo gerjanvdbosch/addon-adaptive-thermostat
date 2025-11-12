@@ -177,6 +177,9 @@ class Inferencer:
             p = max(min(p, max_sp), min_sp)
             rounded_p = safe_round(p)
 
+            # test
+            self.ha.publish_sensor("setpoint", rounded_p)
+
             if (
                 self.last_eval_value is None
                 or safe_round(self.last_eval_value) != rounded_p
