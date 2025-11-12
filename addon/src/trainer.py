@@ -132,7 +132,7 @@ class Trainer:
         except Exception:
             logger.exception("Failed saving partial model")
 
-    def full_retrain_job(self):
+    def full_retrain_job(self, force: bool = False):
         use_unlabeled = bool(self.opts.get("use_unlabeled", True))
         pseudo_limit = int(self.opts.get("pseudo_limit", 1000))
         weight_label = float(self.opts.get("weight_label", 1.0))
@@ -340,13 +340,20 @@ class Trainer:
                 )
 
         # Return immediately if new MAE is not better
-        if mae is None or (existing_mae is not None and mae >= existing_mae):
+        if not force:
+            if mae is None or (existing_mae is not None and mae >= existing_mae):
+                logger.info(
+                    "New model: MAE %.3f not better than existing %.3f; skipping overwrite",
+                    mae,
+                    existing_mae,
+                )
+                return
+        else:
             logger.info(
-                "New model: MAE %.3f not better than existing %.3f; skipping overwrite",
+                "Force flag set: bypassing MAE comparison and forcing overwrite (new_mae=%s existing_mae=%s)",
                 mae,
                 existing_mae,
             )
-            return
 
         metadata = {
             "feature_order": FEATURE_ORDER,
