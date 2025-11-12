@@ -22,6 +22,8 @@ class Inferencer:
         self.last_pred_ts: Optional[datetime] = None
         self.last_pred_value: Optional[float] = None
         self.last_pred_model: Optional[str] = None
+        self.last_eval_value: Optional[float] = None
+        self.last_eval_ts: Optional[datetime] = None
         self.load_models()
 
     def check_and_label_user_override(self) -> bool:
@@ -173,17 +175,21 @@ class Inferencer:
                 logger.warning("Predicted change outside plausible range: %s", p)
                 continue
             p = max(min(p, max_sp), min_sp)
+            rounded_p = safe_round(p)
 
-            # threshold & stability check
-            if self.last_pred_value is not None and self.last_pred_ts:
-                if (
-                    abs(self.last_pred_value - p) < threshold
-                    and (now - self.last_pred_ts).total_seconds() < stable_seconds
-                ):
-                    logger.info(
-                        "Predicted change from %s model not yet stable; skipping", name
-                    )
-                    continue
+            if (
+                self.last_eval_value is None
+                or safe_round(self.last_eval_value) != rounded_p
+            ):
+                self.last_eval_value = p
+                self.last_eval_ts = now
+                logger.info("Starting stability timer for predicted value %.2f", p)
+                continue
+
+            if (now - self.last_eval_ts).total_seconds() < stable_seconds:
+                logger.info("Predicted change from %s not yet stable; skipping", name)
+                continue
+
             if abs(p - current_sp) < threshold:
                 logger.info(
                     "Predicted change from %s below threshold (%.2f < %.2f); skipping",
