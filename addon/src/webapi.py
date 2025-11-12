@@ -548,7 +548,12 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
 
 
 @app.post("/train/full")
-def trigger_full_train(x_addon_token: Optional[str] = Header(None)):
+def trigger_full_train(
+    force: bool = Query(
+        False, description="If true, force overwrite even if MAE is not improved"
+    ),
+    x_addon_token: Optional[str] = Header(None),
+):
     """
     Trigger a full retrain in background. Returns immediately with a job status.
     """
@@ -559,15 +564,15 @@ def trigger_full_train(x_addon_token: Optional[str] = Header(None)):
 
     def _run():
         try:
-            logger.info("Triggered full retrain via API")
-            trainer.full_retrain_job()
+            logger.info("Triggered full retrain via API (force=%s)", force)
+            trainer.full_retrain_job(force=force)
             logger.info("Full retrain job finished (API-triggered)")
         except Exception:
             logger.exception("Exception in API-triggered full retrain")
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    return {"status": "started", "job": "full_retrain"}
+    return {"status": "started", "job": "full_retrain", "force": bool(force)}
 
 
 @app.post("/train/partial")
