@@ -6,6 +6,17 @@ from utils import round_half, safe_float, safe_round
 logger = logging.getLogger(__name__)
 
 
+SENSORS = {
+    "setpoint": {
+        "entity_id": "number.adaptive_thermostat_setpoint",
+        "attributes": {
+            "friendly_name": "Adaptive Thermostat Setpoint",
+            "unit_of_measurement": "°C",
+        },
+    }
+}
+
+
 class HAClient:
     def __init__(self, opts, url=None, token=None):
         self.opts = opts or {}
@@ -28,6 +39,27 @@ class HAClient:
         except Exception as e:
             logger.exception("Error getting state %s: %s", entity_id, e)
             return None
+
+    def publish_sensor(self, id: str, value: float):
+        if id not in SENSORS:
+            logger.warning("Sensor '%s' not found", id)
+            return False
+
+        sensor_conf = SENSORS[id]
+        entity_id = sensor_conf["entity_id"]
+        payload = {
+            "state": value,
+            "attributes": sensor_conf["attributes"],
+        }
+        try:
+            url = f"{self.url}/states/{entity_id}"
+            r = requests.post(url, headers=self.headers, json=payload, timeout=10)
+            r.raise_for_status()
+            logger.info("Published sensor %s with value %s", entity_id, value)
+            return True
+        except Exception as e:
+            logger.exception("Failed to publish sensor %s: %s", entity_id, e)
+            return False
 
     def call_service(self, domain, service, data):
         try:
