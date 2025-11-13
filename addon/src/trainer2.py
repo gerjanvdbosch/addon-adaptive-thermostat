@@ -512,30 +512,54 @@ class Trainer2:
         MIN_LABELS_PROMOTE = int(self.opts.get("min_labels_promote", 50))
         promotion_delta = float(self.opts.get("promotion_delta_mae", 0.0))
         allow_force = bool(self.opts.get("allow_force", False))
+
         if force and not allow_force:
             logger.warning("Force ignored because allow_force not set")
             force = False
 
-        promote = force or (
-            mae is not None
-            and (existing_mae is None or (mae + promotion_delta) < existing_mae)
+        # Decide promotion reason/condition
+        promote = False
+        promotion_reason = None
+
+        if force:
+            promote = True
+            promotion_reason = "force"
+        else:
+            # If no existing model, allow promotion if we have any labeled data (or require min)
+            if existing_mae is None:
+                if n_labeled >= int(
+                    self.opts.get("min_labels_for_promo_if_no_existing", 1)
+                ):
+                    promote = True
+                    promotion_reason = "no_existing_model"
+                else:
+                    promote = False
+                    promotion_reason = "insufficient_labels_for_initial_promo"
+            else:
+                # compare maes with delta (lower is better)
+                if mae is not None and (mae + promotion_delta) < existing_mae:
+                    # also optionally require a minimum number of labeled samples for promotion
+                    if n_labeled >= MIN_LABELS_PROMOTE:
+                        promote = True
+                        promotion_reason = "better_mae"
+                    else:
+                        promote = False
+                        promotion_reason = "better_mae_but_insufficient_labels"
+                else:
+                    promote = False
+                    promotion_reason = "not_better"
+
+        logger.info(
+            "Promotion decision: promote=%s reason=%s mae=%s existing_mae=%s n_labeled=%s force=%s",
+            promote,
+            promotion_reason,
+            mae,
+            "{:.4f}",
+            existing_mae,
+            "{:.4f}",
+            n_labeled,
+            force,
         )
-        if not force and n_labeled < MIN_LABELS_PROMOTE:
-            logger.info(
-                "Skipping promotion: n_labeled=%s < MIN_LABELS_PROMOTE=%s",
-                n_labeled,
-                MIN_LABELS_PROMOTE,
-            )
-            promote = False
-
-        if not promote:
-            logger.info(
-                "MLTrainer: new MAE %s not better than existing %s; skipping save",
-                mae,
-                existing_mae,
-            )
-            return
-
         # grid edge list
         grid_edges = []
         if chosen_params:
