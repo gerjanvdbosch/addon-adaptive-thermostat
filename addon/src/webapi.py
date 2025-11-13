@@ -636,7 +636,7 @@ def trigger_full_train(
         try:
             logger.info("Triggered full retrain via API (force=%s)", force)
             trainer.full_retrain_job(force=force)
-            trainer2.full_retrain_job(force=force)
+            trainer2.train_job(force=force)
             logger.info("Full retrain job finished (API-triggered)")
         except Exception:
             logger.exception("Exception in API-triggered full retrain")
