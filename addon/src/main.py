@@ -7,7 +7,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from collector import Collector
 from trainer import Trainer
+from trainer2 import Trainer2
 from inferencer import Inferencer
+from inferencer2 import Inferencer2
 from ha_client import HAClient
 from config import load_options
 
@@ -25,7 +27,9 @@ def main():
     ha = HAClient(opts)
     collector = Collector(ha, opts)
     trainer = Trainer(ha, opts)
+    trainer2 = Trainer2(ha, opts)
     inferencer = Inferencer(ha, collector, opts)
+    inferencer2 = Inferencer2(ha, collector, opts)
 
     api_thread = threading.Thread(
         target=start_api, args=(opts["webapi_host"], opts["webapi_port"]), daemon=True
@@ -55,7 +59,16 @@ def main():
         trainer.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
     )
     scheduler.add_job(
+        trainer2.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
+    )
+    scheduler.add_job(
         inferencer.inference_job,
+        "interval",
+        seconds=opts["inferencer_interval_seconds"],
+        id="inference",
+    )
+    scheduler.add_job(
+        inferencer2.inference_job,
         "interval",
         seconds=opts["inferencer_interval_seconds"],
         id="inference",

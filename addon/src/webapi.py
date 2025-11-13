@@ -11,6 +11,7 @@ from config import load_options
 from db import Session, Sample, insert_sample, update_label
 from ha_client import HAClient
 from trainer import Trainer
+from trainer2 import Trainer2
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="Adaptive Thermostat API")
@@ -495,6 +496,126 @@ def debug_full_model(x_addon_token: Optional[str] = Header(None)):
         return out
 
 
+def _to_builtin_type(val: Any):
+    """Recursively convert numpy types, arrays and other non-serializables to native types."""
+    try:
+        import numpy as _np
+    except Exception:
+        _np = None
+
+    if val is None or isinstance(val, (bool, int, float, str)):
+        return val
+    if _np is not None:
+        if isinstance(val, _np.generic):
+            return val.item()
+        if isinstance(val, _np.ndarray):
+            return val.tolist()
+    if isinstance(val, dict):
+        return {str(k): _to_builtin_type(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple, set)):
+        return [_to_builtin_type(v) for v in list(val)]
+    if isinstance(val, (bytes, bytearray)):
+        try:
+            return val.decode("utf-8")
+        except Exception:
+            return repr(val)
+    try:
+        return str(val)
+    except Exception:
+        return repr(val)
+
+
+def _extract_model_info(payload: dict) -> Dict[str, Any]:
+    """Extract helpful model introspection fields (feature_importances, params, iterations)."""
+    model = payload.get("model") if isinstance(payload, dict) else payload
+    info: Dict[str, Any] = {}
+    try:
+        # pipeline with named step 'model'
+        if hasattr(model, "named_steps") and "model" in getattr(model, "named_steps"):
+            core = model.named_steps["model"]
+            if hasattr(core, "feature_importances_"):
+                info["feature_importances"] = _to_builtin_type(
+                    core.feature_importances_
+                )
+            if hasattr(core, "n_estimators"):
+                info["n_estimators"] = int(core.n_estimators)
+            if hasattr(core, "max_iter"):
+                info["max_iter"] = int(core.max_iter)
+            if hasattr(core, "n_iter_"):
+                info["n_iter_"] = _to_builtin_type(getattr(core, "n_iter_"))
+            if hasattr(core, "best_iteration_"):
+                info["best_iteration_"] = _to_builtin_type(
+                    getattr(core, "best_iteration_")
+                )
+            try:
+                info["model_params"] = _to_builtin_type(core.get_params())
+            except Exception:
+                info["model_params"] = str(core)
+        else:
+            # raw estimator fallback
+            if hasattr(model, "feature_importances_"):
+                info["feature_importances"] = _to_builtin_type(
+                    model.feature_importances_
+                )
+            try:
+                info["model_params"] = _to_builtin_type(model.get_params())
+            except Exception:
+                info["model_repr"] = str(model)
+    except Exception:
+        logger.exception("Model introspection failed")
+    return info
+
+
+@app.get("/model/full2", response_model=Dict[str, Any])
+def get_full_model_fullmeta():
+    """
+    Return everything in payload['meta'] (if present) plus derived model info and file diagnostics.
+    This endpoint converts numpy / non-serializable types to built-in Python types.
+    """
+    MODEL_PATH = "/config/models/full_model2.joblib"
+    if not os.path.exists(MODEL_PATH):
+        logger.info("Model file not found at %s", MODEL_PATH)
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+    try:
+        payload = joblib.load(MODEL_PATH)
+    except Exception as e:
+        logger.exception("Failed to load model file %s", MODEL_PATH)
+        raise HTTPException(status_code=500, detail=f"Failed loading model: {e}")
+
+    # meta payload (return every key present)
+    if isinstance(payload, dict) and "meta" in payload:
+        raw_meta = payload.get("meta") or {}
+        meta = _to_builtin_type(raw_meta)
+    else:
+        meta = {"note": "No meta key found in model payload"}
+
+    # derived info about the model object
+    model_info = _extract_model_info(payload)
+
+    # file diagnostics
+    try:
+        stat = os.stat(MODEL_PATH)
+        file_info = {
+            "path": MODEL_PATH,
+            "size_bytes": stat.st_size,
+            "modified_ts": datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z",
+        }
+    except Exception:
+        file_info = {"path": MODEL_PATH}
+
+    response = {
+        "meta": meta,
+        "model_info": _to_builtin_type(model_info),
+        "file": file_info,
+    }
+
+    # include entire payload keys (safe-serialized) if you want — uncomment to include everything:
+    # response["raw_payload"] = _to_builtin_type(payload)
+
+    return _to_builtin_type(response)
+
+
 @app.post("/train/full")
 def trigger_full_train(
     force: bool = Query(
@@ -509,11 +630,13 @@ def trigger_full_train(
     opts = load_options()
     ha = HAClient(opts)
     trainer = Trainer(ha, opts)
+    trainer2 = Trainer2(ha, opts)
 
     def _run():
         try:
             logger.info("Triggered full retrain via API (force=%s)", force)
             trainer.full_retrain_job(force=force)
+            trainer2.full_retrain_job(force=force)
             logger.info("Full retrain job finished (API-triggered)")
         except Exception:
             logger.exception("Exception in API-triggered full retrain")
