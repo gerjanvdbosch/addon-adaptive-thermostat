@@ -44,9 +44,6 @@ options:
     wind_direction_today: sensor.windrichting_azimut_1d
     wind_direction_tomorrow: sensor.windrichting_azimut_2d
     outside_temp: sensor.temperatuur
-    thermostat_demand: binary_sensor.ecodan_heatpump_ca09ec_status_in1_thermostaat
-    operational_status: sensor.ecodan_heatpump_ca09ec_status_bedrijf
-    prohibit_heat: switch.ecodan_heatpump_ca09ec_server_control_zone_1_prohibit_heating
 schema:
   shadow_mode: "bool?"
   shadow_setpoint: "str?"
@@ -81,9 +78,6 @@ schema:
     wind_direction_today: "str?"
     wind_direction_tomorrow: "str?"
     outside_temp: "str?"
-    thermostat_demand: "str?"
-    operational_status: "str?"
-    prohibit_heat: "str?"
 ports:
   8000/tcp: 8000
 map:

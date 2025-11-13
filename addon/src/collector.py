@@ -9,7 +9,6 @@ from utils import (
     cyclical_hour,
     cyclical_day,
     encode_wind,
-    encode_binary_onoff,
     cyclical_month,
     month_to_season,
     day_or_night,
@@ -49,16 +48,6 @@ FEATURE_ORDER: List[str] = [
 
 
 class Collector:
-    OP_STATUS_CATEGORIES = [
-        "Uit",  # index 0 -> represents off/unknown
-        "SWW",  # index 1
-        "Legionellapreventie",  # index 2
-        "Verwarmen",  # index 3
-        "Koelen",  # index 4
-        "Vorstbescherming",  # index 5
-    ]
-    OP_STATUS_MAP = {cat.lower(): idx for idx, cat in enumerate(OP_STATUS_CATEGORIES)}
-
     def __init__(self, ha_client, opts: dict, impute_value: float = 0.0):
         self.ha = ha_client
         self.opts = opts or {}
@@ -93,12 +82,6 @@ class Collector:
             time.sleep(0.01)
         return data
 
-    def _encode_operational_status(self, status: Optional[str]) -> int:
-        if not isinstance(status, str):
-            return 0  # Uit
-        s = status.strip().lower()
-        return self.OP_STATUS_MAP.get(s, 0)
-
     def features_from_raw(
         self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime.datetime] = None
     ) -> Dict[str, Any]:
@@ -118,15 +101,6 @@ class Collector:
 
         wtd_sin, wtd_cos = encode_wind(wind_dir_today)
         wtm_sin, wtm_cos = encode_wind(wind_dir_tomorrow)
-
-        td_raw = sensor_dict.get("thermostat_demand")
-        td = encode_binary_onoff(td_raw)
-
-        op_raw = sensor_dict.get("operational_status")
-        op_idx = self._encode_operational_status(op_raw)
-
-        ph_raw = sensor_dict.get("prohibit_heat")
-        ph = encode_binary_onoff(ph_raw)
 
         return {
             "hour_sin": hx,
@@ -161,9 +135,6 @@ class Collector:
             "wind_dir_tomorrow_sin": wtm_sin,
             "wind_dir_tomorrow_cos": wtm_cos,
             "outside_temp": safe_float(sensor_dict.get("outside_temp")),
-            "thermostat_demand": td,
-            "operational_status": float(op_idx),
-            "prohibit_heat": ph,
         }
 
     def get_features(self, ts: datetime.datetime) -> Optional[Dict[str, Any]]:
