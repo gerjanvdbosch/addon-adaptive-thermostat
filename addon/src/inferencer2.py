@@ -209,14 +209,16 @@ class Inferencer2:
 
         if (now - self.last_eval_ts).total_seconds() < stable_seconds:
             logger.info(
-                "Prediction not yet stable; waiting (%.0fs remaining)",
+                "Prediction (%.2f) not yet stable; waiting (%.0fs remaining)",
+                p,
                 stable_seconds - (now - self.last_eval_ts).total_seconds(),
             )
             return
 
         if abs(p - current_sp) < threshold:
             logger.info(
-                "Predicted change %.3f below threshold %.3f; skipping",
+                "Prediction (%.2f), change %.3f below threshold %.3f; skipping",
+                p,
                 abs(p - current_sp),
                 threshold,
             )
