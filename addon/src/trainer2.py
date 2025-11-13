@@ -6,12 +6,10 @@ import time
 import numpy as np
 from datetime import datetime
 
-from typing import List, Tuple, Optional
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
-from sklearn.inspection import permutation_importance
 
 from db import (
     fetch_training_data,
@@ -27,86 +25,6 @@ def _atomic_dump(obj, path):
     tmp = f"{path}.tmp"
     joblib.dump(obj, tmp)
     os.replace(tmp, path)
-
-
-def _top_features_from_model_or_permutation(
-    model,
-    feature_order: List[str],
-    X_sample: Optional[np.ndarray] = None,
-    y_sample: Optional[np.ndarray] = None,
-    top_n: int = 10,
-    n_repeats: int = 8,
-    max_rows: int = 500,
-    random_state: int = 42,
-) -> List[Tuple[str, float]]:
-    """
-    Return top_n (feature_name, importance) sorted by importance desc.
-    1) Try model.named_steps['model'].feature_importances_ (if present and non-zero).
-    2) Otherwise, run permutation importance on X_sample/y_sample (if provided).
-    Returns [] if nothing usable.
-    """
-    try:
-        core = model
-        if hasattr(model, "named_steps") and "model" in getattr(model, "named_steps"):
-            core = model.named_steps["model"]
-
-        # 1) native feature importances
-        if hasattr(core, "feature_importances_"):
-            try:
-                importances = np.asarray(
-                    getattr(core, "feature_importances_"), dtype=float
-                )
-                if importances.size and not np.allclose(importances, 0.0):
-                    pairs = []
-                    for i, imp in enumerate(importances):
-                        name = feature_order[i] if i < len(feature_order) else f"f{i}"
-                        pairs.append((name, float(imp)))
-                    pairs.sort(key=lambda t: t[1], reverse=True)
-                    return pairs[:top_n]
-            except Exception:
-                logger.exception("Failed reading native feature_importances_")
-
-        # 2) permutation importance fallback
-        if X_sample is None or y_sample is None:
-            return []
-
-        # limit rows for performance
-        try:
-            if X_sample.shape[0] > max_rows:
-                X_sub = X_sample[:max_rows]
-                y_sub = y_sample[:max_rows]
-            else:
-                X_sub = X_sample
-                y_sub = y_sample
-        except Exception:
-            X_sub = X_sample
-            y_sub = y_sample
-
-        try:
-            # permutation_importance accepts pipelines as well
-            res = permutation_importance(
-                model,
-                X_sub,
-                y_sub,
-                n_repeats=n_repeats,
-                random_state=random_state,
-                n_jobs=1,
-            )
-            importances = np.asarray(res.importances_mean, dtype=float)
-            pairs = []
-            for i, imp in enumerate(importances):
-                name = feature_order[i] if i < len(feature_order) else f"f{i}"
-                pairs.append((name, float(imp)))
-            pairs.sort(key=lambda t: t[1], reverse=True)
-            # filter zero importances
-            pairs = [p for p in pairs if not np.isclose(p[1], 0.0)]
-            return pairs[:top_n]
-        except Exception:
-            logger.exception("Permutation importance fallback failed")
-            return []
-    except Exception:
-        logger.exception("Top feature extraction failed")
-        return []
 
 
 def _assemble_matrix(rows, feature_order):
@@ -472,7 +390,7 @@ class Trainer2:
 
         # final refit option
         try:
-            final_refit = bool(self.opts.get("refit_on_full", False))
+            final_refit = bool(self.opts.get("refit_on_full", True))
             if final_refit:
                 fit_kwargs_all = {}
                 if sample_weight is not None:
@@ -560,30 +478,6 @@ class Trainer2:
             )
             return
 
-        # Determine sample for permutation importance if needed
-        X_perm = None
-        y_perm = None
-        if X_val is not None and len(X_val):
-            X_perm = X_val
-            y_perm = y_val
-        elif n_labeled and X is not None:
-            X_perm = X[:n_labeled]
-            y_perm = y[:n_labeled]
-
-        try:
-            top_feats = _top_features_from_model_or_permutation(
-                best_pipe,
-                self.feature_order,
-                X_sample=X_perm,
-                y_sample=y_perm,
-                top_n=10,
-                n_repeats=int(self.opts.get("perm_n_repeats", 8)),
-                max_rows=int(self.opts.get("perm_max_rows", 500)),
-                random_state=self.random_state,
-            )
-        except Exception:
-            top_feats = []
-
         # metadata
         metadata = {
             "feature_order": self.feature_order,
@@ -601,7 +495,6 @@ class Trainer2:
             "search_failed": bool(search_failed),
             "random_state": self.random_state,
             "runtime_seconds": runtime_seconds,
-            "top_features": [[name, float(imp)] for name, imp in top_feats],
         }
 
         # persist model and meta
