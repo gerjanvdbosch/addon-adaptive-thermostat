@@ -266,7 +266,18 @@ class Trainer2:
         )
 
         base_est, param_dist = self._search_estimator()
-        param_dist_pipe = {f"model__{k}": v for k, v in param_dist.items()}
+        # Filter param_dist to only parameters that exist on the estimator
+        allowed = set(base_est.get_params().keys())
+        filtered = {}
+        ignored = []
+        for k, v in (param_dist or {}).items():
+            if k in allowed:
+                filtered[k] = v
+            else:
+                ignored.append(k)
+        if ignored:
+            logger.warning("Ignoring unsupported hyperparam keys for estimator: %s", ", ".join(sorted(ignored)))
+        param_dist_pipe = {f"model__{k}": v for k, v in filtered.items()}
 
         n_jobs = int(self.opts.get("n_jobs", 1))
         tss_splits = self._time_splits(n_labeled)
@@ -367,7 +378,7 @@ class Trainer2:
             if chosen_params:
                 for k, v in chosen_params.items():
                     key = k.replace("model__", "")
-                    vals = param_dist.get(key)
+                    vals = (filtered.get(key) or param_dist.get(key))
                     if vals and (np.isclose(v, min(vals)) or np.isclose(v, max(vals))):
                         edge_flag = True
                         logger.warning("Chosen param %s=%s is on grid edge", key, v)
