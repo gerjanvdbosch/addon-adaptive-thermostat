@@ -105,7 +105,13 @@ class Trainer2:
             y_list.append(y_lab)
 
         pseudo_count = 0
-        if bool(self.opts.get("use_unlabeled", True)):
+        pseudo_X = None
+        pseudo_y = None
+
+        # Decide whether to allow pseudo (configurable guard)
+        MIN_LABELS_FOR_PSEUDO = int(self.opts.get("min_labels_for_pseudo", 30))
+        allow_pseudo_by_config = bool(self.opts.get("use_unlabeled", True))
+        if allow_pseudo_by_config and (len(used_rows) >= MIN_LABELS_FOR_PSEUDO):
             try:
                 unl = fetch_unlabeled(limit=int(self.opts.get("pseudo_limit", 1000)))
                 pseudo_rows = []
@@ -118,21 +124,32 @@ class Trainer2:
                     pseudo_label = feat.get("current_setpoint")
                     if pseudo_label is None:
                         continue
-                    r.label_setpoint = pseudo_label  # temporary for assembly
+                    r.label_setpoint = pseudo_label
                     pseudo_rows.append(r)
                 X_pseudo, y_pseudo, _ = _assemble_matrix(
                     pseudo_rows, self.feature_order
                 )
                 if X_pseudo is not None:
-                    X_list.append(X_pseudo)
-                    y_list.append(y_pseudo)
+                    pseudo_X = X_pseudo
+                    pseudo_y = y_pseudo
                     pseudo_count = len(X_pseudo)
-                    logger.info("MLTrainer: collected %d pseudo samples", pseudo_count)
+                    logger.info("MLTrainer: collected %s pseudo samples", pseudo_count)
             except Exception:
                 logger.exception(
                     "MLTrainer: failed fetching unlabeled for pseudo labeling"
                 )
                 pseudo_count = 0
+        else:
+            if allow_pseudo_by_config:
+                logger.info(
+                    "MLTrainer: pseudo-labeling disabled because labeled count=%s < min_for_pseudo=%s",
+                    len(used_rows),
+                    MIN_LABELS_FOR_PSEUDO,
+                )
+
+        if pseudo_X is not None:
+            X_list.append(pseudo_X)
+            y_list.append(pseudo_y)
 
         if not X_list:
             return None, None, None, None, 0
@@ -141,6 +158,28 @@ class Trainer2:
         y = np.concatenate(y_list)
         n_labeled = len(used_rows)
         n_total = len(y)
+
+        # cap pseudo proportion to avoid pseudo-dominance
+        MAX_PSEUDO_MULTIPLIER = float(self.opts.get("max_pseudo_multiplier", 5.0))
+        if n_labeled > 0:
+            max_allowed_pseudo = int(MAX_PSEUDO_MULTIPLIER * max(1, n_labeled))
+            actual_pseudo = n_total - n_labeled
+            if actual_pseudo > max_allowed_pseudo:
+                # trim pseudo by keeping the earliest labeled block then the first allowed_pseudo pseudo rows
+                # Build new arrays
+                X_l = X[:n_labeled]
+                y_l = y[:n_labeled]
+                X_p = X[n_labeled : n_labeled + max_allowed_pseudo]
+                y_p = y[n_labeled : n_labeled + max_allowed_pseudo]
+                X = np.vstack([X_l, X_p])
+                y = np.concatenate([y_l, y_p])
+                pseudo_count = max_allowed_pseudo
+                n_total = len(y)
+                logger.warning(
+                    "Trimmed pseudo samples to %s (max multiplier=%s)",
+                    pseudo_count,
+                    MAX_PSEUDO_MULTIPLIER,
+                )
 
         weight_label = float(self.opts.get("weight_label", 1.0))
         weight_pseudo = float(self.opts.get("weight_pseudo", 0.1))
@@ -159,13 +198,22 @@ class Trainer2:
         return X, y, used_rows, sample_weight, int(pseudo_count)
 
     def _search_estimator(self):
+        # default base estimator
         base = HistGradientBoostingRegressor(random_state=self.random_state)
 
         user_dist = self.opts.get("search_param_dist")
         if user_dist:
             return base, user_dist
 
+        # choose mode; can be switched by expand flag when enough labeled data
         mode = self.opts.get("search_mode", "extended")
+        if (
+            self.opts.get("expand_search_next")
+            and len(self.opts)
+            and int(self.opts.get("expand_search_next_min_labels", 50))
+            <= int(self.opts.get("random_state", 0))
+        ):
+            mode = "extended"
 
         compact = {
             "max_iter": [200, 400, 800],
@@ -173,17 +221,13 @@ class Trainer2:
             "learning_rate": [0.01, 0.03, 0.05],
             "min_data_in_leaf": [10, 30],
             "l2_regularization": [0.0, 0.01, 0.1],
-            "feature_fraction": [0.7, 0.9],
-            "subsample": [0.8, 1.0],
         }
         extended = {
-            "max_iter": [300, 600, 1000, 1500],
-            "max_leaf_nodes": [15, 31, 63, 127],
-            "learning_rate": [0.005, 0.01, 0.02, 0.05],
+            "max_iter": [300, 600, 1000, 1500, 2000],
+            "max_leaf_nodes": [15, 31, 63, 127, 255],
+            "learning_rate": [0.001, 0.005, 0.01, 0.02, 0.05],
             "min_data_in_leaf": [5, 10, 20, 50],
             "l2_regularization": [0.0, 1e-3, 0.01, 0.1, 1.0],
-            "feature_fraction": [0.6, 0.8, 1.0],
-            "subsample": [0.6, 0.8, 1.0],
         }
 
         param_dist = compact if mode == "compact" else extended
@@ -228,7 +272,7 @@ class Trainer2:
         n_total = len(y)
         n_labeled = len(used_rows)
 
-        # reduce search if too few labeled samples
+        # shrink search when labeled are scarce
         min_search_labels = int(self.opts.get("min_search_labels", 50))
         if n_labeled < min_search_labels:
             # shrink n_iter and force compact mode
@@ -266,7 +310,7 @@ class Trainer2:
         )
 
         base_est, param_dist = self._search_estimator()
-        # Filter param_dist to only parameters that exist on the estimator
+        # filter param_dist for valid keys on base estimator
         allowed = set(base_est.get_params().keys())
         filtered = {}
         ignored = []
@@ -464,12 +508,26 @@ class Trainer2:
                     "MLTrainer: failed reading existing model for MAE comparison"
                 )
 
-        # promotion logic
+        # Promotion guard and policy
+        MIN_LABELS_PROMOTE = int(self.opts.get("min_labels_promote", 50))
         promotion_delta = float(self.opts.get("promotion_delta_mae", 0.0))
+        allow_force = bool(self.opts.get("allow_force", False))
+        if force and not allow_force:
+            logger.warning("Force ignored because allow_force not set")
+            force = False
+
         promote = force or (
             mae is not None
             and (existing_mae is None or (mae + promotion_delta) < existing_mae)
         )
+        if not force and n_labeled < MIN_LABELS_PROMOTE:
+            logger.info(
+                "Skipping promotion: n_labeled=%s < MIN_LABELS_PROMOTE=%s",
+                n_labeled,
+                MIN_LABELS_PROMOTE,
+            )
+            promote = False
+
         if not promote:
             logger.info(
                 "MLTrainer: new MAE %s not better than existing %s; skipping save",
@@ -478,6 +536,25 @@ class Trainer2:
             )
             return
 
+        # grid edge list
+        grid_edges = []
+        if chosen_params:
+            for pk, pv in chosen_params.items():
+                key = pk.replace("model__", "")
+                vals = filtered.get(key) or param_dist.get(key)
+                if vals and (np.isclose(pv, min(vals)) or np.isclose(pv, max(vals))):
+                    grid_edges.append(key)
+        # file diagnostics
+        file_info = {"path": self.model_path}
+        try:
+            st = os.stat(self.model_path) if os.path.exists(self.model_path) else None
+            if st:
+                file_info["size_bytes"] = st.st_size
+                file_info["modified_ts"] = (
+                    datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z"
+                )
+        except Exception:
+            pass
         # metadata
         metadata = {
             "feature_order": self.feature_order,
@@ -492,9 +569,11 @@ class Trainer2:
             "search_best_score": best_score,
             "best_iteration": best_iteration,
             "edge_on_param": bool(edge_flag),
+            "grid_edges": grid_edges,
             "search_failed": bool(search_failed),
             "random_state": self.random_state,
             "runtime_seconds": runtime_seconds,
+            "file": file_info,
         }
 
         # persist model and meta
