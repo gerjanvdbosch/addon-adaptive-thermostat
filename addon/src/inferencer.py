@@ -47,9 +47,7 @@ class Inferencer:
             logger.warning("Setpoint outside plausible range: %s", current_sp)
             return False
 
-        last_sample_sp = (
-            row.data.get("features", {}).get("current_setpoint") if row.data else None
-        )
+        last_sample_sp = row.data.get("current_setpoint") if row.data else None
         if last_sample_sp is None:
             return False
 
@@ -71,9 +69,7 @@ class Inferencer:
             return False
 
         features = self.collector.get_features(ts=now)
-        insert_sample(
-            {"features": features}, label_setpoint=current_sp, user_override=True
-        )
+        insert_sample(features, label_setpoint=current_sp, user_override=True)
         logger.info(
             "Detected user override: last %.1f, current %.1f",
             last_sample_rounded,
@@ -105,11 +101,7 @@ class Inferencer:
         if not unl:
             return None, None
         last = unl[0]
-        feat = (
-            last.data.get("features")
-            if last.data and isinstance(last.data, dict)
-            else None
-        )
+        feat = last.data if last.data and isinstance(last.data, dict) else None
         if not feat:
             return None, None
         # ensure all keys present
@@ -226,13 +218,13 @@ class Inferencer:
                     sid = latest.id
                 else:
                     features = self.collector.get_features(ts=now)
-                    sid = insert_sample({"features": features})
+                    sid = insert_sample(features)
                     update_sample_prediction(
                         sid, predicted_setpoint=pred, prediction_error=None
                     )
             else:
                 features = self.collector.get_features(ts=now)
-                sid = insert_sample({"features": features})
+                sid = insert_sample(features)
                 update_sample_prediction(
                     sid, predicted_setpoint=pred, prediction_error=None
                 )

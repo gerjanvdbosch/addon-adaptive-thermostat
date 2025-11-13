@@ -27,7 +27,7 @@ options:
   use_unlabeled: true
   pseudo_limit: 1000
   weight_label: 1.0
-  weight_pseudo: 0.1
+  weight_pseudo: 0.25
   log_level: info
   sensors:
     temp_change: sensor.woonkamer_temperatuur_verandering

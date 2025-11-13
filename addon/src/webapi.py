@@ -8,7 +8,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Header, Query, Path
 from pydantic import BaseModel, Field
 from config import load_options
-from db import Session, Sample, Metric, insert_sample, update_label
+from db import Session, Sample, insert_sample, update_label
 from ha_client import HAClient
 from trainer import Trainer
 
@@ -39,15 +39,6 @@ class LabelPayload(BaseModel):
     )
 
 
-class MetricOut(BaseModel):
-    id: int
-    timestamp: datetime.datetime
-    model_type: Optional[str]
-    mae: Optional[float]
-    n_samples: Optional[int]
-    meta: Optional[dict]
-
-
 class SampleOut(BaseModel):
     id: int
     timestamp: datetime.datetime
@@ -71,13 +62,6 @@ class PredictionOut(BaseModel):
 def receive_label(payload: LabelPayload, x_addon_token: Optional[str] = Header(None)):
     _check_token(x_addon_token)
     try:
-        ts = None
-        if payload.timestamp:
-            try:
-                ts = datetime.datetime.datetime.fromisoformat(payload.timestamp)
-            except Exception:
-                ts = datetime.datetime.utcnow()
-
         if payload.sample_id is not None:
             update_label(
                 payload.sample_id,
@@ -93,10 +77,7 @@ def receive_label(payload: LabelPayload, x_addon_token: Optional[str] = Header(N
 
         sensors = payload.sensors or {}
         insert_sample(
-            {
-                "timestamp": (ts or datetime.datetime.utcnow()).isoformat(),
-                "features": sensors,
-            },
+            sensors,
             label_setpoint=float(payload.new_setpoint),
             user_override=bool(payload.user_override),
         )
@@ -112,39 +93,6 @@ def receive_label(payload: LabelPayload, x_addon_token: Optional[str] = Header(N
     except Exception as e:
         logger.exception("Error handling /label request: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@app.get("/metrics", response_model=List[MetricOut])
-def list_metrics(
-    limit: int = Query(50, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    x_addon_token: Optional[str] = Header(None),
-):
-    _check_token(x_addon_token)
-    s = Session()
-    try:
-        rows = (
-            s.query(Metric)
-            .order_by(Metric.timestamp.desc())
-            .limit(limit)
-            .offset(offset)
-            .all()
-        )
-        out = []
-        for r in rows:
-            out.append(
-                MetricOut(
-                    id=r.id,
-                    timestamp=r.timestamp,
-                    model_type=r.model_type,
-                    mae=r.mae,
-                    n_samples=r.n_samples,
-                    meta=r.meta or {},
-                )
-            )
-        return out
-    finally:
-        s.close()
 
 
 @app.get("/samples", response_model=List[SampleOut])
@@ -267,7 +215,7 @@ def list_predictions(
             features = None
             current_sp = None
             if r.data and isinstance(r.data, dict):
-                features = r.data.get("features") or r.data
+                features = r.data
                 if isinstance(features, dict):
                     current_sp = features.get("current_setpoint")
             out.append(

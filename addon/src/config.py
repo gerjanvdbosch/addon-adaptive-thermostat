@@ -1,16 +1,15 @@
 import os
 import json
-from typing import Dict, Any
 
 
-def load_options() -> Dict[str, Any]:
+def load_options():
     try:
         sensors = json.loads(os.getenv("SENSORS", None))
     except Exception:
         sensors = None
 
     return {
-        "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.woonkamer"),
+        "climate_entity": os.getenv("CLIMATE_ENTITY", "climate.living_room"),
         "shadow_mode": bool(os.getenv("SHADOW_MODE")),
         "shadow_setpoint": os.getenv("SHADOW_SETPOINT"),
         "inferencer_interval_seconds": int(

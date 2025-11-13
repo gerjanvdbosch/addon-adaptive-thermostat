@@ -10,6 +10,9 @@ from utils import (
     cyclical_day,
     encode_wind,
     encode_binary_onoff,
+    cyclical_month,
+    month_to_season,
+    day_or_night,
 )
 from db import insert_sample
 
@@ -20,6 +23,10 @@ FEATURE_ORDER: List[str] = [
     "hour_cos",
     "day_sin",
     "day_cos",
+    "month_sin",
+    "month_cos",
+    "season",
+    "day_or_night",
     "current_setpoint",
     "current_temp",
     "temp_change",
@@ -38,9 +45,6 @@ FEATURE_ORDER: List[str] = [
     "wind_dir_tomorrow_sin",
     "wind_dir_tomorrow_cos",
     "outside_temp",
-    "thermostat_demand",
-    "operational_status",
-    "prohibit_heat",
 ]
 
 
@@ -105,6 +109,8 @@ class Collector:
         ts = timestamp or datetime.datetime.utcnow()
         hx, hy = cyclical_hour(ts)
         dx, dy = cyclical_day(ts)
+        mx, my = cyclical_month(ts)
+        season_idx = month_to_season(ts)
 
         # these keys are optional in sensor_dict; keep names consistent with what you write into DB
         wind_dir_today = sensor_dict.get("wind_direction_today")
@@ -127,6 +133,10 @@ class Collector:
             "hour_cos": hy,
             "day_sin": dx,
             "day_cos": dy,
+            "month_sin": mx,
+            "month_cos": my,
+            "season": float(season_idx),
+            "day_or_night": float(day_or_night(ts)),
             "current_setpoint": safe_float(sensor_dict.get("current_setpoint")),
             "current_temp": safe_float(sensor_dict.get("current_temp")),
             "temp_change": safe_float(sensor_dict.get("temp_change")),
@@ -173,7 +183,7 @@ class Collector:
         try:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)
-            insert_sample({"features": features})
+            insert_sample(features)
             logger.info(
                 "Sample stored: current_setpoint=%s current_temp=%s",
                 sensors.get("current_setpoint"),

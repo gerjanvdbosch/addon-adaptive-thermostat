@@ -10,7 +10,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import mean_absolute_error
 
-from db import fetch_training_data, insert_metric, update_sample_prediction
+from db import fetch_training_data, update_sample_prediction
 from collector import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
@@ -65,9 +65,7 @@ class Trainer:
         X = []
         y = []
         for r in rows:
-            feat = (
-                r.data.get("features") if r.data and isinstance(r.data, dict) else None
-            )
+            feat = r.data if r.data and isinstance(r.data, dict) else None
             if not feat:
                 continue
             try:
@@ -154,9 +152,7 @@ class Trainer:
         y = []
         used_rows = []
         for r in labeled_rows:
-            feat = (
-                r.data.get("features") if r.data and isinstance(r.data, dict) else None
-            )
+            feat = r.data if r.data and isinstance(r.data, dict) else None
             if not feat:
                 continue
             try:
@@ -187,11 +183,7 @@ class Trainer:
                     if getattr(r, "label_setpoint", None) is not None:
                         continue
 
-                    feat = (
-                        r.data.get("features")
-                        if r.data and isinstance(r.data, dict)
-                        else None
-                    )
+                    feat = r.data if r.data and isinstance(r.data, dict) else None
                     if not feat:
                         continue
 
@@ -379,14 +371,6 @@ class Trainer:
 
         except Exception:
             logger.exception("Failed saving full model")
-
-        # persist metric record (n_samples refers to labeled samples only)
-        try:
-            insert_metric(
-                model_type="full", mae=mae, n_samples=n_labeled, meta=metadata
-            )
-        except Exception:
-            logger.exception("Failed to insert metric record")
 
         # update per-sample predictions for the labeled rows
         try:

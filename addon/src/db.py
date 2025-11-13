@@ -10,7 +10,6 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     JSON,
-    String,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session as SASession
 
@@ -37,16 +36,6 @@ class Sample(Base):
     user_override = Column(Boolean, default=False)
     predicted_setpoint = Column(Float, nullable=True)
     prediction_error = Column(Float, nullable=True)
-
-
-class Metric(Base):
-    __tablename__ = "metrics"
-    id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
-    model_type = Column(String)
-    mae = Column(Float)
-    n_samples = Column(Integer)
-    meta = Column(JSON)
 
 
 Base.metadata.create_all(engine)
@@ -148,17 +137,5 @@ def update_sample_prediction(
                 except Exception:
                     row.prediction_error = None
             s.commit()
-    finally:
-        s.close()
-
-
-def insert_metric(
-    model_type: str, mae: Optional[float], n_samples: int, meta: Optional[dict] = None
-) -> None:
-    s: SASession = Session()
-    try:
-        m = Metric(model_type=model_type, mae=mae, n_samples=n_samples, meta=meta or {})
-        s.add(m)
-        s.commit()
     finally:
         s.close()
