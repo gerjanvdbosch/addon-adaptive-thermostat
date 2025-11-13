@@ -206,7 +206,7 @@ class Trainer2:
             return base, user_dist
 
         # choose mode; can be switched by expand flag when enough labeled data
-        mode = self.opts.get("search_mode", "extended")
+        mode = self.opts.get("search_mode", "compact")
         if (
             self.opts.get("expand_search_next")
             and len(self.opts)
