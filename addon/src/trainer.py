@@ -3,6 +3,7 @@ import logging
 import joblib
 import numpy as np
 from datetime import datetime
+from utils import safe_float
 
 from sklearn.linear_model import SGDRegressor, Ridge
 from sklearn.preprocessing import StandardScaler
@@ -363,10 +364,10 @@ class Trainer:
             joblib.dump({"model": best, "meta": metadata}, full_path)
             logger.info(
                 "Full model updated: OOF-MAE %.3f improved over %.3f (trained on %d labeled user samples and %d pseudo samples)",
-                mae,
-                existing_mae,
-                n_labeled,
-                pseudo_count,
+                safe_float(mae),
+                safe_float(existing_mae),
+                safe_float(n_labeled),
+                safe_float(pseudo_count),
             )
 
         except Exception:
