@@ -549,17 +549,20 @@ class Trainer2:
                     promote = False
                     promotion_reason = "not_better"
 
-        logger.info(
-            "Promotion decision: promote=%s reason=%s mae=%s existing_mae=%s n_labeled=%s force=%s",
-            promote,
-            promotion_reason,
-            mae,
-            "{:.4f}",
-            existing_mae,
-            "{:.4f}",
-            n_labeled,
-            force,
+        # Safe formatted logging for the promotion decision
+        promo_log = (
+            "Promotion decision: promote={promote} reason={reason} mae={mae} existing_mae={existing} "
+            "n_labeled={n} force={force}"
+        ).format(
+            promote=str(promote),
+            reason=str(promotion_reason),
+            mae=("None" if mae is None else f"{mae:.4f}"),
+            existing=("None" if existing_mae is None else f"{existing_mae:.4f}"),
+            n=str(n_labeled),
+            force=str(force),
         )
+        logger.info(promo_log)
+
         # grid edge list
         grid_edges = []
         if chosen_params:
