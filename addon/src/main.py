@@ -59,7 +59,7 @@ def main():
         trainer.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
     )
     scheduler.add_job(
-        trainer2.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain"
+        trainer2.train_job, "cron", hour=hh, minute=mm, id="full_retrain2"
     )
     scheduler.add_job(
         inferencer.inference_job,
@@ -71,7 +71,7 @@ def main():
         inferencer2.inference_job,
         "interval",
         seconds=opts["inferencer_interval_seconds"],
-        id="inference",
+        id="inference2",
     )
 
     scheduler.start()
