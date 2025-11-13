@@ -1,6 +1,7 @@
 import logging
 import datetime
 import time
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List
 
 from utils import (
@@ -90,6 +91,7 @@ class Collector:
         Defensive: uses safe_float and encoding helpers.
         """
         ts = timestamp or datetime.datetime.utcnow()
+        ts = ts.replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
         hx, hy = cyclical_hour(ts)
         dx, dy = cyclical_day(ts)
         mx, my = cyclical_month(ts)
