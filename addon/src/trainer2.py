@@ -276,7 +276,10 @@ class Trainer2:
             else:
                 ignored.append(k)
         if ignored:
-            logger.warning("Ignoring unsupported hyperparam keys for estimator: %s", ", ".join(sorted(ignored)))
+            logger.warning(
+                "Ignoring unsupported hyperparam keys for estimator: %s",
+                ", ".join(sorted(ignored)),
+            )
         param_dist_pipe = {f"model__{k}": v for k, v in filtered.items()}
 
         n_jobs = int(self.opts.get("n_jobs", 1))
@@ -378,7 +381,7 @@ class Trainer2:
             if chosen_params:
                 for k, v in chosen_params.items():
                     key = k.replace("model__", "")
-                    vals = (filtered.get(key) or param_dist.get(key))
+                    vals = filtered.get(key) or param_dist.get(key)
                     if vals and (np.isclose(v, min(vals)) or np.isclose(v, max(vals))):
                         edge_flag = True
                         logger.warning("Chosen param %s=%s is on grid edge", key, v)
