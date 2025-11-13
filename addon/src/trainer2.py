@@ -27,6 +27,40 @@ def _atomic_dump(obj, path):
     os.replace(tmp, path)
 
 
+def _top_features_from_model(model, feature_order, top_n=10):
+    """
+    Return list of (feature_name, importance) sorted desc by importance.
+    Handles pipeline with named_steps['model'] and raw estimators with feature_importances_.
+    """
+    try:
+        core = model
+        if hasattr(model, "named_steps") and "model" in getattr(model, "named_steps"):
+            core = model.named_steps["model"]
+        if not hasattr(core, "feature_importances_"):
+            return []
+        importances = getattr(core, "feature_importances_")
+        # ensure numpy -> native
+        try:
+            import numpy as _np
+
+            importances = _np.asarray(importances).astype(float)
+        except Exception:
+            importances = list(importances)
+        pairs = []
+        for i, imp in enumerate(importances):
+            name = feature_order[i] if i < len(feature_order) else f"f{i}"
+            try:
+                val = float(imp)
+            except Exception:
+                continue
+            pairs.append((name, val))
+        pairs.sort(key=lambda t: t[1], reverse=True)
+        return pairs[:top_n]
+    except Exception:
+        logger.exception("Failed extracting top features")
+        return []
+
+
 def _assemble_matrix(rows, feature_order):
     X = []
     y = []
@@ -478,6 +512,13 @@ class Trainer2:
             )
             return
 
+        try:
+            top_feats = _top_features_from_model(
+                best_pipe, self.feature_order, top_n=10
+            )
+        except Exception:
+            top_feats = []
+
         # metadata
         metadata = {
             "feature_order": self.feature_order,
@@ -495,6 +536,7 @@ class Trainer2:
             "search_failed": bool(search_failed),
             "random_state": self.random_state,
             "runtime_seconds": runtime_seconds,
+            "top_features": [[name, float(imp)] for name, imp in top_feats],
         }
 
         # persist model and meta
