@@ -14,6 +14,7 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.inspection import permutation_importance
 from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
 from collector import FEATURE_ORDER
+from scipy.stats import loguniform, randint
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ class Trainer2:
       - allow_force: True (but persistent save requires n_labeled >= 30)
       - refit_on_full: True
       - promotion_delta_mae: 0.0
+      - require_user_override: True (if set true, only rows with user_override are considered labeled)
     """
 
     def __init__(self, ha_client, opts: dict):
@@ -94,20 +96,27 @@ class Trainer2:
     def _fetch_data(self):
         buffer_days = int(self.opts.get("buffer_days", 30))
         rows = fetch_training_data(days=buffer_days)
+
+        # allow opt to control whether only user_override rows count as labeled
+        require_user_override = bool(self.opts.get("require_user_override", True))
         labeled_rows = [
             r
             for r in rows
-            if r.label_setpoint is not None and getattr(r, "user_override", False)
+            if r.label_setpoint is not None
+            and (not require_user_override or getattr(r, "user_override", False))
         ]
         X_lab, y_lab, used_rows = _assemble_matrix(labeled_rows, self.feature_order)
-        X_list, y_list = ([], [])
-        if X_lab is not None:
-            X_list.append(X_lab)
-            y_list.append(y_lab)
 
         pseudo_count = 0
         pseudo_X = None
         pseudo_y = None
+
+        X_list = []
+        y_list = []
+
+        if X_lab is not None:
+            X_list.append(X_lab)
+            y_list.append(y_lab)
 
         MIN_LABELS_FOR_PSEUDO = int(self.opts.get("min_labels_for_pseudo", 30))
         allow_pseudo_by_config = bool(self.opts.get("use_unlabeled", False))
@@ -234,51 +243,28 @@ class Trainer2:
 
         param_dist = compact if mode == "compact" else extended
 
-        try:
-            sampled = {}
-            # learning_rate: log-uniform-like samples (100 values)
-            lr_samples = (
-                10 ** np.random.uniform(np.log10(1e-4), np.log10(1e-1), size=100)
-            ).tolist()
-            sampled["learning_rate"] = lr_samples
+        # Always use scipy distributions for RandomizedSearchCV
+        sampled = {}
+        sampled["learning_rate"] = loguniform(1e-4, 1e-1)
+        sampled["l2_regularization"] = loguniform(1e-6, 1.0)
 
-            # l2_regularization: log-uniform-like samples (50 values)
-            l2_samples = (
-                10 ** np.random.uniform(np.log10(1e-6), np.log10(1.0), size=50)
-            ).tolist()
-            sampled["l2_regularization"] = l2_samples
+        mi_min, mi_max = min(param_dist["max_iter"]), max(param_dist["max_iter"])
+        sampled["max_iter"] = randint(mi_min, mi_max + 1)
 
-            # integer ranges: max_iter, max_leaf_nodes, min_samples_leaf
-            mi_min, mi_max = min(param_dist["max_iter"]), max(param_dist["max_iter"])
-            sampled["max_iter"] = list(
-                range(mi_min, mi_max + 1, max(1, (mi_max - mi_min) // 50))
-            )
+        mln_min, mln_max = min(param_dist["max_leaf_nodes"]), max(
+            param_dist["max_leaf_nodes"]
+        )
+        sampled["max_leaf_nodes"] = randint(mln_min, mln_max + 1)
 
-            mln_min, mln_max = min(param_dist["max_leaf_nodes"]), max(
-                param_dist["max_leaf_nodes"]
-            )
-            sampled["max_leaf_nodes"] = list(
-                range(mln_min, mln_max + 1, max(1, (mln_max - mln_min) // 20))
-            )
+        ms_min, ms_max = min(param_dist["min_samples_leaf"]), max(
+            param_dist["min_samples_leaf"]
+        )
+        sampled["min_samples_leaf"] = randint(ms_min, ms_max + 1)
 
-            ms_min, ms_max = min(param_dist["min_samples_leaf"]), max(
-                param_dist["min_samples_leaf"]
-            )
-            sampled["min_samples_leaf"] = list(
-                range(ms_min, ms_max + 1, max(1, (ms_max - ms_min) // 10))
-            )
+        sampled["max_features"] = param_dist.get("max_features", [1.0])
+        sampled["validation_fraction"] = param_dist.get("validation_fraction", [0.1])
 
-            # categorical-like remain lists from param_dist
-            sampled["max_features"] = param_dist.get("max_features", [1.0])
-            sampled["validation_fraction"] = param_dist.get(
-                "validation_fraction", [0.1]
-            )
-
-            return base, sampled
-        except Exception:
-            return base, param_dist
-
-        return base, param_dist
+        return base, sampled
 
     def _time_splits(self, n_labeled):
         min_train = int(self.opts.get("min_train_size", 30))
@@ -383,7 +369,26 @@ class Trainer2:
 
         n_jobs = int(self.opts.get("n_jobs", 1))
         tss_splits = self._time_splits(n_labeled)
-        cv = TimeSeriesSplit(n_splits=tss_splits) if tss_splits else None
+
+        # Ensure cv is valid relative to training set size
+        cv = None
+        if tss_splits:
+            try:
+                n_train = len(X_train)
+                if tss_splits >= 2 and tss_splits < n_train:
+                    cv = TimeSeriesSplit(n_splits=tss_splits)
+                else:
+                    logger.info(
+                        "TimeSeriesSplit disabled: requested n_splits=%s not valid for n_train=%d",
+                        str(tss_splits),
+                        n_train,
+                    )
+                    cv = None
+            except Exception:
+                logger.exception(
+                    "Failed creating TimeSeriesSplit; falling back to None"
+                )
+                cv = None
 
         chosen_params = None
         best_pipe = None
@@ -438,12 +443,12 @@ class Trainer2:
                     )
                 ]
             )
+            # Use consistent fit kwargs for fallback as well
+            fallback_fit_kwargs = {}
+            if sw_train is not None:
+                fallback_fit_kwargs["model__sample_weight"] = sw_train
             try:
-                if "reg_lambda" in self.opts:
-                    best_pipe.set_params(
-                        model__l2_regularization=float(self.opts.get("reg_lambda", 1.0))
-                    )
-                best_pipe.fit(X_train, y_train, model__sample_weight=sw_train)
+                best_pipe.fit(X_train, y_train, **fallback_fit_kwargs)
             except Exception:
                 logger.exception("MLTrainer: fallback fit failed")
                 return
