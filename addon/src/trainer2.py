@@ -216,18 +216,22 @@ class Trainer2:
             mode = "extended"
 
         compact = {
-            "max_iter": [200, 400, 800],
-            "max_leaf_nodes": [31, 63],
+            "max_iter": [100, 200, 400],
+            "max_leaf_nodes": [15, 31, 63],
             "learning_rate": [0.01, 0.03, 0.05],
-            "min_data_in_leaf": [10, 30],
+            "min_samples_leaf": [10, 20, 40],
             "l2_regularization": [0.0, 0.01, 0.1],
+            "max_features": [0.6, 0.8, 1.0],
         }
+
         extended = {
             "max_iter": [300, 600, 1000, 1500, 2000],
             "max_leaf_nodes": [15, 31, 63, 127, 255],
             "learning_rate": [0.001, 0.005, 0.01, 0.02, 0.05],
-            "min_data_in_leaf": [5, 10, 20, 50],
+            "min_samples_leaf": [5, 10, 20, 50],
             "l2_regularization": [0.0, 1e-3, 0.01, 0.1, 1.0],
+            "max_features": [0.5, 0.7, 0.9, 1.0],
+            "validation_fraction": [0.05, 0.1, 0.2],
         }
 
         param_dist = compact if mode == "compact" else extended
