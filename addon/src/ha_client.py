@@ -61,7 +61,7 @@ class HAClient:
             attrs = climate.get("attributes", {})
             current_temp = safe_float(attrs.get("current_temperature"))
             current_setpoint = safe_float(attrs.get("temperature"))
-            hvac_mode = climate.get("state")
+            hvac_mode = climate.get("state").strip().lower()
         if current_setpoint is None:
             raise RuntimeError("Failed to read current setpoint")
         if current_temp is None:

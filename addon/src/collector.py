@@ -103,8 +103,9 @@ class Collector:
         wtd_sin, wtd_cos = encode_wind(wind_dir_today)
         wtm_sin, wtm_cos = encode_wind(wind_dir_tomorrow)
 
-        hvac_mode = str(sensor_dict.get("hvac_mode")).strip().lower()
-        hvac = {"off": 0, "heat": 1, "cool": 2}.get(hvac_mode, 0)
+        hvac_mode = {"off": 0, "heat": 1, "cool": 2}.get(
+            sensor_dict.get("hvac_mode"), 0
+        )
 
         return {
             "hour_sin": hx,
@@ -139,7 +140,7 @@ class Collector:
             "wind_dir_tomorrow_sin": wtm_sin,
             "wind_dir_tomorrow_cos": wtm_cos,
             "outside_temp": safe_float(sensor_dict.get("outside_temp")),
-            "hvac_mode": safe_float(hvac),
+            "hvac_mode": safe_float(hvac_mode),
         }
 
     def get_features(self, ts: datetime):
