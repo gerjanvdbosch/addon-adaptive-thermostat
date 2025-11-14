@@ -840,26 +840,35 @@ class Trainer2:
             logger.exception("MLTrainer: failed saving model")
             return
 
-        # update per-sample predictions
+        # update per-sample predictions (compact, correct mapping)
         try:
             if n_labeled > 0:
+                # prefer reuse of already computed OOF preds_labeled
                 try:
-                    preds_for_update = (
-                        preds_labeled  # prefer OOF preds if computed earlier
-                    )
+                    preds_for_update = preds_labeled
                 except NameError:
                     preds_for_update = predict_fn(X[:n_labeled])
 
                 preds_for_update = np.asarray(preds_for_update, dtype=float)
-                for row, pred in zip(used_rows, preds_for_update):
+
+                # ensure lengths align; iterate by index to guarantee y-index matches
+                upto = min(len(used_rows), n_labeled, len(preds_for_update))
+                if upto != len(used_rows):
+                    logger.warning(
+                        "Length mismatch when updating samples: used_rows=%d n_labeled=%d preds=%d -> truncating to %d",
+                        len(used_rows),
+                        n_labeled,
+                        len(preds_for_update),
+                        upto,
+                    )
+
+                for i in range(upto):
+                    row = used_rows[i]
                     try:
-                        err = (
-                            abs(float(pred) - float(y[used_rows.index(row)]))
-                            if y is not None
-                            else None
-                        )
+                        pred = float(preds_for_update[i])
+                        err = abs(pred - float(y[i])) if y is not None else None
                         update_sample_prediction(
-                            row.id, predicted_setpoint=float(pred), prediction_error=err
+                            row.id, predicted_setpoint=pred, prediction_error=err
                         )
                     except Exception:
                         logger.exception(
