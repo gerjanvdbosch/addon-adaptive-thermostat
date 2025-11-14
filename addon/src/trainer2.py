@@ -329,26 +329,37 @@ class Trainer2:
 
         # validation split with minimum reliable val size
         val_frac = float(self.opts.get("val_fraction", 0.15))
-        min_val_size = int(self.opts.get("min_val_size", 10))  # new opt, default 10
+        # verhoog minimum voor betrouwbare permutation/SHAP analyses naar 30
+        min_val_size = int(self.opts.get("min_val_size", 30))  # default 30 now
+
         # compute initial val_size and increase val_frac if necessary to reach min_val_size
         val_size = max(1, int(n_total * val_frac))
         if val_size < min_val_size:
-            # raise val_frac just enough to reach min_val_size but not exceed 0.5
-            desired_frac = min(0.5, float(min_val_size) / max(1, n_total))
-            if desired_frac > val_frac:
+            # only increase if dataset large enough to provide min_val_size samples
+            if n_total > min_val_size:
+                desired_frac = min(0.5, float(min_val_size) / max(1, n_total))
+                if desired_frac > val_frac:
+                    logger.info(
+                        "Increasing val_fraction from %.3f to %.3f to ensure min_val_size=%d (n_total=%d)",
+                        val_frac,
+                        desired_frac,
+                        min_val_size,
+                        n_total,
+                    )
+                    val_frac = desired_frac
+                    val_size = max(1, int(n_total * val_frac))
+            else:
+                # Not enough total samples to reach min_val_size; use largest possible val_size while keeping at least one train sample
+                val_size = max(1, n_total - 1)
                 logger.info(
-                    "Increasing val_fraction from %.3f to %.3f to ensure min_val_size=%d (n_total=%d)",
-                    val_frac,
-                    desired_frac,
-                    min_val_size,
+                    "Total samples (%d) < min_val_size (%d); using val_size=%d (train will be small).",
                     n_total,
+                    min_val_size,
+                    val_size,
                 )
-                val_frac = desired_frac
-                val_size = max(1, int(n_total * val_frac))
 
-        val_size = min(
-            val_size, max(1, n_total - 1)
-        )  # keep at least one training sample
+        # ensure at least one train sample remains
+        val_size = min(val_size, max(1, n_total - 1))
         train_idx = slice(0, n_total - val_size)
         val_idx = slice(n_total - val_size, n_total)
 
@@ -723,13 +734,17 @@ class Trainer2:
             )
             return
 
-        # compute/import feature importances: try model importances, fallback to permutation on X_val
+        # compute/import feature importances: try native model importances first,
+        # then SHAP TreeExplainer if available and X_val big enough, otherwise permutation_importance.
         top_feats = []
+        importance_reliable = False
         try:
+            # 1) native feature_importances_ if present and non-trivial
             model_core = best_pipe.named_steps.get("model")
-            if hasattr(model_core, "feature_importances_"):
-                imps = getattr(model_core, "feature_importances_", None)
-                if imps is not None:
+            imps = getattr(model_core, "feature_importances_", None)
+            if imps is not None:
+                # Only accept native importances if they contain non-zero variance
+                if np.any(np.asarray(imps, dtype=float) != 0.0):
                     pairs = []
                     for i, v in enumerate(imps):
                         name = (
@@ -740,8 +755,98 @@ class Trainer2:
                         pairs.append((name, float(v)))
                     pairs.sort(key=lambda t: t[1], reverse=True)
                     top_feats = pairs[: min(10, len(pairs))]
+                    importance_reliable = True
         except Exception:
             logger.exception("Failed extracting native feature importances")
+
+        # 2) If native importances not reliable, try SHAP when validation set large enough
+        try:
+            if (
+                (not importance_reliable)
+                and X_val is not None
+                and len(X_val) >= int(self.opts.get("min_val_size", 30))
+            ):
+                try:
+                    # Prefer SHAP for tree models if available
+                    try:
+                        import shap  # type: ignore
+
+                        # use TreeExplainer on the fitted model (pipeline may wrap the model)
+                        model_for_shap = best_pipe.named_steps.get("model")
+                        # if pipeline contains preprocessing you may need to pass full pipeline to SHAP
+                        explainer = shap.Explainer(
+                            model_for_shap, feature_perturbation="tree"
+                        )
+                        # compute SHAP values on X_val (may be expensive)
+                        shap_vals = explainer(X_val)
+                        # shap_vals.values shape: (n_samples, n_features)
+                        mean_abs = np.mean(np.abs(shap_vals.values), axis=0)
+                        inds = np.argsort(mean_abs)[::-1][:10]
+                        top_feats = [
+                            (self.feature_order[i], float(mean_abs[i])) for i in inds
+                        ]
+                        importance_reliable = True
+                    except Exception:
+                        logger.exception(
+                            "SHAP analysis failed; falling back to permutation_importance"
+                        )
+                        # fall through to permutation_importance fallback below
+                except Exception:
+                    logger.exception("Failed importing/using SHAP")
+        except Exception:
+            logger.exception("SHAP wrapper failed")
+
+        # 3) Permutation importance fallback (only if still not reliable and X_val large enough)
+        try:
+            if (
+                (not importance_reliable)
+                and X_val is not None
+                and len(X_val) >= int(self.opts.get("min_val_size", 30))
+                and best_pipe is not None
+            ):
+                try:
+                    # Use MAE as scoring and increase repeats for stability
+                    res = permutation_importance(
+                        best_pipe,
+                        X_val,
+                        y_val,
+                        n_repeats=int(self.opts.get("perm_repeats", 30)),
+                        random_state=self.random_state,
+                        n_jobs=1,
+                        scoring="neg_mean_absolute_error",
+                    )
+                    importances = res.importances_mean
+                    if importances is not None and len(importances) == len(
+                        self.feature_order
+                    ):
+                        inds = np.argsort(importances)[::-1][:10]
+                        top_feats = [
+                            (self.feature_order[i], float(importances[i])) for i in inds
+                        ]
+                        importance_reliable = True
+                    else:
+                        logger.warning(
+                            "Permutation importance returned unexpected shape: importances=%s",
+                            None if importances is None else importances.shape,
+                        )
+                except Exception:
+                    logger.exception("Permutation importance failed")
+        except Exception:
+            logger.exception("Permutation importance wrapper failed")
+
+        # If still not reliable, mark top_feats as unreliable (and return zeros to preserve metadata shape)
+        if not importance_reliable:
+            logger.warning(
+                "Feature importance not reliable for this run: X_val n=%d, n_labeled=%d",
+                0 if X_val is None else len(X_val),
+                n_labeled,
+            )
+            # produce placeholder list with zeros to keep metadata format consistent, add flag
+            top_feats = [
+                (name, 0.0)
+                for name in self.feature_order[: min(10, len(self.feature_order))]
+            ]
+            # also store an indicator in metadata later (see metadata block below)
 
         # permutation fallback if no native importances or empty and we have a validation set
         try:
@@ -840,6 +945,7 @@ class Trainer2:
             "random_state": self.random_state,
             "runtime_seconds": runtime_seconds,
             "top_features": [[name, float(imp)] for name, imp in top_feats],
+            "feature_importance_reliable": bool(importance_reliable),
             "file": file_info,
         }
 
