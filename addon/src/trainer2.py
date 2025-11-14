@@ -14,6 +14,12 @@ from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
 from sklearn.inspection import permutation_importance
 
+
+from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
+from collector import FEATURE_ORDER
+
+logger = logging.getLogger(__name__)
+
 # try to import scipy distributions for RandomizedSearch; fallback gracefully
 try:
     from scipy.stats import loguniform, randint
@@ -22,11 +28,6 @@ try:
     logger.info("Scipy detected: enabling advanced hyperparameter distributions")
 except Exception:
     SCIPY_AVAILABLE = False
-
-from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
-from collector import FEATURE_ORDER
-
-logger = logging.getLogger(__name__)
 
 
 def _atomic_dump(obj: Any, path: str) -> None:
@@ -101,6 +102,7 @@ class Trainer2:
         self.feature_order = FEATURE_ORDER
         self.backend = "sklearn_histgb"
         self.random_state = int(self.opts.get("random_state", 42))
+        logger.info("Current hour %s", str(datetime.now().hour))
 
     def _fetch_data(self):
         buffer_days = int(self.opts.get("buffer_days", 30))
