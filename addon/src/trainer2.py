@@ -327,8 +327,26 @@ class Trainer2:
                 n_iter = n_iter_compact
                 self.opts["search_mode"] = "compact"
 
+        # validation split with minimum reliable val size
         val_frac = float(self.opts.get("val_fraction", 0.15))
+        min_val_size = int(self.opts.get("min_val_size", 10))  # new opt, default 10
+        # compute initial val_size and increase val_frac if necessary to reach min_val_size
         val_size = max(1, int(n_total * val_frac))
+        if val_size < min_val_size:
+            # raise val_frac just enough to reach min_val_size but not exceed 0.5
+            desired_frac = min(0.5, float(min_val_size) / max(1, n_total))
+            if desired_frac > val_frac:
+                logger.info(
+                    "Increasing val_fraction from %.3f to %.3f to ensure min_val_size=%d (n_total=%d)",
+                    val_frac,
+                    desired_frac,
+                    min_val_size,
+                    n_total,
+                )
+                val_frac = desired_frac
+                val_size = max(1, int(n_total * val_frac))
+
+        val_size = min(val_size, max(1, n_total - 1))  # keep at least one training sample
         train_idx = slice(0, n_total - val_size)
         val_idx = slice(n_total - val_size, n_total)
 
@@ -848,7 +866,7 @@ class Trainer2:
         # update per-sample predictions
         try:
             if n_labeled > 0:
-                preds_labeled = best_pipe.predict(X[:n_labeled])
+                preds = predict_fn(X[:n_labeled])
                 for i, row in enumerate(used_rows):
                     try:
                         pred = float(preds_labeled[i])
