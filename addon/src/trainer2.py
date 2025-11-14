@@ -840,42 +840,21 @@ class Trainer2:
             logger.exception("MLTrainer: failed saving model")
             return
 
-        # update per-sample predictions (compact, correct mapping)
+        # update per-sample predictions
         try:
             if n_labeled > 0:
-                # prefer reuse of already computed OOF preds_labeled
-                try:
-                    preds_for_update = preds_labeled
-                except NameError:
-                    preds_for_update = predict_fn(X[:n_labeled])
-
-                preds_for_update = np.asarray(preds_for_update, dtype=float)
-
-                # ensure lengths align; iterate by index to guarantee y-index matches
-                upto = min(len(used_rows), n_labeled, len(preds_for_update))
-                if upto != len(used_rows):
-                    logger.warning(
-                        "Length mismatch when updating samples: used_rows=%d n_labeled=%d preds=%d -> truncating to %d",
-                        len(used_rows),
-                        n_labeled,
-                        len(preds_for_update),
-                        upto,
-                    )
-
-                for i in range(upto):
-                    row = used_rows[i]
+                preds_labeled = best_pipe.predict(X[:n_labeled])
+                for i, row in enumerate(used_rows):
                     try:
-                        pred = float(preds_for_update[i])
+                        pred = float(preds_labeled[i])
                         err = abs(pred - float(y[i])) if y is not None else None
                         update_sample_prediction(
                             row.id, predicted_setpoint=pred, prediction_error=err
                         )
                     except Exception:
                         logger.exception(
-                            "MLTrainer: failed updating sample prediction for %s",
+                            "Failed updating sample prediction for sample %s",
                             getattr(row, "id", None),
                         )
         except Exception:
-            logger.exception(
-                "MLTrainer: failed computing/updating per-sample predictions"
-            )
+            logger.exception("Failed to compute/update per-sample predictions")
