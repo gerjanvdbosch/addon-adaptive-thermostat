@@ -11,7 +11,6 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import KFold
 from sklearn.inspection import permutation_importance
 from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
 from collector import FEATURE_ORDER
@@ -81,6 +80,8 @@ class Trainer2:
       - refit_on_full: True
       - promotion_delta_mae: 0.0
       - require_user_override: True (if set true, only rows with user_override are considered labeled)
+      - min_val_size: 30
+      - min_train_for_search: 10
     """
 
     def __init__(self, ha_client, opts: dict):
@@ -328,16 +329,16 @@ class Trainer2:
                 n_iter = n_iter_compact
                 self.opts["search_mode"] = "compact"
 
-        # validation split with minimum reliable val size
         val_frac = float(self.opts.get("val_fraction", 0.15))
-        # verhoog minimum voor betrouwbare permutation/SHAP analyses naar 30
-        min_val_size = int(self.opts.get("min_val_size", 30))  # default 30 now
+        min_val_size = int(self.opts.get("min_val_size", 30))
+        min_train_for_search = int(self.opts.get("min_train_for_search", 10))
 
-        # compute initial val_size and increase val_frac if necessary to reach min_val_size
+        # initial val size
         val_size = max(1, int(n_total * val_frac))
-        if val_size < min_val_size:
-            # only increase if dataset large enough to provide min_val_size samples
-            if n_total > min_val_size:
+
+        # if dataset large enough for both goals, increase val to min_val_size
+        if n_total >= (min_val_size + min_train_for_search):
+            if val_size < min_val_size:
                 desired_frac = min(0.5, float(min_val_size) / max(1, n_total))
                 if desired_frac > val_frac:
                     logger.info(
@@ -349,17 +350,20 @@ class Trainer2:
                     )
                     val_frac = desired_frac
                     val_size = max(1, int(n_total * val_frac))
-            else:
-                # Not enough total samples to reach min_val_size; use largest possible val_size while keeping at least one train sample
-                val_size = max(1, n_total - 1)
+        else:
+            # Not enough total samples to satisfy both; ensure at least min_train_for_search remain for training when possible
+            max_val_allowed = max(1, n_total - min_train_for_search)
+            if val_size > max_val_allowed:
                 logger.info(
-                    "Total samples (%d) < min_val_size (%d); using val_size=%d (train will be small).",
-                    n_total,
-                    min_val_size,
+                    "Reducing val_size from %d to %d to preserve min_train_for_search=%d (n_total=%d)",
                     val_size,
+                    max_val_allowed,
+                    min_train_for_search,
+                    n_total,
                 )
+                val_size = max_val_allowed
 
-        # ensure at least one train sample remains
+        # final safety: keep at least one train sample
         val_size = min(val_size, max(1, n_total - 1))
         train_idx = slice(0, n_total - val_size)
         val_idx = slice(n_total - val_size, n_total)
@@ -402,39 +406,26 @@ class Trainer2:
         n_jobs = int(self.opts.get("n_jobs", 1))
         tss_splits = self._time_splits(n_labeled)
 
+        # create safe CV relative to training set size
         cv = None
-        if tss_splits:
-            try:
-                n_train = X_train.shape[0]
-                # TimeSeriesSplit requires n_splits < n_train
-                if tss_splits >= 2 and tss_splits < n_train:
-                    cv = TimeSeriesSplit(n_splits=tss_splits)
-                    logger.info(
-                        "Using TimeSeriesSplit with n_splits=%d (n_train=%d)",
-                        tss_splits,
-                        n_train,
-                    )
-                else:
-                    # fallback: if too few training samples, use small KFold (must have n_splits < n_train)
-                    fallback_splits = max(2, min(3, max(1, n_train - 1)))
-                    if fallback_splits < n_train:
-                        cv = KFold(n_splits=fallback_splits)
-                        logger.info(
-                            "TimeSeriesSplit invalid for n_train=%d; falling back to KFold(n_splits=%d)",
-                            n_train,
-                            fallback_splits,
-                        )
-                    else:
-                        cv = None
-                        logger.info(
-                            "No CV used for hypersearch (n_train=%d, requested_tss=%s)",
-                            n_train,
-                            str(tss_splits),
-                        )
-            except Exception:
-                logger.exception("Failed creating CV splitter; falling back to None")
-                cv = None
+        try:
+            n_train = X_train.shape[0]
+        except Exception:
+            n_train = 0
+        if tss_splits and n_train > tss_splits:
+            cv = TimeSeriesSplit(n_splits=tss_splits)
+            logger.info(
+                "Using TimeSeriesSplit with n_splits=%d (n_train=%d)",
+                tss_splits,
+                n_train,
+            )
         else:
+            # fallback to None (no CV) for small training sets; hypersearch will be skipped below if too small
+            logger.info(
+                "Not using TimeSeriesSplit for hypersearch (tss_splits=%s n_train=%d)",
+                str(tss_splits),
+                n_train,
+            )
             cv = None
 
         chosen_params = None
@@ -444,53 +435,30 @@ class Trainer2:
         edge_flag = False
         best_iteration = None
 
-        try:
-            search = RandomizedSearchCV(
-                pipe,
-                param_distributions=param_dist_pipe,
-                n_iter=n_iter,
-                cv=cv,
-                scoring="neg_mean_absolute_error",
-                n_jobs=n_jobs,
-                random_state=self.random_state,
-                verbose=0,
-            )
-            fit_kwargs = {}
-            if sw_train is not None:
-                fit_kwargs["model__sample_weight"] = sw_train
+        # If not enough training samples, skip expensive RandomizedSearchCV and use fallback fit
+        if n_train < min_train_for_search:
             logger.info(
-                "MLTrainer: running hyperparameter search (n_iter=%d, cv=%s)",
-                n_iter,
-                "TimeSeriesSplit" if cv else "None",
-            )
-            search.fit(X_train, y_train, **fit_kwargs)
-            best_pipe = search.best_estimator_
-            chosen_params = getattr(search, "best_params_", None)
-            best_score = getattr(search, "best_score_", None)
-            logger.info(
-                "Hypersearch complete: best_score=%s best_params=%s",
-                str(best_score),
-                str(chosen_params),
-            )
-        except Exception:
-            search_failed = True
-            logger.exception(
-                "MLTrainer: search failed; falling back to default estimator"
+                "Skipping RandomizedSearchCV: n_train=%d < min_train_for_search=%d. Using fallback estimator.",
+                n_train,
+                min_train_for_search,
             )
             best_pipe = Pipeline(
                 [
                     (
                         "model",
                         HistGradientBoostingRegressor(
-                            max_iter=300,
-                            max_leaf_nodes=63,
-                            learning_rate=0.01,
+                            max_iter=int(self.opts.get("fallback_max_iter", 100)),
+                            max_leaf_nodes=int(
+                                self.opts.get("fallback_max_leaf_nodes", 31)
+                            ),
+                            learning_rate=float(
+                                self.opts.get("fallback_learning_rate", 0.05)
+                            ),
                             random_state=self.random_state,
                         ),
                     )
                 ]
             )
-            # Use consistent fit kwargs for fallback as well
             fallback_fit_kwargs = {}
             if sw_train is not None:
                 fallback_fit_kwargs["model__sample_weight"] = sw_train
@@ -499,6 +467,62 @@ class Trainer2:
             except Exception:
                 logger.exception("MLTrainer: fallback fit failed")
                 return
+            search_failed = True
+        else:
+            try:
+                search = RandomizedSearchCV(
+                    pipe,
+                    param_distributions=param_dist_pipe,
+                    n_iter=n_iter,
+                    cv=cv,
+                    scoring="neg_mean_absolute_error",
+                    n_jobs=n_jobs,
+                    random_state=self.random_state,
+                    verbose=0,
+                )
+                fit_kwargs = {}
+                if sw_train is not None:
+                    fit_kwargs["model__sample_weight"] = sw_train
+                logger.info(
+                    "MLTrainer: running hyperparameter search (n_iter=%d, cv=%s)",
+                    n_iter,
+                    "TimeSeriesSplit" if cv else "None",
+                )
+                search.fit(X_train, y_train, **fit_kwargs)
+                best_pipe = search.best_estimator_
+                chosen_params = getattr(search, "best_params_", None)
+                best_score = getattr(search, "best_score_", None)
+                logger.info(
+                    "Hypersearch complete: best_score=%s best_params=%s",
+                    str(best_score),
+                    str(chosen_params),
+                )
+            except Exception:
+                search_failed = True
+                logger.exception(
+                    "MLTrainer: search failed; falling back to default estimator"
+                )
+                best_pipe = Pipeline(
+                    [
+                        (
+                            "model",
+                            HistGradientBoostingRegressor(
+                                max_iter=300,
+                                max_leaf_nodes=63,
+                                learning_rate=0.01,
+                                random_state=self.random_state,
+                            ),
+                        )
+                    ]
+                )
+                fallback_fit_kwargs = {}
+                if sw_train is not None:
+                    fallback_fit_kwargs["model__sample_weight"] = sw_train
+                try:
+                    best_pipe.fit(X_train, y_train, **fallback_fit_kwargs)
+                except Exception:
+                    logger.exception("MLTrainer: fallback fit failed")
+                    return
 
         # capture iteration info if present
         try:
@@ -775,7 +799,6 @@ class Trainer2:
         except Exception:
             logger.exception("Failed extracting native feature importances")
 
-        # 2) If native importances not reliable, try SHAP when validation set large enough
         try:
             if (
                 (not importance_reliable)
@@ -783,36 +806,26 @@ class Trainer2:
                 and len(X_val) >= int(self.opts.get("min_val_size", 30))
             ):
                 try:
-                    # Prefer SHAP for tree models if available
-                    try:
-                        import shap  # type: ignore
+                    import shap  # type: ignore
 
-                        # use TreeExplainer on the fitted model (pipeline may wrap the model)
-                        model_for_shap = best_pipe.named_steps.get("model")
-                        # if pipeline contains preprocessing you may need to pass full pipeline to SHAP
-                        explainer = shap.Explainer(
-                            model_for_shap, feature_perturbation="tree"
-                        )
-                        # compute SHAP values on X_val (may be expensive)
-                        shap_vals = explainer(X_val)
-                        # shap_vals.values shape: (n_samples, n_features)
-                        mean_abs = np.mean(np.abs(shap_vals.values), axis=0)
-                        inds = np.argsort(mean_abs)[::-1][:10]
-                        top_feats = [
-                            (self.feature_order[i], float(mean_abs[i])) for i in inds
-                        ]
-                        importance_reliable = True
-                    except Exception:
-                        logger.exception(
-                            "SHAP analysis failed; falling back to permutation_importance"
-                        )
-                        # fall through to permutation_importance fallback below
+                    model_for_shap = best_pipe.named_steps.get("model")
+                    explainer = shap.Explainer(
+                        model_for_shap, feature_perturbation="tree"
+                    )
+                    shap_vals = explainer(X_val)
+                    mean_abs = np.mean(np.abs(shap_vals.values), axis=0)
+                    inds = np.argsort(mean_abs)[::-1][:10]
+                    top_feats = [
+                        (self.feature_order[i], float(mean_abs[i])) for i in inds
+                    ]
+                    importance_reliable = True
                 except Exception:
-                    logger.exception("Failed importing/using SHAP")
+                    logger.exception(
+                        "SHAP analysis failed; falling back to permutation_importance"
+                    )
         except Exception:
             logger.exception("SHAP wrapper failed")
 
-        # 3) Permutation importance fallback (only if still not reliable and X_val large enough)
         try:
             if (
                 (not importance_reliable)
@@ -821,7 +834,6 @@ class Trainer2:
                 and best_pipe is not None
             ):
                 try:
-                    # Use MAE as scoring and increase repeats for stability
                     res = permutation_importance(
                         best_pipe,
                         X_val,
@@ -850,72 +862,17 @@ class Trainer2:
         except Exception:
             logger.exception("Permutation importance wrapper failed")
 
-        # If still not reliable, mark top_feats as unreliable (and return zeros to preserve metadata shape)
         if not importance_reliable:
             logger.warning(
                 "Feature importance not reliable for this run: X_val n=%d, n_labeled=%d",
                 0 if X_val is None else len(X_val),
                 n_labeled,
             )
-            # produce placeholder list with zeros to keep metadata format consistent, add flag
             top_feats = [
                 (name, 0.0)
                 for name in self.feature_order[: min(10, len(self.feature_order))]
             ]
-            # also store an indicator in metadata later (see metadata block below)
 
-        # permutation fallback if no native importances or empty and we have a validation set
-        try:
-            if (
-                (not top_feats)
-                and X_val is not None
-                and len(X_val)
-                and best_pipe is not None
-            ):
-                try:
-                    # require at least a few samples to compute permutation importance
-                    if len(X_val) < 5:
-                        logger.warning(
-                            "Permutation importance skipped: X_val too small (n=%d)",
-                            len(X_val),
-                        )
-                    elif X_val.shape[1] != len(self.feature_order):
-                        logger.warning(
-                            "Permutation importance skipped: feature dimension mismatch X_val.shape[1]=%d vs feature_order=%d",
-                            X_val.shape[1],
-                            len(self.feature_order),
-                        )
-                    else:
-                        # use MAE as scoring metric so importances reflect your MAE objective
-                        res = permutation_importance(
-                            best_pipe,
-                            X_val,
-                            y_val,
-                            n_repeats=10,
-                            random_state=self.random_state,
-                            n_jobs=1,
-                            scoring="neg_mean_absolute_error",
-                        )
-                        importances = res.importances_mean
-                        if importances is not None and len(importances) == len(
-                            self.feature_order
-                        ):
-                            inds = np.argsort(importances)[::-1][:10]
-                            top_feats = [
-                                (self.feature_order[i], float(importances[i]))
-                                for i in inds
-                            ]
-                        else:
-                            logger.warning(
-                                "Permutation importance returned unexpected shape: importances=%s",
-                                None if importances is None else importances.shape,
-                            )
-                except Exception:
-                    logger.exception("Permutation importance failed")
-        except Exception:
-            logger.exception("Permutation importance wrapper failed")
-
-        # grid edges list
         grid_edges = []
         if chosen_params and isinstance(filtered, dict):
             for pk, pv in chosen_params.items():
