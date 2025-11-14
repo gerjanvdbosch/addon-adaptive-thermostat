@@ -66,10 +66,11 @@ class Collector:
         Read current setpoint/temp from HA client and then each mapped sensor.
         Returns a dict with raw numeric values or None.
         """
-        current_setpoint, current_temp = self.ha.get_setpoint()
+        current_setpoint, current_temp, hvac_mode = self.ha.get_setpoint()
         data: Dict[str, Optional[float]] = {
             "current_setpoint": current_setpoint,
             "current_temp": current_temp,
+            "hvac_mode": hvac_mode,
         }
         time.sleep(0.01)
         for feature_key, entity_id in self.sensor_map.items():

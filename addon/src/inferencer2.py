@@ -81,7 +81,7 @@ class Inferencer2:
                 return False
             row = rows[0]
 
-            current_sp, _ = self.ha.get_setpoint()
+            current_sp, *rest = self.ha.get_setpoint()
             min_sp = float(self.opts.get("min_setpoint", 15.0))
             max_sp = float(self.opts.get("max_setpoint", 24.0))
             if not (min_sp <= current_sp <= max_sp):
