@@ -578,18 +578,27 @@ class Trainer2:
         promotion_reason = None
 
         if force:
-            # allow forcing to bypass decision logic, but require minimal labeled samples to persist to disk
-            if n_labeled >= force_persist_min:
+            # If there's no existing model on disk, allow force to persist the first model
+            if existing_mae is None:
                 promote = True
-                promotion_reason = "force"
-            else:
+                promotion_reason = "force_and_no_existing_model"
                 logger.info(
-                    "Force requested but n_labeled (%d) < force_persist_min (%d); will not persist",
+                    "Force requested and no existing model found; persisting forced model regardless of n_labeled (%d).",
                     n_labeled,
-                    force_persist_min,
                 )
-                promote = False
-                promotion_reason = "force_but_insufficient_labels_for_persist"
+            else:
+                # existing model present — keep safety guard: require minimal labeled samples to persist
+                if n_labeled >= force_persist_min:
+                    promote = True
+                    promotion_reason = "force"
+                else:
+                    logger.info(
+                        "Force requested but n_labeled (%d) < force_persist_min (%d); will not persist over existing model",
+                        n_labeled,
+                        force_persist_min,
+                    )
+                    promote = False
+                    promotion_reason = "force_but_insufficient_labels_for_persist"
         else:
             if existing_mae is None:
                 if n_labeled >= int(
