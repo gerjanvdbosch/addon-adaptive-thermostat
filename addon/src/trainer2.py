@@ -11,6 +11,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import KFold
 from sklearn.inspection import permutation_importance
 from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
 from collector import FEATURE_ORDER
@@ -401,25 +402,40 @@ class Trainer2:
         n_jobs = int(self.opts.get("n_jobs", 1))
         tss_splits = self._time_splits(n_labeled)
 
-        # Ensure cv is valid relative to training set size
         cv = None
         if tss_splits:
             try:
-                n_train = len(X_train)
+                n_train = X_train.shape[0]
+                # TimeSeriesSplit requires n_splits < n_train
                 if tss_splits >= 2 and tss_splits < n_train:
                     cv = TimeSeriesSplit(n_splits=tss_splits)
-                else:
                     logger.info(
-                        "TimeSeriesSplit disabled: requested n_splits=%s not valid for n_train=%d",
-                        str(tss_splits),
+                        "Using TimeSeriesSplit with n_splits=%d (n_train=%d)",
+                        tss_splits,
                         n_train,
                     )
-                    cv = None
+                else:
+                    # fallback: if too few training samples, use small KFold (must have n_splits < n_train)
+                    fallback_splits = max(2, min(3, max(1, n_train - 1)))
+                    if fallback_splits < n_train:
+                        cv = KFold(n_splits=fallback_splits)
+                        logger.info(
+                            "TimeSeriesSplit invalid for n_train=%d; falling back to KFold(n_splits=%d)",
+                            n_train,
+                            fallback_splits,
+                        )
+                    else:
+                        cv = None
+                        logger.info(
+                            "No CV used for hypersearch (n_train=%d, requested_tss=%s)",
+                            n_train,
+                            str(tss_splits),
+                        )
             except Exception:
-                logger.exception(
-                    "Failed creating TimeSeriesSplit; falling back to None"
-                )
+                logger.exception("Failed creating CV splitter; falling back to None")
                 cv = None
+        else:
+            cv = None
 
         chosen_params = None
         best_pipe = None
