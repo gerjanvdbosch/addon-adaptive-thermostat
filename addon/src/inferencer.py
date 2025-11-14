@@ -27,7 +27,7 @@ class Inferencer:
         self.load_models()
 
     def check_and_label_user_override(self) -> bool:
-        now = datetime.utcnow()
+        now = datetime.now()
         interval = float(self.opts.get("sample_interval_seconds", 300))
         if (
             self.last_pred_ts is not None
@@ -151,7 +151,7 @@ class Inferencer:
         if current_sp is None:
             logger.warning("Current setpoint unknown, skipping action")
             return
-        now = datetime.utcnow()
+        now = datetime.now()
 
         # sort models by MAE ascending
         sorted_models = sorted(

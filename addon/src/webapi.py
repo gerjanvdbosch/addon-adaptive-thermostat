@@ -1,5 +1,5 @@
 import os
-import datetime
+from datetime import datetime
 import logging
 import joblib
 import threading
@@ -42,7 +42,7 @@ class LabelPayload(BaseModel):
 
 class SampleOut(BaseModel):
     id: int
-    timestamp: datetime.datetime
+    timestamp: datetime
     data: Optional[dict]
     label_setpoint: Optional[float]
     user_override: Optional[bool]
@@ -52,7 +52,7 @@ class SampleOut(BaseModel):
 
 class PredictionOut(BaseModel):
     sample_id: int
-    timestamp: datetime.datetime
+    timestamp: datetime
     predicted_setpoint: Optional[float]
     prediction_error: Optional[float]
     current_setpoint: Optional[float]
@@ -206,7 +206,7 @@ def list_predictions(
         q = s.query(Sample).filter(Sample.predicted_setpoint.isnot(None))
         if since:
             try:
-                dt = datetime.datetime.fromisoformat(since)
+                dt = datetime.fromisoformat(since)
                 q = q.filter(Sample.timestamp >= dt)
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid 'since' timestamp")
@@ -242,7 +242,7 @@ class ModelMetaOut(BaseModel):
     meta: Optional[dict] = None
     mae: Optional[float] = None
     n_samples: Optional[int] = None
-    trained_at: Optional[datetime.datetime] = None
+    trained_at: Optional[datetime] = None
     note: Optional[str] = None
 
 
@@ -250,7 +250,7 @@ class ModelSummaryOut(BaseModel):
     full: ModelMetaOut
     partial: ModelMetaOut
     best_source: Optional[str] = None
-    retrieved_at: datetime.datetime
+    retrieved_at: datetime
 
 
 def _load_model_meta_from_path(path: Optional[str]) -> ModelMetaOut:
@@ -293,7 +293,7 @@ def _load_model_meta_from_path(path: Optional[str]) -> ModelMetaOut:
         ta = out.meta.get("trained_at") if out.meta else None
         if ta:
             try:
-                out.trained_at = datetime.datetime.fromisoformat(ta)
+                out.trained_at = datetime.fromisoformat(ta)
             except Exception:
                 out.trained_at = None
         out.note = "loaded"

@@ -1,7 +1,6 @@
 import math
 
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 
 def round_half(x):
@@ -42,7 +41,6 @@ def cyclical_month(ts):
 def day_or_night(ts=None):
     if ts is None:
         ts = datetime.now()
-    ts = ts.replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
     h = ts.hour
     if 7 <= h < 22:
         return 0  # day

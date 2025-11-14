@@ -5,13 +5,14 @@ import joblib
 import time
 import math
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
+from sklearn.inspection import permutation_importance
 
 # try to import scipy distributions for RandomizedSearch; fallback gracefully
 try:
@@ -66,21 +67,26 @@ class Trainer2:
     """
     Production-ready sklearn ML trainer using HistGradientBoostingRegressor.
 
-    Optional opts keys (use defaults as needed):
+    Important configurable opts (defaults chosen for safety):
       - model_path_full (required)
       - buffer_days: 30
-      - use_unlabeled: True
+      - use_unlabeled: False
       - pseudo_limit: 1000
       - weight_label: 1.0
-      - weight_pseudo: 0.1
+      - weight_pseudo: 0.05
       - val_fraction: 0.15
       - n_jobs: 1
-      - n_iter_search: 20
-      - search_mode: 'compact' or 'extended'
+      - n_iter_compact: 20
+      - n_iter_extended: 100
       - min_train_size: 30
       - min_search_labels: 50
-      - refit_on_full: False
-      - early_stopping_rounds: 50
+      - min_labels_to_expand: 100
+      - edge_count_threshold: 2
+      - min_labels_promote: 50
+      - min_labels_for_promo_if_no_existing: 20
+      - require_labels_for_expand_promo: True
+      - allow_force: True (but persistent save requires n_labeled >= 30)
+      - refit_on_full: True
       - promotion_delta_mae: 0.0
     """
 
@@ -210,18 +216,17 @@ class Trainer2:
         compact = {
             "max_iter": [100, 200, 400],
             "max_leaf_nodes": [15, 31, 63],
-            "learning_rate": [0.01, 0.03, 0.05],
+            "learning_rate": [0.001, 0.01, 0.03],
             "min_samples_leaf": [10, 20, 40],
-            "l2_regularization": [0.0, 0.01, 0.1],
-            "max_features": [0.6, 0.8, 1.0],
-            "validation_fraction": [0.1, 0.15],
+            "l2_regularization": [1e-6, 0.001, 0.01],
+            "max_features": [0.5, 0.7, 1.0],
+            "validation_fraction": [0.05, 0.1, 0.15],
         }
 
-        # extended grid used only when enough labels and expand flag set
         extended = {
             "max_iter": [300, 600, 1000, 1500, 2000],
             "max_leaf_nodes": [15, 31, 63, 127, 255],
-            "learning_rate": [0.001, 0.003, 0.005, 0.01, 0.02, 0.05],
+            "learning_rate": [0.0001, 0.001, 0.005, 0.01, 0.02, 0.05],
             "min_samples_leaf": [5, 10, 20, 40, 80],
             "l2_regularization": [1e-6, 1e-3, 0.01, 0.1, 1.0],
             "max_features": [0.4, 0.6, 0.8, 1.0],
@@ -301,8 +306,8 @@ class Trainer2:
         self.opts["last_n_labeled"] = n_labeled
 
         min_search_labels = int(self.opts.get("min_search_labels", 50))
-        n_iter_compact = int(self.opts.get("n_iter_compact", 10))
-        n_iter_extended = int(self.opts.get("n_iter_extended", 50))
+        n_iter_compact = int(self.opts.get("n_iter_compact", 20))
+        n_iter_extended = int(self.opts.get("n_iter_extended", 100))
 
         if n_labeled < min_search_labels:
             self.opts["search_mode"] = "compact"
@@ -563,6 +568,7 @@ class Trainer2:
         MIN_LABELS_PROMOTE = int(self.opts.get("min_labels_promote", 50))
         promotion_delta = float(self.opts.get("promotion_delta_mae", 0.0))
         allow_force = bool(self.opts.get("allow_force", True))
+        force_persist_min = int(self.opts.get("force_persist_min_labels", 30))
 
         if force and not allow_force:
             logger.warning("Force ignored because allow_force not set")
@@ -572,12 +578,22 @@ class Trainer2:
         promotion_reason = None
 
         if force:
-            promote = True
-            promotion_reason = "force"
+            # allow forcing to bypass decision logic, but require minimal labeled samples to persist to disk
+            if n_labeled >= force_persist_min:
+                promote = True
+                promotion_reason = "force"
+            else:
+                logger.info(
+                    "Force requested but n_labeled (%d) < force_persist_min (%d); will not persist",
+                    n_labeled,
+                    force_persist_min,
+                )
+                promote = False
+                promotion_reason = "force_but_insufficient_labels_for_persist"
         else:
             if existing_mae is None:
                 if n_labeled >= int(
-                    self.opts.get("min_labels_for_promo_if_no_existing", 1)
+                    self.opts.get("min_labels_for_promo_if_no_existing", 20)
                 ):
                     promote = True
                     promotion_reason = "no_existing_model"
@@ -596,7 +612,7 @@ class Trainer2:
                     promote = False
                     promotion_reason = "not_better"
 
-        # adaptive expansion policy: update counters and decide expand flag
+        # adaptive expansion policy
         edge_count_threshold = int(self.opts.get("edge_count_threshold", 2))
         min_labels_to_expand = int(self.opts.get("min_labels_to_expand", 100))
         require_labels_for_expand_promo = bool(
@@ -606,11 +622,8 @@ class Trainer2:
         if edge_flag:
             self.opts["edge_count"] = int(self.opts.get("edge_count", 0)) + 1
         else:
-            # decay counter on runs without edge
             self.opts["edge_count"] = 0
 
-        # if best_iteration hit max_iter, treat as edge as well (already set via edge_flag)
-        # decide whether to enable expand_search_next for future runs
         if (
             self.opts.get("edge_count", 0) >= edge_count_threshold
             and n_labeled >= min_labels_to_expand
@@ -633,7 +646,6 @@ class Trainer2:
             and require_labels_for_expand_promo
             and n_labeled < min_labels_to_expand
         ):
-            # force promotion False to avoid saving model found at grid edge with little data
             if promote:
                 logger.info(
                     "Deferring promotion because expand_search_next=True and n_labeled (%d) < min_labels_to_expand (%d)",
@@ -643,7 +655,6 @@ class Trainer2:
                 promote = False
                 promotion_reason = "deferred_due_to_expand_policy"
 
-        # log promotion decision (safe formatted string)
         promo_log = (
             "Promotion decision: promote={promote} reason={reason} mae={mae} existing_mae={existing} "
             "n_labeled={n} force={force} edge_count={edge} expand_next={expand}"
@@ -665,10 +676,9 @@ class Trainer2:
             )
             return
 
-        # prepare top features (permutation fallback omitted here for brevity)
+        # compute/import feature importances: try model importances, fallback to permutation on X_val
+        top_feats = []
         try:
-            top_feats = []
-            # attempt to extract native importances if available
             model_core = best_pipe.named_steps.get("model")
             if hasattr(model_core, "feature_importances_"):
                 imps = getattr(model_core, "feature_importances_", None)
@@ -684,7 +694,37 @@ class Trainer2:
                     pairs.sort(key=lambda t: t[1], reverse=True)
                     top_feats = pairs[: min(10, len(pairs))]
         except Exception:
-            logger.exception("Failed extracting top features")
+            logger.exception("Failed extracting native feature importances")
+
+        # permutation fallback if no native importances or empty and we have a validation set
+        try:
+            if (
+                (not top_feats)
+                and X_val is not None
+                and len(X_val)
+                and best_pipe is not None
+            ):
+                try:
+                    res = permutation_importance(
+                        best_pipe,
+                        X_val,
+                        y_val,
+                        n_repeats=6,
+                        random_state=self.random_state,
+                        n_jobs=1,
+                    )
+                    importances = res.importances_mean
+                    if importances is not None and len(importances) == len(
+                        self.feature_order
+                    ):
+                        inds = np.argsort(importances)[::-1][:10]
+                        top_feats = [
+                            (self.feature_order[i], float(importances[i])) for i in inds
+                        ]
+                except Exception:
+                    logger.exception("Permutation importance failed")
+        except Exception:
+            logger.exception("Permutation importance wrapper failed")
 
         # grid edges list
         grid_edges = []
@@ -702,22 +742,22 @@ class Trainer2:
                         if str(pv) == str(min(vals)) or str(pv) == str(max(vals)):
                             grid_edges.append(key)
 
-        # file diagnostics
+        # file diagnostics (use UTC timestamps)
         file_info = {"path": self.model_path}
         try:
             st = os.stat(self.model_path) if os.path.exists(self.model_path) else None
             if st:
                 file_info["size_bytes"] = st.st_size
-                file_info["modified_ts"] = (
-                    datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z"
-                )
+                file_info["modified_ts"] = datetime.fromtimestamp(
+                    st.st_mtime, timezone.utc
+                ).isoformat()
         except Exception:
             pass
 
         metadata: Dict[str, Any] = {
             "feature_order": self.feature_order,
             "backend": self.backend,
-            "trained_at": datetime.utcnow().isoformat(),
+            "trained_at": datetime.now(timezone.utc).isoformat(),
             "mae": mae,
             "val_mae": val_mae,
             "n_samples": n_labeled,

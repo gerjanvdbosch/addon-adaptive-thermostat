@@ -149,7 +149,7 @@ class Trainer:
         try:
             meta = {
                 "feature_order": FEATURE_ORDER,
-                "trained_at": datetime.utcnow().isoformat(),
+                "trained_at": datetime.now().isoformat(),
                 "n_samples": len(X),
             }
             joblib.dump(
@@ -433,7 +433,7 @@ class Trainer:
                 if gs
                 else {"model__alpha": chosen_alpha}
             ),
-            "trained_at": datetime.utcnow().isoformat(),
+            "trained_at": datetime.now().isoformat(),
             "mae": mae,
             "n_samples": n_labeled,
             "pseudo_samples_used": pseudo_count,

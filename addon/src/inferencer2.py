@@ -68,7 +68,7 @@ class Inferencer2:
     def check_and_label_user_override(self) -> bool:
         """Detecteer en label een echte gebruikeroverride; return True als gelabeld."""
         try:
-            now = datetime.utcnow()
+            now = datetime.now()
             interval = float(self.opts.get("sample_interval_seconds", 300))
             if (
                 self.last_pred_ts
@@ -184,7 +184,7 @@ class Inferencer2:
         if current_sp is None:
             logger.warning("Current setpoint unknown; skipping inference")
             return
-        now = datetime.utcnow()
+        now = datetime.now()
 
         p = self._predict(X)
         if p is None or not np.isfinite(p):

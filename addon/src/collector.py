@@ -1,5 +1,5 @@
 import logging
-import datetime
+from datetime import datetime
 import time
 from typing import Optional, Dict, Any, List
 
@@ -83,13 +83,13 @@ class Collector:
         return data
 
     def features_from_raw(
-        self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime.datetime] = None
+        self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         Convert raw sensor dict into feature dictionary following FEATURE_ORDER keys.
         Defensive: uses safe_float and encoding helpers.
         """
-        ts = timestamp or datetime.datetime.utcnow()
+        ts = timestamp or datetime.now()
         hx, hy = cyclical_hour(ts)
         dx, dy = cyclical_day(ts)
         mx, my = cyclical_month(ts)
@@ -137,7 +137,7 @@ class Collector:
             "outside_temp": safe_float(sensor_dict.get("outside_temp")),
         }
 
-    def get_features(self, ts: datetime.datetime) -> Optional[Dict[str, Any]]:
+    def get_features(self, ts: datetime):
         """
         Public method used by inferencer/trainer to obtain a features dict for timestamp ts.
         """
@@ -150,7 +150,7 @@ class Collector:
             return None
 
     def sample_and_store(self):
-        ts = datetime.datetime.utcnow()
+        ts = datetime.now()
         try:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)

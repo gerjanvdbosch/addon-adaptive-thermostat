@@ -60,7 +60,7 @@ def insert_sample(
 def fetch_training_data(days: int = 30) -> List[Sample]:
     s: SASession = Session()
     try:
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now() - timedelta(days=days)
         rows = (
             s.query(Sample)
             .filter(Sample.timestamp >= cutoff)

@@ -22,14 +22,20 @@ jobs:
 
       - name: Install runtime deps and linters
         run: |
-          # python -m pip install -r addon/requirements.txt -r addon/requirements-dev.txt ruff black mypy 
-          python -m pip install ruff black mypy 
+          python -m pip install ruff black pyflakes
+      #pylint flake8
+
+      - name: Pyflakes (syntax check)
+        run: pyflakes addon/src
 
       - name: Ruff (lint)
-        run: ruff check .
+        run: ruff check addon/src
 
       - name: Black (format check)
-        run: black --check .
-        
-      # - name: Mypy (type check)
-      #   run: mypy --install-types --non-interactive . && mypy .
+        run: black --check addon/src
+
+#      - name: Flake8 (style check)
+#        run: flake8 addon/src
+#
+#      - name: Pylint (code quality)
+#        run: pylint addon/src
