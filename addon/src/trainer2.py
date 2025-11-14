@@ -515,7 +515,7 @@ class Trainer2:
         # Promotion guard and policy
         MIN_LABELS_PROMOTE = int(self.opts.get("min_labels_promote", 50))
         promotion_delta = float(self.opts.get("promotion_delta_mae", 0.0))
-        allow_force = bool(self.opts.get("allow_force", False))
+        allow_force = bool(self.opts.get("allow_force", True))
 
         if force and not allow_force:
             logger.warning("Force ignored because allow_force not set")
