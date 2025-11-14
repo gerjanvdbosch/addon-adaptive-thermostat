@@ -55,16 +55,20 @@ class HAClient:
     def get_setpoint(self):
         current_setpoint = None
         current_temp = None
+        hvac_mode = None
         climate = self.get_state(self.opts.get("climate_entity"))
         if climate:
             attrs = climate.get("attributes", {})
             current_temp = safe_float(attrs.get("current_temperature"))
             current_setpoint = safe_float(attrs.get("temperature"))
+            hvac_mode = climate.get("state")
         if current_setpoint is None:
             raise RuntimeError("Failed to read current setpoint")
         if current_temp is None:
             raise RuntimeError("Failed to read current temperature")
-        return current_setpoint, current_temp
+        if hvac_mode is None:
+            raise RuntimeError("Failed to read HVAC mode")
+        return current_setpoint, current_temp, hvac_mode
 
     def set_setpoint(self, value):
         try:
