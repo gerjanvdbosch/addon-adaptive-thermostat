@@ -848,9 +848,7 @@ class Trainer2:
                     try:
                         pred = float(preds[i])
                         err = abs(pred - float(y[i])) if y is not None else None
-                        update_sample_prediction(
-                            row.id, predicted_setpoint=pred, prediction_error=err
-                        )
+                        #update_sample_prediction(row.id, predicted_setpoint=pred, prediction_error=err)
                     except Exception:
                         logger.exception(
                             "MLTrainer: failed updating sample prediction for %s",
