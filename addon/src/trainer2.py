@@ -7,27 +7,15 @@ import math
 import numpy as np
 from datetime import datetime, timezone
 from typing import Any, Dict
-
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
 from sklearn.inspection import permutation_importance
-
-
 from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
 from collector import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
-
-# try to import scipy distributions for RandomizedSearch; fallback gracefully
-try:
-    from scipy.stats import loguniform, randint
-
-    SCIPY_AVAILABLE = True
-    logger.info("Scipy detected: enabling advanced hyperparameter distributions")
-except Exception:
-    SCIPY_AVAILABLE = False
 
 
 def _atomic_dump(obj: Any, path: str) -> None:
@@ -102,7 +90,6 @@ class Trainer2:
         self.feature_order = FEATURE_ORDER
         self.backend = "sklearn_histgb"
         self.random_state = int(self.opts.get("random_state", 42))
-        logger.info("Current hour %s", str(datetime.now().hour))
 
     def _fetch_data(self):
         buffer_days = int(self.opts.get("buffer_days", 30))
@@ -247,26 +234,49 @@ class Trainer2:
 
         param_dist = compact if mode == "compact" else extended
 
-        # If scipy is available, convert some params to distributions for RandomizedSearch
-        if SCIPY_AVAILABLE:
-            dist = {}
-            # learning_rate loguniform, l2 loguniform, max_iter and max_leaf_nodes randint
-            dist["learning_rate"] = loguniform(1e-4, 1e-1)
-            dist["l2_regularization"] = loguniform(1e-6, 1.0)
-            dist["max_iter"] = randint(
-                min(param_dist["max_iter"]), max(param_dist["max_iter"]) + 1
+        try:
+            sampled = {}
+            # learning_rate: log-uniform-like samples (100 values)
+            lr_samples = (
+                10 ** np.random.uniform(np.log10(1e-4), np.log10(1e-1), size=100)
+            ).tolist()
+            sampled["learning_rate"] = lr_samples
+
+            # l2_regularization: log-uniform-like samples (50 values)
+            l2_samples = (
+                10 ** np.random.uniform(np.log10(1e-6), np.log10(1.0), size=50)
+            ).tolist()
+            sampled["l2_regularization"] = l2_samples
+
+            # integer ranges: max_iter, max_leaf_nodes, min_samples_leaf
+            mi_min, mi_max = min(param_dist["max_iter"]), max(param_dist["max_iter"])
+            sampled["max_iter"] = list(
+                range(mi_min, mi_max + 1, max(1, (mi_max - mi_min) // 50))
             )
-            dist["max_leaf_nodes"] = randint(
-                min(param_dist["max_leaf_nodes"]), max(param_dist["max_leaf_nodes"]) + 1
+
+            mln_min, mln_max = min(param_dist["max_leaf_nodes"]), max(
+                param_dist["max_leaf_nodes"]
             )
-            dist["min_samples_leaf"] = randint(
-                min(param_dist["min_samples_leaf"]),
-                max(param_dist["min_samples_leaf"]) + 1,
+            sampled["max_leaf_nodes"] = list(
+                range(mln_min, mln_max + 1, max(1, (mln_max - mln_min) // 20))
             )
-            # categorical-like remain lists
-            dist["max_features"] = param_dist.get("max_features", [1.0])
-            dist["validation_fraction"] = param_dist.get("validation_fraction", [0.1])
-            return base, dist
+
+            ms_min, ms_max = min(param_dist["min_samples_leaf"]), max(
+                param_dist["min_samples_leaf"]
+            )
+            sampled["min_samples_leaf"] = list(
+                range(ms_min, ms_max + 1, max(1, (ms_max - ms_min) // 10))
+            )
+
+            # categorical-like remain lists from param_dist
+            sampled["max_features"] = param_dist.get("max_features", [1.0])
+            sampled["validation_fraction"] = param_dist.get(
+                "validation_fraction", [0.1]
+            )
+
+            return base, sampled
+        except Exception:
+            return base, param_dist
 
         return base, param_dist
 
@@ -717,22 +727,43 @@ class Trainer2:
                 and best_pipe is not None
             ):
                 try:
-                    res = permutation_importance(
-                        best_pipe,
-                        X_val,
-                        y_val,
-                        n_repeats=6,
-                        random_state=self.random_state,
-                        n_jobs=1,
-                    )
-                    importances = res.importances_mean
-                    if importances is not None and len(importances) == len(
-                        self.feature_order
-                    ):
-                        inds = np.argsort(importances)[::-1][:10]
-                        top_feats = [
-                            (self.feature_order[i], float(importances[i])) for i in inds
-                        ]
+                    # require at least a few samples to compute permutation importance
+                    if len(X_val) < 5:
+                        logger.warning(
+                            "Permutation importance skipped: X_val too small (n=%d)",
+                            len(X_val),
+                        )
+                    elif X_val.shape[1] != len(self.feature_order):
+                        logger.warning(
+                            "Permutation importance skipped: feature dimension mismatch X_val.shape[1]=%d vs feature_order=%d",
+                            X_val.shape[1],
+                            len(self.feature_order),
+                        )
+                    else:
+                        # use MAE as scoring metric so importances reflect your MAE objective
+                        res = permutation_importance(
+                            best_pipe,
+                            X_val,
+                            y_val,
+                            n_repeats=10,
+                            random_state=self.random_state,
+                            n_jobs=1,
+                            scoring="neg_mean_absolute_error",
+                        )
+                        importances = res.importances_mean
+                        if importances is not None and len(importances) == len(
+                            self.feature_order
+                        ):
+                            inds = np.argsort(importances)[::-1][:10]
+                            top_feats = [
+                                (self.feature_order[i], float(importances[i]))
+                                for i in inds
+                            ]
+                        else:
+                            logger.warning(
+                                "Permutation importance returned unexpected shape: importances=%s",
+                                None if importances is None else importances.shape,
+                            )
                 except Exception:
                     logger.exception("Permutation importance failed")
         except Exception:
