@@ -843,12 +843,24 @@ class Trainer2:
         # update per-sample predictions
         try:
             if n_labeled > 0:
-                preds = predict_fn(X[:n_labeled])
-                for i, row in enumerate(used_rows):
+                try:
+                    preds_for_update = (
+                        preds_labeled  # prefer OOF preds if computed earlier
+                    )
+                except NameError:
+                    preds_for_update = predict_fn(X[:n_labeled])
+
+                preds_for_update = np.asarray(preds_for_update, dtype=float)
+                for row, pred in zip(used_rows, preds_for_update):
                     try:
-                        pred = float(preds[i])
-                        err = abs(pred - float(y[i])) if y is not None else None
-                        #update_sample_prediction(row.id, predicted_setpoint=pred, prediction_error=err)
+                        err = (
+                            abs(float(pred) - float(y[used_rows.index(row)]))
+                            if y is not None
+                            else None
+                        )
+                        update_sample_prediction(
+                            row.id, predicted_setpoint=float(pred), prediction_error=err
+                        )
                     except Exception:
                         logger.exception(
                             "MLTrainer: failed updating sample prediction for %s",
