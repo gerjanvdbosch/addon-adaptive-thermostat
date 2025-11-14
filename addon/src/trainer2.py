@@ -346,7 +346,9 @@ class Trainer2:
                 val_frac = desired_frac
                 val_size = max(1, int(n_total * val_frac))
 
-        val_size = min(val_size, max(1, n_total - 1))  # keep at least one training sample
+        val_size = min(
+            val_size, max(1, n_total - 1)
+        )  # keep at least one training sample
         train_idx = slice(0, n_total - val_size)
         val_idx = slice(n_total - val_size, n_total)
 
@@ -869,7 +871,7 @@ class Trainer2:
                 preds = predict_fn(X[:n_labeled])
                 for i, row in enumerate(used_rows):
                     try:
-                        pred = float(preds_labeled[i])
+                        pred = float(preds[i])
                         err = abs(pred - float(y[i])) if y is not None else None
                         update_sample_prediction(
                             row.id, predicted_setpoint=pred, prediction_error=err
