@@ -19,6 +19,7 @@ try:
     from scipy.stats import loguniform, randint
 
     SCIPY_AVAILABLE = True
+    logger.info("Scipy detected: enabling advanced hyperparameter distributions")
 except Exception:
     SCIPY_AVAILABLE = False
 
