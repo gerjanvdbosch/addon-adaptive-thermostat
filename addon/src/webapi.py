@@ -155,15 +155,6 @@ def list_samples(
 
 @app.get("/setpoints", response_model=List[SetpointOut])
 def list_setpoints(
-    labeled: Optional[bool] = Query(
-        None, description="Filter by labeled/unlabeled. None = both"
-    ),
-    user_override: Optional[bool] = Query(
-        None, description="Filter by user_override flag"
-    ),
-    has_prediction: Optional[bool] = Query(
-        None, description="Filter samples that have predicted_setpoint"
-    ),
     limit: int = Query(100, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     x_addon_token: Optional[str] = Header(None),
@@ -179,13 +170,14 @@ def list_setpoints(
                 SetpointOut(
                     id=r.id,
                     timestamp=r.timestamp,
-                    data=r.data or {},
-                    setpoint=r.SetpointOut,
+                    data=getattr(r, "data", None) or {},
+                    setpoint=getattr(r, "setpoint", None),
                 )
             )
         return out
     finally:
         s.close()
+
 
 
 @app.get("/samples/{sample_id}", response_model=SampleOut)
