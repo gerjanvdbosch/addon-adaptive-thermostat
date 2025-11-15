@@ -79,32 +79,78 @@ class Inferencer:
         return True
 
     def load_models(self):
+        """
+        Load models from configured paths. Normalize loaded objects into dicts with keys:
+        {"model": <estimator_or_pipeline>, "scaler": <optional scaler>, "meta": <meta dict>}
+
+        If meta["feature_order"] mismatches FEATURE_ORDER the model is ignored.
+        If meta lacks "mae", we set it to +inf to avoid using un-evaluated partials ahead of full models.
+        """
         try:
+            self.models = {}
             for name, path in (
                 ("full", self.opts.get("model_path_full")),
                 ("partial", self.opts.get("model_path_partial")),
             ):
-                if path and os.path.exists(path):
+                if not path:
+                    continue
+                if not os.path.exists(path):
+                    logger.debug("Model path %s for %s does not exist", path, name)
+                    continue
+                try:
                     obj = joblib.load(path)
-                    meta = obj.get("meta", {})
-                    if meta.get("feature_order") != FEATURE_ORDER:
-                        logger.warning(
-                            "%s model feature_order mismatch; ignoring", name
-                        )
-                        continue
-                    # normalize object shape: ensure obj contains keys "model" and optionally "scaler"
-                    model = obj.get("model")
-                    scaler = obj.get("scaler") if "scaler" in obj else None
-                    # if the saved model is a pipeline that already contains a scaler,
-                    # prefer using the pipeline and ignore external scaler to avoid double-scaling.
-                    if isinstance(model, Pipeline) and scaler is not None:
-                        logger.debug(
-                            "%s model is a Pipeline and contains internal scaler; ignoring external scaler",
-                            name,
-                        )
-                        scaler = None
-                    self.models[name] = {"model": model, "scaler": scaler, "meta": meta}
-                    logger.debug("Loaded %s model from %s", name, path)
+                except Exception:
+                    logger.exception(
+                        "Failed to joblib.load %s model from %s", name, path
+                    )
+                    continue
+
+                if not isinstance(obj, dict):
+                    logger.warning("Loaded %s model is not a dict; ignoring", name)
+                    continue
+
+                meta = obj.get("meta", {}) or {}
+                if meta.get("feature_order") != FEATURE_ORDER:
+                    logger.warning(
+                        "%s model feature_order mismatch; ignoring %s", name, path
+                    )
+                    continue
+
+                # Ensure an MAE exists to avoid promoting unevaluated partials
+                meta.setdefault("mae", float("inf"))
+
+                model = obj.get("model")
+                scaler = obj.get("scaler") if "scaler" in obj else None
+
+                # If model is a Pipeline that contains its own scaler, ignore external scaler to avoid double-scaling
+                if isinstance(model, Pipeline) and scaler is not None:
+                    logger.debug(
+                        "%s: model is a Pipeline and an external scaler was present; ignoring external scaler",
+                        name,
+                    )
+                    scaler = None
+
+                # Basic sanity checks
+                try:
+                    feat_len = len(FEATURE_ORDER)
+                    # If scaler present, check mean_ length if possible
+                    if scaler is not None and hasattr(scaler, "mean_"):
+                        if len(getattr(scaler, "mean_")) != feat_len:
+                            logger.warning(
+                                "%s scaler mean length (%d) != FEATURE_ORDER length (%d); ignoring model",
+                                name,
+                                len(getattr(scaler, "mean_")),
+                                feat_len,
+                            )
+                            continue
+                except Exception:
+                    logger.exception("Sanity check failed for %s model; skipping", name)
+                    continue
+
+                self.models[name] = {"model": model, "scaler": scaler, "meta": meta}
+                logger.info(
+                    "Loaded %s model from %s (MAE=%s)", name, path, meta.get("mae")
+                )
         except Exception:
             logger.exception("Error loading models")
 
@@ -116,7 +162,6 @@ class Inferencer:
         feat = last.data if last.data and isinstance(last.data, dict) else None
         if not feat:
             return None, None
-        # ensure all keys present in FEATURE_ORDER
         vec = [feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER]
         return vec, feat
 
@@ -124,47 +169,90 @@ class Inferencer:
         self, name: str, obj: dict, X: np.ndarray
     ) -> Optional[float]:
         """
-        Predicts a single-row X (2D array) using model and scaler present in obj.
-        Handles cases:
-         - model is a Pipeline (may include scaler) -> call model.predict directly
-         - model is an estimator and scaler provided separately -> apply scaler then predict
-         - model is an estimator without scaler -> predict on raw X
-        Returns the scalar prediction or None on failure.
+        Predict using the provided normalized object.
+        Adds defensive logging for shapes, scaler means, and scaled features to diagnose mismatches.
+        Returns predicted scalar or None.
         """
         try:
             model = obj.get("model")
             scaler = obj.get("scaler")
+            meta = obj.get("meta", {}) or {}
+
             if model is None:
+                logger.debug("Model %s has no estimator; skipping", name)
                 return None
 
-            # Ensure X is 2D ndarray
+            # Ensure X is numpy array 2D
             if not isinstance(X, np.ndarray):
                 X = np.array(X, dtype=float)
             if X.ndim == 1:
                 X = X.reshape(1, -1)
 
-            # If model is a Pipeline, call predict directly (pipeline handles scaling)
+            # Quick sanity logs
+            logger.debug(
+                "Model %s predict called. X.shape=%s FEATURE_ORDER_len=%d meta_keys=%s",
+                name,
+                X.shape,
+                len(FEATURE_ORDER),
+                list(meta.keys()),
+            )
+
+            # If model is a pipeline, let it handle scaling
             if isinstance(model, Pipeline):
-                p = float(model.predict(X)[0])
+                try:
+                    preds = model.predict(X)
+                    p = float(preds[0])
+                except Exception:
+                    logger.exception("Pipeline predict failed for model %s", name)
+                    return None
             else:
-                # model is a bare estimator
+                # Bare estimator
                 if scaler is not None:
-                    # scaler expected to be fitted StandardScaler or similar
+                    # log scaler shape if available
+                    if hasattr(scaler, "mean_"):
+                        try:
+                            logger.debug(
+                                "Model %s scaler mean sample: %s",
+                                name,
+                                np.array(scaler.mean_).tolist()[:5],
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Model %s scaler mean present but failed to list", name
+                            )
+
+                    # Attempt transform with graceful fallback
                     try:
                         Xs = scaler.transform(X)
+                        logger.debug(
+                            "Model %s scaled X sample: %s", name, Xs[0].tolist()[:10]
+                        )
                     except Exception:
-                        # If scaler was saved but shape mismatch, log and fallback to raw X
                         logger.exception(
-                            "Scaler transform failed for model %s; falling back to raw features",
+                            "Scaler.transform failed for model %s; falling back to raw features",
                             name,
                         )
                         Xs = X
-                    p = float(model.predict(Xs)[0])
+                    try:
+                        preds = model.predict(Xs)
+                        p = float(preds[0])
+                    except Exception:
+                        logger.exception(
+                            "Estimator predict failed for model %s after scaling", name
+                        )
+                        return None
                 else:
-                    p = float(model.predict(X)[0])
+                    # No scaler; predict raw
+                    try:
+                        preds = model.predict(X)
+                        p = float(preds[0])
+                    except Exception:
+                        logger.exception(
+                            "Estimator predict failed for model %s (no scaler)", name
+                        )
+                        return None
 
-            mae = obj.get("meta", {}).get("mae")
-            logger.info("Model %s predicted %.2f (MAE=%s)", name, p, mae)
+            logger.info("Model %s predicted %.2f (MAE=%s)", name, p, meta.get("mae"))
             return p
         except Exception:
             logger.exception("Prediction failed for model %s", name)
@@ -177,7 +265,7 @@ class Inferencer:
         except Exception:
             logger.exception("Error during override check; continuing")
 
-        # reload models at start of each job to pick up new full/partial models
+        # Always reload models at start to pick up latest full/partial
         self.load_models()
         if not self.models:
             logger.info("No models available for inference")
@@ -199,10 +287,10 @@ class Inferencer:
             return
         now = datetime.now()
 
-        # sort models by MAE ascending; if MAE missing treat as very large
+        # Sort models by MAE ascending; models without MAE were given inf earlier
         sorted_models = sorted(
             self.models.items(),
-            key=lambda kv: kv[1].get("meta", {}).get("mae", np.inf),
+            key=lambda kv: kv[1].get("meta", {}).get("mae", float("inf")),
         )
 
         pred = None
@@ -223,11 +311,11 @@ class Inferencer:
                 )
                 continue
 
-            # clamp to bounds
+            # clamp to bounds and round
             p = max(min(p, max_sp), min_sp)
             rounded_p = safe_round(p)
 
-            # evaluate stability window logic
+            # Stability logic
             if (
                 self.last_eval_value is None
                 or safe_round(self.last_eval_value) != rounded_p
@@ -239,17 +327,14 @@ class Inferencer:
                     p,
                     name,
                 )
-                # start stability timer; require consistent prediction on next iterations
                 continue
 
-            # check stability duration
             if (now - self.last_eval_ts).total_seconds() < stable_seconds:
                 logger.info(
                     "Predicted value from model %s not yet stable; skipping", name
                 )
                 continue
 
-            # threshold check against current setpoint
             if abs(p - current_sp) < threshold:
                 logger.info(
                     "Predicted change from %s below threshold (%.2f < %.2f); skipping",
