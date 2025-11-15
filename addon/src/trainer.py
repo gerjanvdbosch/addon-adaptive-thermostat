@@ -65,7 +65,9 @@ class Trainer:
                 "model_path_full and model_path_partial must be provided in opts."
             )
 
+        # partial_pipeline will hold Pipeline if saved as pipeline; partial holds estimator reference
         self.partial = None
+        self.partial_pipeline = None
         self.scaler = None
 
         # Try load partial model if present and compatible
@@ -73,20 +75,35 @@ class Trainer:
         if partial_path and os.path.exists(partial_path):
             try:
                 obj = joblib.load(partial_path)
-                self.partial = obj.get("model")
-                self.scaler = obj.get("scaler")
+                model_obj = obj.get("model")
+                # If a Pipeline was stored, prefer it
+                if isinstance(model_obj, Pipeline):
+                    self.partial_pipeline = model_obj
+                    # estimator accessible via named_steps["model"] if present
+                    try:
+                        self.partial = self.partial_pipeline.named_steps.get("model")
+                    except Exception:
+                        self.partial = None
+                    self.scaler = None
+                else:
+                    # legacy: separate estimator + scaler may have been stored
+                    self.partial = model_obj
+                    self.partial_pipeline = None
+                    self.scaler = obj.get("scaler")
                 meta = obj.get("meta", {})
                 if meta.get("feature_order") != FEATURE_ORDER:
                     logger.warning(
                         "Partial model feature_order mismatch; ignoring partial model"
                     )
                     self.partial = None
+                    self.partial_pipeline = None
                     self.scaler = None
                 else:
                     logger.info("Loaded partial model from %s", partial_path)
             except Exception:
                 logger.exception("Failed loading partial model; starting fresh")
                 self.partial = None
+                self.partial_pipeline = None
                 self.scaler = None
 
     def partial_fit_job(self):
@@ -124,10 +141,10 @@ class Trainer:
         X = np.array(X, dtype=float)
         y = np.array(y, dtype=float)
 
-        if self.scaler is None:
-            self.scaler = StandardScaler()
-        self.scaler.fit(X)
-        Xs = self.scaler.transform(X)
+        # Always use a scaler and save the partial model as a Pipeline to avoid inference mismatch
+        scaler = StandardScaler()
+        scaler.fit(X)
+        Xs = scaler.transform(X)
 
         if self.partial is None:
             self.partial = SGDRegressor(
@@ -153,11 +170,22 @@ class Trainer:
                 "trained_at": datetime.now().isoformat(),
                 "n_samples": len(X),
             }
+            # save as Pipeline(scaler + model) to ensure inference uses the exact same scaling
+            partial_pipeline = Pipeline([("scaler", scaler), ("model", self.partial)])
             joblib.dump(
-                {"model": self.partial, "scaler": self.scaler, "meta": meta},
+                {"model": partial_pipeline, "meta": meta},
                 self.opts.get("model_path_partial"),
             )
-            logger.info("Partial model updated with %d samples", len(X))
+            # update in-memory references
+            self.partial_pipeline = partial_pipeline
+            try:
+                self.partial = self.partial_pipeline.named_steps.get("model")
+            except Exception:
+                self.partial = None
+            self.scaler = None
+            logger.info(
+                "Partial model updated with %d samples (saved as Pipeline)", len(X)
+            )
         except Exception:
             logger.exception("Failed saving partial model")
 
