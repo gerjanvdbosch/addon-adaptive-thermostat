@@ -122,7 +122,8 @@ class Inferencer2:
             return False
 
     def _fetch_current_vector(self) -> Tuple[Optional[List[float]], Optional[dict]]:
-        """Haal de laatste unlabelled sample features op en maak vector volgens FEATURE_ORDER."""
+        """Haal de laatste unlabelled sample features op en maak vector volgens FEATURE_ORDER.
+        Mask current_setpoint in de featurevector (prevent trivial identity/echo)."""
         try:
             unl = fetch_unlabeled(limit=1)
             if not unl:
@@ -134,16 +135,22 @@ class Inferencer2:
             vec = []
             for k in FEATURE_ORDER:
                 v = feat.get(k)
-                if v is None:
+                if k == "current_setpoint":
+                    # mask current_setpoint to prevent trivial identity predictions
                     v = 0.0
                 else:
-                    try:
-                        v = float(v)
-                    except Exception:
-                        logger.warning(
-                            "Feature %s value not numeric: %r; coercing to 0.0", k, v
-                        )
+                    if v is None:
                         v = 0.0
+                    else:
+                        try:
+                            v = float(v)
+                        except Exception:
+                            logger.warning(
+                                "Feature %s value not numeric: %r; coercing to 0.0",
+                                k,
+                                v,
+                            )
+                            v = 0.0
                 vec.append(v)
             return vec, feat
         except Exception:

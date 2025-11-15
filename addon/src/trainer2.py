@@ -120,7 +120,7 @@ class Trainer2:
             r
             for r in rows
             if r.label_setpoint is not None
-            and (not require_user_override or getattr(r, "user_override", False))
+            and (not require_user_override or getattr(r, "user_override", True))
         ]
         X_lab, y_lab, used_rows = _assemble_matrix(labeled_rows, self.feature_order)
 
@@ -230,6 +230,13 @@ class Trainer2:
                     float(np.min(y)),
                     float(np.max(y)),
                 )
+                # extra guard: alert when labels are essentially constant
+                std = float(np.std(y))
+                if std < 1e-4:
+                    logger.warning(
+                        "Training labels near-constant (std=%.6f); likely labels == current_setpoint across dataset",
+                        std,
+                    )
         except Exception:
             logger.exception("Failed logging training label stats")
 
