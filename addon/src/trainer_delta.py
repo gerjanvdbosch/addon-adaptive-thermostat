@@ -37,6 +37,7 @@ def _assemble_matrix_delta(
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any]]:
     """
     Build X and y where y = setpoint - current_setpoint (delta).
+    Mask current_setpoint in feature vector (set to 0.0) to avoid trivial echo learning.
     Skip rows that lack current_setpoint or have trivial delta and are not override.
     """
     X: List[List[float]] = []
@@ -91,6 +92,10 @@ def _assemble_matrix_delta(
 
             vec: List[float] = []
             for k in feature_order:
+                # Mask current_setpoint during training to prevent echo learning
+                if k == "current_setpoint":
+                    vec.append(0.0)
+                    continue
                 v = feat.get(k)
                 if v is None:
                     vec.append(0.0)
@@ -451,7 +456,14 @@ class TrainerDelta:
                     else None
                 )
                 if ci is not None:
-                    curr_val = X_val[:, ci]
+                    # note: X_val contains masked current_setpoint (0.0) at ci for compatibility
+                    curr_val = np.array(
+                        [
+                            _safe_float(r.data.get("current_setpoint", 0.0))
+                            for r in used_rows[n_total - len(X_val) : n_total]
+                        ],
+                        dtype=float,
+                    )
                     val_preds_abs = curr_val + np.array(val_preds_delta, dtype=float)
                     val_true_abs = curr_val + np.array(y_val, dtype=float)
                     val_mae_abs = float(
