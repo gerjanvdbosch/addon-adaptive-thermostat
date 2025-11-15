@@ -113,7 +113,7 @@ class InferencerDelta:
             insert_sample(features, label_setpoint=current_sp, user_override=True)
 
             features["current_setpoint"] = last_sample_sp
-            insert_setpoint(features, setpoint=current_sp, override=True)
+            insert_setpoint(features, setpoint=current_sp)
             logger.info(
                 "Detected user override: inserted labeled sample %.1f (was %.1f)",
                 current_rounded,
