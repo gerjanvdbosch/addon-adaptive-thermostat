@@ -28,6 +28,7 @@ class Inferencer:
         self.load_models()
 
     def check_and_label_user_override(self) -> bool:
+        return False
         now = datetime.now()
         interval = float(self.opts.get("sample_interval_seconds", 300))
         if (

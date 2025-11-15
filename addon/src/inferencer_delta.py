@@ -5,7 +5,13 @@ import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, List
 
-from db import fetch, fetch_unlabeled, update_sample_prediction, insert_sample
+from db import (
+    fetch_unlabeled,
+    update_sample_prediction,
+    insert_sample,
+    fetch,
+    insert_setpoint,
+)
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
 from utils import safe_round
@@ -13,42 +19,33 @@ from utils import safe_round
 logger = logging.getLogger(__name__)
 
 
-class Inferencer2:
+class InferencerDelta:
     """
-    Inferencer voor MLSklearnTrainer (één full model, geen scaler ondersteuning).
-    Verwachte model payload op disk: joblib dump van dict {"model": <estimator>, "meta": {...}}
-    Belangrijke opts (met defaults):
-      - model_path_full
-      - sample_interval_seconds: 300
-      - min_setpoint: 15.0
-      - max_setpoint: 24.0
-      - min_change_threshold: 0.3
-      - stable_seconds: 600
-      - cooldown_seconds: 3600
-      - sample_age_threshold: 300
+    Inferencer for models trained on delta (predicted_delta).
+    It masks current_setpoint in the feature-vector during predict so the model cannot trivially copy it.
+    It reconstructs predicted_setpoint = current_setpoint + pred_delta and applies checks.
     """
 
     def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
         self.ha = ha_client
         self.collector = collector
         self.opts = opts or {}
-        # self.model_path = self.opts.get("model_path_full")
-        self.model_path = "/config/models/full_model2.joblib"
-        self.model_payload = None  # loaded payload dict {"model","meta"}
-        self.last_pred_ts: Optional[datetime] = None
-        self.last_pred_value: Optional[float] = None
-        self.last_pred_model: Optional[str] = None
-        self.last_eval_value: Optional[float] = None
-        self.last_eval_ts: Optional[datetime] = None
-
+        self.model_path = self.opts.get(
+            "model_path", "/config/models/full_model_delta.joblib"
+        )
+        self.model_payload = None
+        self.last_pred_ts = None
+        self.last_pred_value = None
+        self.last_pred_model = None
+        self.last_eval_value = None
+        self.last_eval_ts = None
         self.load_model()
 
     def load_model(self):
-        """Laad enkel het full model van schijf en valideer feature_order."""
         self.model_payload = None
         path = self.model_path
         if not path or not os.path.exists(path):
-            logger.debug("No model path configured or file missing: %s", path)
+            logger.debug("No model found at %s", path)
             return
         try:
             payload = joblib.load(path)
@@ -59,15 +56,20 @@ class Inferencer2:
         if meta.get("feature_order") and meta.get("feature_order") != FEATURE_ORDER:
             logger.warning("Model feature_order mismatch; ignoring model at %s", path)
             return
+        if meta.get("target") and meta.get("target") != "delta":
+            logger.warning("Model target != delta; ignoring model at %s", path)
+            return
         if "model" not in payload or payload["model"] is None:
-            logger.warning("Model payload missing 'model'; ignoring %s", path)
+            logger.warning("Model payload missing model; ignoring %s", path)
             return
         self.model_payload = payload
         logger.info("Loaded model from %s (mae=%s)", path, meta.get("mae"))
 
     def check_and_label_user_override(self) -> bool:
-        """Detecteer en label een echte gebruikeroverride; return True als gelabeld."""
-        return False
+        """
+        If the user manually changed the setpoint (via HA), add a labeled sample with user_override=True.
+        This function should only label when it's a genuine user action (not when our model applied it).
+        """
         try:
             now = datetime.now()
             interval = float(self.opts.get("sample_interval_seconds", 300))
@@ -80,16 +82,16 @@ class Inferencer2:
             rows = fetch(limit=1)
             if not rows:
                 return False
-            row = rows[0]
-
-            current_sp, *rest = self.ha.get_setpoint()
-            min_sp = float(self.opts.get("min_setpoint", 15.0))
-            max_sp = float(self.opts.get("max_setpoint", 24.0))
+            last_row = rows[0]
+            current_sp, *_ = self.ha.get_setpoint()
+            min_sp = float(self.opts.get("min_setpoint", 5.0))
+            max_sp = float(self.opts.get("max_setpoint", 30.0))
             if not (min_sp <= current_sp <= max_sp):
-                logger.warning("Setpoint outside plausible range: %s", current_sp)
                 return False
 
-            last_sample_sp = row.data.get("current_setpoint") if row.data else None
+            last_sample_sp = (
+                last_row.data.get("current_setpoint") if last_row.data else None
+            )
             if last_sample_sp is None:
                 return False
 
@@ -103,28 +105,33 @@ class Inferencer2:
 
             if current_rounded == last_sample_rounded:
                 return False
-
             if last_pred_rounded is not None and current_rounded == last_pred_rounded:
-                logger.info(
-                    "Current setpoint matches last predicted value; not user override"
-                )
+                # user matched our last prediction -> not a human override
                 return False
 
             features = self.collector.get_features(ts=now)
             insert_sample(features, label_setpoint=current_sp, user_override=True)
+
+            features["current_setpoint"] = last_sample_sp
+            insert_setpoint(features, setpoint=current_sp, override=True)
             logger.info(
-                "Detected user override and inserted labeled sample: last %.1f -> current %.1f",
-                last_sample_rounded,
+                "Detected user override: inserted labeled sample %.1f (was %.1f)",
                 current_rounded,
+                last_sample_rounded,
             )
             return True
         except Exception:
-            logger.exception("Error detecting/labeling user override")
+            logger.exception("Error detecting user override")
             return False
 
-    def _fetch_current_vector(self) -> Tuple[Optional[List[float]], Optional[dict]]:
-        """Haal de laatste unlabelled sample features op en maak vector volgens FEATURE_ORDER.
-        Mask current_setpoint in de featurevector (prevent trivial identity/echo)."""
+    def _fetch_current_vector_masked(
+        self,
+    ) -> Tuple[Optional[List[float]], Optional[dict]]:
+        """
+        Fetch latest unlabelled sample and build feature vector.
+        Mask the current_setpoint feature (set to 0.0) so model cannot trivially echo it.
+        Return both vector and original featdict (unchanged) so we can reconstruct current_setpoint.
+        """
         try:
             unl = fetch_unlabeled(limit=1)
             if not unl:
@@ -137,117 +144,81 @@ class Inferencer2:
             for k in FEATURE_ORDER:
                 v = feat.get(k)
                 if k == "current_setpoint":
-                    # mask current_setpoint to prevent trivial identity predictions
-                    v = 0.0
+                    vec.append(0.0)
+                    continue
+                if v is None:
+                    vec.append(0.0)
                 else:
-                    if v is None:
-                        v = 0.0
-                    else:
-                        try:
-                            v = float(v)
-                        except Exception:
-                            logger.warning(
-                                "Feature %s value not numeric: %r; coercing to 0.0",
-                                k,
-                                v,
-                            )
-                            v = 0.0
-                vec.append(v)
+                    try:
+                        vec.append(float(v))
+                    except Exception:
+                        logger.debug("Coercing non-numeric feature %s to 0.0", k)
+                        vec.append(0.0)
             return vec, feat
         except Exception:
-            logger.exception("Failed fetching current vector")
+            logger.exception("Failed fetching current vector (masked)")
             return None, None
 
-    def _predict(self, X: np.ndarray) -> Optional[float]:
-        """Voorspel met het geladen model; verwacht model.predict(X) op raw features."""
-        if self.model_payload is None:
-            logger.debug("No model loaded for prediction")
-            return None
-        try:
-            model = self.model_payload.get("model")
-            if model is None:
-                return None
-            p = model.predict(X)[0]
-            mae = self.model_payload.get("meta", {}).get("mae")
-            logger.debug("Model predicted %.3f (mae=%s)", p, mae)
-            return float(p)
-        except Exception:
-            logger.exception("Prediction failed")
-            return None
-
     def inference_job(self):
-        """Hoofdlogica: label overrides, laad model, voorspel, check stabiliteit en pas setpoint toe."""
         try:
             if self.check_and_label_user_override():
                 return
         except Exception:
-            logger.exception("Error during override check; continuing")
+            logger.exception("Error in override check; continuing")
 
-        # refresh model each run to pick up new saved model
         self.load_model()
         if self.model_payload is None:
-            logger.debug("No model available for inference")
+            logger.debug("No model loaded for inference")
             return
 
-        Xvec, featdict = self._fetch_current_vector()
+        Xvec, featdict = self._fetch_current_vector_masked()
         if Xvec is None:
-            logger.debug("No current features for inference")
+            logger.debug("No features available for inference")
             return
         X = np.array([Xvec], dtype=float)
 
-        min_sp = float(self.opts.get("min_setpoint", 15.0))
-        max_sp = float(self.opts.get("max_setpoint", 24.0))
-        threshold = float(self.opts.get("min_change_threshold", 0.3))
-        stable_seconds = float(self.opts.get("stable_seconds", 600))
         current_sp = featdict.get("current_setpoint") if featdict else None
         if current_sp is None:
-            logger.warning("Current setpoint unknown; skipping inference")
+            logger.warning("Current setpoint not available; skipping inference")
             return
-        now = datetime.now()
 
-        # --- debug logging: inspect features, vector en model type before predict
+        min_sp = float(self.opts.get("min_setpoint", 5.0))
+        max_sp = float(self.opts.get("max_setpoint", 30.0))
+        threshold = float(self.opts.get("min_change_threshold", 0.25))
+        stable_seconds = float(self.opts.get("stable_seconds", 600))
+
+        # debug
         logger.debug(
             "DEBUG: featdict keys = %s", sorted(featdict.keys()) if featdict else None
         )
-        logger.debug(
-            "DEBUG: featdict sample = %s",
-            (
-                {k: featdict.get(k) for k in list(featdict.keys())[:10]}
-                if featdict
-                else None
-            ),
-        )
         logger.debug("DEBUG: Xvec = %s", Xvec)
-        logger.debug(
-            "DEBUG: X shape/dtype = %s %s",
-            getattr(X, "shape", None),
-            getattr(X, "dtype", None),
-        )
+        logger.debug("DEBUG: model type = %s", type(self.model_payload.get("model")))
 
-        # inspect model
-        model = self.model_payload.get("model")
-        logger.debug("DEBUG: model type = %s", type(model))
         try:
-            # call model.predict with logging to capture raw return value and shape
+            model = self.model_payload.get("model")
             pred_raw = model.predict(X)
-            logger.debug("DEBUG: model.predict returned = %s", pred_raw)
-            p = float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
-            logger.debug("DEBUG: interpreted prediction p = %s", p)
+            pred_delta = (
+                float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
+            )
+            p = float(current_sp) + pred_delta
+            logger.debug(
+                "DEBUG: predicted_delta=%.4f reconstructed_setpoint=%.4f", pred_delta, p
+            )
         except Exception:
-            logger.exception("Prediction failed during debug predict")
+            logger.exception("Prediction failed")
             return
 
-        if p is None or not np.isfinite(p):
-            logger.debug("No valid prediction")
+        if not np.isfinite(p):
+            logger.debug("Invalid prediction")
             return
-
         if p < min_sp or p > max_sp:
-            logger.warning("Predicted value outside plausible range: %.3f", p)
+            logger.warning("Predicted setpoint outside plausible range: %.3f", p)
             return
         p = float(max(min(p, max_sp), min_sp))
         rounded_p = safe_round(p)
 
-        # stability timer logic
+        # stability timer
+        now = datetime.now()
         if (
             self.last_eval_value is None
             or safe_round(self.last_eval_value) != rounded_p
@@ -256,31 +227,28 @@ class Inferencer2:
             self.last_eval_ts = now
             logger.info("Starting stability timer for predicted value %.2f", p)
             return
-
         if (now - self.last_eval_ts).total_seconds() < stable_seconds:
             logger.info(
-                "Prediction (%.2f) not yet stable; waiting (%.0fs remaining)",
+                "Prediction %.2f not yet stable; waiting (%.0fs remaining)",
                 p,
                 stable_seconds - (now - self.last_eval_ts).total_seconds(),
             )
             return
 
-        if abs(p - current_sp) < threshold:
+        # threshold and cooldown
+        if abs(p - float(current_sp)) < threshold:
             logger.info(
-                "Prediction (%.2f), change %.3f below threshold %.3f; skipping",
-                p,
-                abs(p - current_sp),
+                "Predicted change %.3f < threshold %.3f; skipping",
+                abs(p - float(current_sp)),
                 threshold,
             )
             return
-
-        # cooldown
         cooldown = float(self.opts.get("cooldown_seconds", 3600))
         if self.last_pred_ts and (now - self.last_pred_ts).total_seconds() < cooldown:
             logger.info("Cooldown active; skipping predicted setpoint %.2f", p)
             return
 
-        # persist prediction
+        # persist prediction (absolute)
         try:
             unl = fetch_unlabeled(limit=1)
             if unl:
@@ -305,9 +273,9 @@ class Inferencer2:
                     sid, predicted_setpoint=p, prediction_error=None
                 )
         except Exception:
-            logger.exception("Failed to persist predicted_setpoint; continuing")
+            logger.exception("Failed to persist prediction")
 
-        # apply setpoint
+        # apply setpoint in HA
         try:
             self.ha.set_setpoint(p)
             self.last_pred_ts = now
@@ -315,4 +283,4 @@ class Inferencer2:
             self.last_pred_model = self.model_path
             logger.info("Applied predicted setpoint %.2f (was %.2f)", p, current_sp)
         except Exception:
-            logger.exception("Failed to apply setpoint via HAClient")
+            logger.exception("Failed to apply setpoint via HA client")

@@ -12,6 +12,7 @@ from db import Session, Sample, insert_sample, update_label
 from ha_client import HAClient
 from trainer import Trainer
 from trainer2 import Trainer2
+from trainer_delta import TrainerDelta
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="Adaptive Thermostat API")
@@ -616,6 +617,56 @@ def get_full_model_fullmeta():
     return _to_builtin_type(response)
 
 
+@app.get("/model/full_delta", response_model=Dict[str, Any])
+def get_full_model_full_delta_meta():
+    """
+    Return everything in payload['meta'] (if present) plus derived model info and file diagnostics.
+    This endpoint converts numpy / non-serializable types to built-in Python types.
+    """
+    MODEL_PATH = "/config/models/full_model_delta.joblib"
+    if not os.path.exists(MODEL_PATH):
+        logger.info("Model file not found at %s", MODEL_PATH)
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+    try:
+        payload = joblib.load(MODEL_PATH)
+    except Exception as e:
+        logger.exception("Failed to load model file %s", MODEL_PATH)
+        raise HTTPException(status_code=500, detail=f"Failed loading model: {e}")
+
+    # meta payload (return every key present)
+    if isinstance(payload, dict) and "meta" in payload:
+        raw_meta = payload.get("meta") or {}
+        meta = _to_builtin_type(raw_meta)
+    else:
+        meta = {"note": "No meta key found in model payload"}
+
+    # derived info about the model object
+    model_info = _extract_model_info(payload)
+
+    # file diagnostics
+    try:
+        stat = os.stat(MODEL_PATH)
+        file_info = {
+            "path": MODEL_PATH,
+            "size_bytes": stat.st_size,
+            "modified_ts": datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z",
+        }
+    except Exception:
+        file_info = {"path": MODEL_PATH}
+
+    response = {
+        "meta": meta,
+        "model_info": _to_builtin_type(model_info),
+        "file": file_info,
+    }
+
+    # include entire payload keys (safe-serialized) if you want — uncomment to include everything:
+    # response["raw_payload"] = _to_builtin_type(payload)
+
+    return _to_builtin_type(response)
+
+
 @app.post("/train/full")
 def trigger_full_train(
     force: bool = Query(
@@ -629,14 +680,16 @@ def trigger_full_train(
     _check_token(x_addon_token)
     opts = load_options()
     ha = HAClient(opts)
-    trainer = Trainer(ha, opts)
+    # trainer = Trainer(ha, opts)
     trainer2 = Trainer2(ha, opts)
+    trainer_delta = TrainerDelta(ha, opts)
 
     def _run():
         try:
             logger.info("Triggered full retrain via API (force=%s)", force)
-            trainer.full_retrain_job(force=force)
+            # trainer.full_retrain_job(force=force)
             trainer2.train_job(force=force)
+            trainer_delta.train_job(force=force)
             logger.info("Full retrain job finished (API-triggered)")
         except Exception:
             logger.exception("Exception in API-triggered full retrain")

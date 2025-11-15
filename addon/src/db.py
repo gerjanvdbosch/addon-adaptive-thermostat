@@ -38,7 +38,55 @@ class Sample(Base):
     prediction_error = Column(Float, nullable=True)
 
 
+class Setpoint(Base):
+    __tablename__ = "setpoints"
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.now, index=True)
+    setpoint = Column(Float, nullable=False)
+    data = Column(JSON)
+
+
 Base.metadata.create_all(engine)
+
+
+def insert_setpoint(
+    data: dict, setpoint: Optional[float] = None
+) -> int:
+    s: SASession = Session()
+    try:
+        sample = Setpoint(data=data, setpoint=setpoint)
+        s.add(sample)
+        s.commit()
+        s.refresh(sample)
+        return sample.id
+    finally:
+        s.close()
+
+
+def update_setpoint(setpoint_id: int, setpoint: float) -> None:
+    s: SASession = Session()
+    try:
+        row = s.get(Setpoint, setpoint_id)
+        if row is not None:
+            row.setpoint = setpoint
+            s.commit()
+    finally:
+        s.close()
+
+
+def fetch_training_setpoints(days: int = 30) -> List[Sample]:
+    s: SASession = Session()
+    try:
+        cutoff = datetime.now() - timedelta(days=days)
+        rows = (
+            s.query(Setpoint)
+            .filter(Setpoint.timestamp >= cutoff)
+            .filter(Setpoint.setpoint.isnot(None))
+            .all()
+        )
+        return rows
+    finally:
+        s.close()
 
 
 def insert_sample(
