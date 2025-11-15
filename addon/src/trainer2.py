@@ -39,9 +39,24 @@ def _assemble_matrix(rows, feature_order):
                 logger.info("MLTrainer: invalid temp %s", str(label))
                 continue
 
-            vec = [
-                feat.get(k) if feat.get(k) is not None else 0.0 for k in feature_order
-            ]
+            vec = []
+            for k in feature_order:
+                v = feat.get(k)
+                if v is None:
+                    v = 0.0
+                else:
+                    try:
+                        v = float(v)
+                    except Exception:
+                        logger.warning(
+                            "Feature %s value not numeric in training row %s: %r; coercing to 0.0",
+                            k,
+                            getattr(r, "id", None),
+                            v,
+                        )
+                        v = 0.0
+                vec.append(v)
+
             X.append(vec)
             y.append(label)
             used_rows.append(r)
@@ -203,6 +218,21 @@ class Trainer2:
             n_total,
             pseudo_count,
         )
+
+        # quick label stats for debugging potential constant-label problems
+        try:
+            if y is not None and len(y):
+                logger.info(
+                    "Training labels: n=%d mean=%.4f std=%.4f min=%.4f max=%.4f",
+                    len(y),
+                    float(np.mean(y)),
+                    float(np.std(y)),
+                    float(np.min(y)),
+                    float(np.max(y)),
+                )
+        except Exception:
+            logger.exception("Failed logging training label stats")
+
         return X, y, used_rows, sample_weight, int(pseudo_count)
 
     def _search_estimator(self):
@@ -809,19 +839,32 @@ class Trainer2:
                     import shap  # type: ignore
 
                     model_for_shap = best_pipe.named_steps.get("model")
-                    explainer = shap.Explainer(
-                        model_for_shap, feature_perturbation="tree"
+                    logger.debug(
+                        "SHAP: creating explainer for model type %s",
+                        type(model_for_shap),
                     )
-                    shap_vals = explainer(X_val)
-                    mean_abs = np.mean(np.abs(shap_vals.values), axis=0)
-                    inds = np.argsort(mean_abs)[::-1][:10]
-                    top_feats = [
-                        (self.feature_order[i], float(mean_abs[i])) for i in inds
-                    ]
-                    importance_reliable = True
+                    try:
+                        # Let SHAP choose the correct explainer; explicit feature_perturbation may raise
+                        explainer = shap.Explainer(model_for_shap)
+                        shap_vals = explainer(X_val)
+                        mean_abs = np.mean(np.abs(shap_vals.values), axis=0)
+                        inds = np.argsort(mean_abs)[::-1][:10]
+                        top_feats = [
+                            (self.feature_order[i], float(mean_abs[i])) for i in inds
+                        ]
+                        importance_reliable = True
+                        logger.info(
+                            "SHAP: computed top features via shap (n_val=%d)",
+                            len(X_val),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "SHAP analysis failed inside explainer; will fall back to permutation_importance"
+                        )
+                        # continue to permutation_importance fallback
                 except Exception:
                     logger.exception(
-                        "SHAP analysis failed; falling back to permutation_importance"
+                        "SHAP import failed or SHAP usage raised; falling back to permutation_importance"
                     )
         except Exception:
             logger.exception("SHAP wrapper failed")

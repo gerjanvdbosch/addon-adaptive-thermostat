@@ -131,9 +131,20 @@ class Inferencer2:
             feat = last.data if last.data and isinstance(last.data, dict) else None
             if not feat:
                 return None, None
-            vec = [
-                feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER
-            ]
+            vec = []
+            for k in FEATURE_ORDER:
+                v = feat.get(k)
+                if v is None:
+                    v = 0.0
+                else:
+                    try:
+                        v = float(v)
+                    except Exception:
+                        logger.warning(
+                            "Feature %s value not numeric: %r; coercing to 0.0", k, v
+                        )
+                        v = 0.0
+                vec.append(v)
             return vec, feat
         except Exception:
             logger.exception("Failed fetching current vector")
@@ -186,7 +197,38 @@ class Inferencer2:
             return
         now = datetime.now()
 
-        p = self._predict(X)
+        # --- debug logging: inspect features, vector en model type before predict
+        logger.debug(
+            "DEBUG: featdict keys = %s", sorted(featdict.keys()) if featdict else None
+        )
+        logger.debug(
+            "DEBUG: featdict sample = %s",
+            (
+                {k: featdict.get(k) for k in list(featdict.keys())[:10]}
+                if featdict
+                else None
+            ),
+        )
+        logger.debug("DEBUG: Xvec = %s", Xvec)
+        logger.debug(
+            "DEBUG: X shape/dtype = %s %s",
+            getattr(X, "shape", None),
+            getattr(X, "dtype", None),
+        )
+
+        # inspect model
+        model = self.model_payload.get("model")
+        logger.debug("DEBUG: model type = %s", type(model))
+        try:
+            # call model.predict with logging to capture raw return value and shape
+            pred_raw = model.predict(X)
+            logger.debug("DEBUG: model.predict returned = %s", pred_raw)
+            p = float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
+            logger.debug("DEBUG: interpreted prediction p = %s", p)
+        except Exception:
+            logger.exception("Prediction failed during debug predict")
+            return
+
         if p is None or not np.isfinite(p):
             logger.debug("No valid prediction")
             return
