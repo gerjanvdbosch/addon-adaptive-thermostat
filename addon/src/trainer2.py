@@ -41,6 +41,10 @@ def _assemble_matrix(rows, feature_order):
 
             vec = []
             for k in feature_order:
+                # Mask current_setpoint during training to prevent echo learning
+                if k == "current_setpoint":
+                    vec.append(0.0)
+                    continue
                 v = feat.get(k)
                 if v is None:
                     v = 0.0
