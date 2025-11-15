@@ -9,6 +9,7 @@ from db import fetch, fetch_unlabeled, update_sample_prediction, insert_sample
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
 from utils import safe_round
+from sklearn.pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,18 @@ class Inferencer:
                             "%s model feature_order mismatch; ignoring", name
                         )
                         continue
-                    self.models[name] = obj
+                    # normalize object shape: ensure obj contains keys "model" and optionally "scaler"
+                    model = obj.get("model")
+                    scaler = obj.get("scaler") if "scaler" in obj else None
+                    # if the saved model is a pipeline that already contains a scaler,
+                    # prefer using the pipeline and ignore external scaler to avoid double-scaling.
+                    if isinstance(model, Pipeline) and scaler is not None:
+                        logger.debug(
+                            "%s model is a Pipeline and contains internal scaler; ignoring external scaler",
+                            name,
+                        )
+                        scaler = None
+                    self.models[name] = {"model": model, "scaler": scaler, "meta": meta}
                     logger.debug("Loaded %s model from %s", name, path)
         except Exception:
             logger.exception("Error loading models")
@@ -104,21 +116,53 @@ class Inferencer:
         feat = last.data if last.data and isinstance(last.data, dict) else None
         if not feat:
             return None, None
-        # ensure all keys present
+        # ensure all keys present in FEATURE_ORDER
         vec = [feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER]
         return vec, feat
 
-    def _predict_with_model(self, name, obj, X):
+    def _predict_with_model(
+        self, name: str, obj: dict, X: np.ndarray
+    ) -> Optional[float]:
+        """
+        Predicts a single-row X (2D array) using model and scaler present in obj.
+        Handles cases:
+         - model is a Pipeline (may include scaler) -> call model.predict directly
+         - model is an estimator and scaler provided separately -> apply scaler then predict
+         - model is an estimator without scaler -> predict on raw X
+        Returns the scalar prediction or None on failure.
+        """
         try:
             model = obj.get("model")
             scaler = obj.get("scaler")
             if model is None:
                 return None
-            if scaler is not None:
-                Xs = scaler.transform(X)
-                p = model.predict(Xs)[0]
+
+            # Ensure X is 2D ndarray
+            if not isinstance(X, np.ndarray):
+                X = np.array(X, dtype=float)
+            if X.ndim == 1:
+                X = X.reshape(1, -1)
+
+            # If model is a Pipeline, call predict directly (pipeline handles scaling)
+            if isinstance(model, Pipeline):
+                p = float(model.predict(X)[0])
             else:
-                p = model.predict(X)[0]
+                # model is a bare estimator
+                if scaler is not None:
+                    # scaler expected to be fitted StandardScaler or similar
+                    try:
+                        Xs = scaler.transform(X)
+                    except Exception:
+                        # If scaler was saved but shape mismatch, log and fallback to raw X
+                        logger.exception(
+                            "Scaler transform failed for model %s; falling back to raw features",
+                            name,
+                        )
+                        Xs = X
+                    p = float(model.predict(Xs)[0])
+                else:
+                    p = float(model.predict(X)[0])
+
             mae = obj.get("meta", {}).get("mae")
             logger.info("Model %s predicted %.2f (MAE=%s)", name, p, mae)
             return p
@@ -133,8 +177,10 @@ class Inferencer:
         except Exception:
             logger.exception("Error during override check; continuing")
 
+        # reload models at start of each job to pick up new full/partial models
         self.load_models()
         if not self.models:
+            logger.info("No models available for inference")
             return
 
         Xvec, featdict = self._fetch_current_vector()
@@ -153,9 +199,10 @@ class Inferencer:
             return
         now = datetime.now()
 
-        # sort models by MAE ascending
+        # sort models by MAE ascending; if MAE missing treat as very large
         sorted_models = sorted(
-            self.models.items(), key=lambda kv: kv[1].get("meta", {}).get("mae", np.inf)
+            self.models.items(),
+            key=lambda kv: kv[1].get("meta", {}).get("mae", np.inf),
         )
 
         pred = None
@@ -163,25 +210,46 @@ class Inferencer:
 
         for name, obj in sorted_models:
             p = self._predict_with_model(name, obj, X)
-            if p is None or p < min_sp or p > max_sp:
-                logger.warning("Predicted change outside plausible range: %s", p)
+            if p is None:
+                logger.debug("Model %s returned no prediction; trying next", name)
                 continue
+
+            # enforce plausible range
+            if p < min_sp or p > max_sp:
+                logger.warning(
+                    "Predicted change outside plausible range from model %s: %s",
+                    name,
+                    p,
+                )
+                continue
+
+            # clamp to bounds
             p = max(min(p, max_sp), min_sp)
             rounded_p = safe_round(p)
 
+            # evaluate stability window logic
             if (
                 self.last_eval_value is None
                 or safe_round(self.last_eval_value) != rounded_p
             ):
                 self.last_eval_value = p
                 self.last_eval_ts = now
-                logger.info("Starting stability timer for predicted value %.2f", p)
+                logger.info(
+                    "Starting stability timer for predicted value %.2f (model=%s)",
+                    p,
+                    name,
+                )
+                # start stability timer; require consistent prediction on next iterations
                 continue
 
+            # check stability duration
             if (now - self.last_eval_ts).total_seconds() < stable_seconds:
-                logger.info("Predicted change from %s not yet stable; skipping", name)
+                logger.info(
+                    "Predicted value from model %s not yet stable; skipping", name
+                )
                 continue
 
+            # threshold check against current setpoint
             if abs(p - current_sp) < threshold:
                 logger.info(
                     "Predicted change from %s below threshold (%.2f < %.2f); skipping",
