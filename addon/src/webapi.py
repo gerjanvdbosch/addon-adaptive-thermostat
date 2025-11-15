@@ -179,7 +179,6 @@ def list_setpoints(
         s.close()
 
 
-
 @app.get("/samples/{sample_id}", response_model=SampleOut)
 def get_sample(
     sample_id: int = Path(..., ge=1), x_addon_token: Optional[str] = Header(None)

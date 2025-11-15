@@ -143,8 +143,6 @@ class TrainerDelta:
         self.random_state = int(self.opts.get("random_state", 42))
 
         # safe defaults
-        if "require_override" not in self.opts:
-            self.opts["require_override"] = True
         if "warning_std_threshold" not in self.opts:
             self.opts["warning_std_threshold"] = 1e-3
 
@@ -154,13 +152,7 @@ class TrainerDelta:
         Optional[np.ndarray], Optional[np.ndarray], List[Any], Optional[np.ndarray], int
     ]:
         rows = fetch_training_setpoints(days=int(self.opts.get("buffer_days", 30)))
-        require_override = bool(self.opts.get("require_override", True))
-        labeled_rows = [
-            r
-            for r in rows
-            if r.setpoint is not None
-            and (not require_override or getattr(r, "override", False))
-        ]
+        labeled_rows = [r for r in rows if r.setpoint is not None]
         X_lab, y_lab, used_rows = _assemble_matrix_delta(
             labeled_rows, self.feature_order
         )
