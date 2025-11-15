@@ -80,11 +80,8 @@ class Inferencer:
 
     def load_models(self):
         """
-        Load models from configured paths. Normalize loaded objects into dicts with keys:
-        {"model": <estimator_or_pipeline>, "scaler": <optional scaler>, "meta": <meta dict>}
-
-        If meta["feature_order"] mismatches FEATURE_ORDER the model is ignored.
-        If meta lacks "mae", we set it to +inf to avoid using un-evaluated partials ahead of full models.
+        Load models and normalize into {'model','scaler','meta'}.
+        If meta lacks 'mae' assign inf to avoid using unevaluated partials before full.
         """
         try:
             self.models = {}
@@ -116,13 +113,11 @@ class Inferencer:
                     )
                     continue
 
-                # Ensure an MAE exists to avoid promoting unevaluated partials
                 meta.setdefault("mae", float("inf"))
 
                 model = obj.get("model")
                 scaler = obj.get("scaler") if "scaler" in obj else None
 
-                # If model is a Pipeline that contains its own scaler, ignore external scaler to avoid double-scaling
                 if isinstance(model, Pipeline) and scaler is not None:
                     logger.debug(
                         "%s: model is a Pipeline and an external scaler was present; ignoring external scaler",
@@ -130,10 +125,9 @@ class Inferencer:
                     )
                     scaler = None
 
-                # Basic sanity checks
+                # Sanity checks
                 try:
                     feat_len = len(FEATURE_ORDER)
-                    # If scaler present, check mean_ length if possible
                     if scaler is not None and hasattr(scaler, "mean_"):
                         if len(getattr(scaler, "mean_")) != feat_len:
                             logger.warning(
@@ -147,6 +141,7 @@ class Inferencer:
                     logger.exception("Sanity check failed for %s model; skipping", name)
                     continue
 
+                # attach normalized object
                 self.models[name] = {"model": model, "scaler": scaler, "meta": meta}
                 logger.info(
                     "Loaded %s model from %s (MAE=%s)", name, path, meta.get("mae")
@@ -169,9 +164,10 @@ class Inferencer:
         self, name: str, obj: dict, X: np.ndarray
     ) -> Optional[float]:
         """
-        Predict using the provided normalized object.
-        Adds defensive logging for shapes, scaler means, and scaled features to diagnose mismatches.
-        Returns predicted scalar or None.
+        Predict with strong diagnostics:
+        - logs raw features, shapes
+        - logs scaler.mean_, scaled features (first 10 values) if scaler present
+        - logs model.coef_ and intercept if available
         """
         try:
             model = obj.get("model")
@@ -182,22 +178,26 @@ class Inferencer:
                 logger.debug("Model %s has no estimator; skipping", name)
                 return None
 
-            # Ensure X is numpy array 2D
+            # Ensure X is numpy 2D
             if not isinstance(X, np.ndarray):
                 X = np.array(X, dtype=float)
             if X.ndim == 1:
                 X = X.reshape(1, -1)
 
-            # Quick sanity logs
             logger.debug(
-                "Model %s predict called. X.shape=%s FEATURE_ORDER_len=%d meta_keys=%s",
+                "Model %s predict called. X.shape=%s FEATURE_ORDER_len=%d",
                 name,
                 X.shape,
                 len(FEATURE_ORDER),
-                list(meta.keys()),
             )
 
-            # If model is a pipeline, let it handle scaling
+            # Log raw feature sample values (first 20 chars)
+            try:
+                logger.debug("Model %s raw X sample: %s", name, X[0].tolist())
+            except Exception:
+                logger.debug("Model %s unable to list raw X", name)
+
+            # If model is a pipeline -> pipeline handles scaling internally
             if isinstance(model, Pipeline):
                 try:
                     preds = model.predict(X)
@@ -206,26 +206,43 @@ class Inferencer:
                     logger.exception("Pipeline predict failed for model %s", name)
                     return None
             else:
-                # Bare estimator
+                # Bare estimator path
+                # Log model coefficients if present
+                try:
+                    if hasattr(model, "coef_"):
+                        logger.debug(
+                            "Model %s coef sample (first10): %s",
+                            name,
+                            np.array(model.coef_).tolist()[:10],
+                        )
+                    if hasattr(model, "intercept_"):
+                        logger.debug(
+                            "Model %s intercept: %s", name, getattr(model, "intercept_")
+                        )
+                except Exception:
+                    logger.debug("Could not read model coef/intercept for %s", name)
+
                 if scaler is not None:
-                    # log scaler shape if available
+                    # log scaler.mean_ if available
                     if hasattr(scaler, "mean_"):
                         try:
                             logger.debug(
-                                "Model %s scaler mean sample: %s",
+                                "Model %s scaler.mean_ (first10): %s",
                                 name,
-                                np.array(scaler.mean_).tolist()[:5],
+                                np.array(scaler.mean_).tolist()[:10],
                             )
                         except Exception:
                             logger.debug(
-                                "Model %s scaler mean present but failed to list", name
+                                "Model %s scaler.mean_ present but failed to list", name
                             )
 
-                    # Attempt transform with graceful fallback
+                    # Attempt transform with fallback
                     try:
                         Xs = scaler.transform(X)
                         logger.debug(
-                            "Model %s scaled X sample: %s", name, Xs[0].tolist()[:10]
+                            "Model %s scaled X sample (first20): %s",
+                            name,
+                            Xs[0].tolist()[:20],
                         )
                     except Exception:
                         logger.exception(
@@ -233,6 +250,7 @@ class Inferencer:
                             name,
                         )
                         Xs = X
+
                     try:
                         preds = model.predict(Xs)
                         p = float(preds[0])
@@ -242,7 +260,7 @@ class Inferencer:
                         )
                         return None
                 else:
-                    # No scaler; predict raw
+                    # No scaler present
                     try:
                         preds = model.predict(X)
                         p = float(preds[0])
@@ -252,7 +270,30 @@ class Inferencer:
                         )
                         return None
 
-            logger.info("Model %s predicted %.2f (MAE=%s)", name, p, meta.get("mae"))
+            logger.info("Model %s predicted %.4f (MAE=%s)", name, p, meta.get("mae"))
+
+            # Additional debug: if prediction out of expected human setpoint range, log details
+            min_sp = float(self.opts.get("min_setpoint", 15.0))
+            max_sp = float(self.opts.get("max_setpoint", 24.0))
+            if p < min_sp or p > max_sp:
+                logger.warning(
+                    "Model %s produced out-of-range prediction %.4f (expected %.1f-%.1f). Dumping diagnostics.",
+                    name,
+                    p,
+                    min_sp,
+                    max_sp,
+                )
+                # Log full coefficient vector if present
+                try:
+                    if hasattr(model, "coef_"):
+                        logger.warning(
+                            "Model %s full coef: %s",
+                            name,
+                            np.array(model.coef_).tolist(),
+                        )
+                except Exception:
+                    logger.warning("Unable to log full coefs for model %s", name)
+
             return p
         except Exception:
             logger.exception("Prediction failed for model %s", name)
@@ -265,7 +306,6 @@ class Inferencer:
         except Exception:
             logger.exception("Error during override check; continuing")
 
-        # Always reload models at start to pick up latest full/partial
         self.load_models()
         if not self.models:
             logger.info("No models available for inference")
@@ -287,7 +327,6 @@ class Inferencer:
             return
         now = datetime.now()
 
-        # Sort models by MAE ascending; models without MAE were given inf earlier
         sorted_models = sorted(
             self.models.items(),
             key=lambda kv: kv[1].get("meta", {}).get("mae", float("inf")),
@@ -311,11 +350,9 @@ class Inferencer:
                 )
                 continue
 
-            # clamp to bounds and round
             p = max(min(p, max_sp), min_sp)
             rounded_p = safe_round(p)
 
-            # Stability logic
             if (
                 self.last_eval_value is None
                 or safe_round(self.last_eval_value) != rounded_p
@@ -384,7 +421,6 @@ class Inferencer:
         except Exception:
             logger.exception("Failed to persist predicted_setpoint; continuing")
 
-        # apply setpoint
         try:
             self.ha.set_setpoint(pred)
             self.last_pred_ts = now
