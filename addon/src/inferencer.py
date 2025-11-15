@@ -150,15 +150,40 @@ class Inferencer:
             logger.exception("Error loading models")
 
     def _fetch_current_vector(self) -> Tuple[Optional[List[float]], Optional[dict]]:
-        unl = fetch_unlabeled(limit=1)
-        if not unl:
+        """Haal de laatste unlabelled sample features op en maak vector volgens FEATURE_ORDER.
+        Mask current_setpoint in de featurevector (prevent trivial identity/echo)."""
+        try:
+            unl = fetch_unlabeled(limit=1)
+            if not unl:
+                return None, None
+            last = unl[0]
+            feat = last.data if last.data and isinstance(last.data, dict) else None
+            if not feat:
+                return None, None
+            vec = []
+            for k in FEATURE_ORDER:
+                v = feat.get(k)
+                if k == "current_setpoint":
+                    # mask current_setpoint to prevent trivial identity predictions
+                    v = 0.0
+                else:
+                    if v is None:
+                        v = 0.0
+                    else:
+                        try:
+                            v = float(v)
+                        except Exception:
+                            logger.warning(
+                                "Feature %s value not numeric: %r; coercing to 0.0",
+                                k,
+                                v,
+                            )
+                            v = 0.0
+                vec.append(v)
+            return vec, feat
+        except Exception:
+            logger.exception("Failed fetching current vector")
             return None, None
-        last = unl[0]
-        feat = last.data if last.data and isinstance(last.data, dict) else None
-        if not feat:
-            return None, None
-        vec = [feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER]
-        return vec, feat
 
     def _predict_with_model(
         self, name: str, obj: dict, X: np.ndarray
