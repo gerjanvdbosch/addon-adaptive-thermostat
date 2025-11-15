@@ -36,7 +36,7 @@ def _assemble_matrix_delta(
     rows: List[Any], feature_order: List[str]
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any]]:
     """
-    Build X and y where y = label_setpoint - current_setpoint (delta).
+    Build X and y where y = setpoint - current_setpoint (delta).
     Skip rows that lack current_setpoint or have trivial delta and are not override.
     """
     X: List[List[float]] = []
@@ -48,9 +48,9 @@ def _assemble_matrix_delta(
         if not feat:
             continue
         try:
-            if r.label_setpoint is None:
+            if r.setpoint is None:
                 continue
-            label = _safe_float(r.label_setpoint, None)
+            label = _safe_float(r.setpoint, None)
             if label is None:
                 continue
             # sanity bounds on absolute setpoint
@@ -121,7 +121,7 @@ def _assemble_matrix_delta(
 
 class TrainerDelta:
     """
-    Trainer that learns delta = label_setpoint - current_setpoint.
+    Trainer that learns delta = setpoint - current_setpoint.
 
     Key opts (defaults):
       - model_path: path to save model
@@ -158,7 +158,7 @@ class TrainerDelta:
         labeled_rows = [
             r
             for r in rows
-            if r.label_setpoint is not None
+            if r.setpoint is not None
             and (not require_override or getattr(r, "override", False))
         ]
         X_lab, y_lab, used_rows = _assemble_matrix_delta(
@@ -394,7 +394,7 @@ class TrainerDelta:
                 )
                 preds_abs = current_arr + np.array(preds_delta, dtype=float)
                 y_true_abs = np.array(
-                    [_safe_float(r.label_setpoint, 0.0) for r in used_rows[:n_labeled]],
+                    [_safe_float(r.setpoint, 0.0) for r in used_rows[:n_labeled]],
                     dtype=float,
                 )
                 mae_abs = float(mean_absolute_error(y_true_abs, preds_abs))
