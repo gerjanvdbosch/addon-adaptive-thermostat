@@ -26,10 +26,6 @@ def _atomic_dump(obj: Any, path: str) -> None:
 
 
 def _assemble_matrix(rows, feature_order):
-    """
-    Bouw X en y, maar y is delta = label_setpoint - current_setpoint.
-    Rows zonder current_setpoint worden overgeslagen.
-    """
     X = []
     y = []
     used_rows = []
@@ -39,23 +35,10 @@ def _assemble_matrix(rows, feature_order):
             continue
         try:
             label = float(r.label_setpoint)
-            current = feat.get("current_setpoint")
-            if current is None:
-                # cannot compute delta zonder current_setpoint
-                logger.debug(
-                    "Skipping row %s: missing current_setpoint", getattr(r, "id", None)
-                )
-                continue
-            current = float(current)
-            # sanity bounds on label
             if not (14 <= label <= 25.0):
                 logger.info("MLTrainer: invalid temp %s", str(label))
                 continue
 
-            # compute delta target
-            label_delta = label - current
-
-            # build feature vector (coerce to floats; keep current_setpoint optionally)
             vec = []
             for k in feature_order:
                 v = feat.get(k)
@@ -75,7 +58,7 @@ def _assemble_matrix(rows, feature_order):
                 vec.append(v)
 
             X.append(vec)
-            y.append(label_delta)
+            y.append(label)
             used_rows.append(r)
         except Exception:
             logger.exception(
@@ -88,8 +71,32 @@ def _assemble_matrix(rows, feature_order):
 
 class Trainer2:
     """
-    Trainer die het model laat leren DELTA = label_setpoint - current_setpoint.
-    Pseudo-labeling is uitgeschakeld als quick-fix; herintroduceer pas met veilige policy.
+    Production-ready sklearn ML trainer using HistGradientBoostingRegressor.
+
+    Important configurable opts (defaults chosen for safety):
+      - model_path_full (required)
+      - buffer_days: 30
+      - use_unlabeled: False
+      - pseudo_limit: 1000
+      - weight_label: 1.0
+      - weight_pseudo: 0.05
+      - val_fraction: 0.15
+      - n_jobs: 1
+      - n_iter_compact: 20
+      - n_iter_extended: 100
+      - min_train_size: 30
+      - min_search_labels: 50
+      - min_labels_to_expand: 100
+      - edge_count_threshold: 2
+      - min_labels_promote: 50
+      - min_labels_for_promo_if_no_existing: 20
+      - require_labels_for_expand_promo: True
+      - allow_force: True (but persistent save requires n_labeled >= 30)
+      - refit_on_full: True
+      - promotion_delta_mae: 0.0
+      - require_user_override: True (if set true, only rows with user_override are considered labeled)
+      - min_val_size: 30
+      - min_train_for_search: 10
     """
 
     def __init__(self, ha_client, opts: dict):
@@ -143,8 +150,6 @@ class Trainer2:
                     pseudo_label = feat.get("current_setpoint")
                     if pseudo_label is None:
                         continue
-                    # DO NOT blindly use pseudo_label as absolute label when training delta.
-                    # If re-enabling pseudo-labeling later, compute pseudo_delta or use model-based pseudo.
                     r.label_setpoint = pseudo_label
                     pseudo_rows.append(r)
                 X_pseudo, y_pseudo, _ = _assemble_matrix(
@@ -201,11 +206,10 @@ class Trainer2:
                     str(MAX_PSEUDO_MULTIPLIER),
                 )
 
-        sample_weight = np.ones(n_total, dtype=float)
+        weight_label = float(self.opts.get("weight_label", 1.0))
+        weight_pseudo = float(self.opts.get("weight_pseudo", 0.1))
+        sample_weight = np.ones(n_total, dtype=float) * weight_label
         if n_total > n_labeled:
-            weight_label = float(self.opts.get("weight_label", 1.0))
-            weight_pseudo = float(self.opts.get("weight_pseudo", 0.1))
-            sample_weight *= weight_label
             sample_weight[n_labeled:n_total] = weight_pseudo
 
         logger.info(
@@ -215,11 +219,11 @@ class Trainer2:
             pseudo_count,
         )
 
-        # quick label stats for debugging potential constant-label problems (report deltas)
+        # quick label stats for debugging potential constant-label problems
         try:
             if y is not None and len(y):
                 logger.info(
-                    "Training deltas: n=%d mean=%.4f std=%.4f min=%.4f max=%.4f",
+                    "Training labels: n=%d mean=%.4f std=%.4f min=%.4f max=%.4f",
                     len(y),
                     float(np.mean(y)),
                     float(np.std(y)),
@@ -227,17 +231,19 @@ class Trainer2:
                     float(np.max(y)),
                 )
         except Exception:
-            logger.exception("Failed logging training delta stats")
+            logger.exception("Failed logging training label stats")
 
         return X, y, used_rows, sample_weight, int(pseudo_count)
 
     def _search_estimator(self):
+        # default base estimator
         base = HistGradientBoostingRegressor(random_state=self.random_state)
 
         user_dist = self.opts.get("search_param_dist")
         if user_dist:
             return base, user_dist
 
+        # compact grid for small data
         compact = {
             "max_iter": [100, 200, 400],
             "max_leaf_nodes": [15, 31, 63],
@@ -301,12 +307,12 @@ class Trainer2:
             return None
         return n_splits
 
-    def _report_household_drift(self, used_rows, preds_abs, y_true_abs):
+    def _report_household_drift(self, used_rows, preds, y_true):
         try:
             hh_map = {}
             for i, r in enumerate(used_rows):
                 hh = getattr(r, "household_id", None) or "unknown"
-                hh_map.setdefault(hh, []).append((preds_abs[i], y_true_abs[i]))
+                hh_map.setdefault(hh, []).append((preds[i], y_true[i]))
             for hh, vals in hh_map.items():
                 errors = [
                     abs(p - t) for p, t in vals if np.isfinite(p) and np.isfinite(t)
@@ -320,13 +326,14 @@ class Trainer2:
 
     def train_job(self, force: bool = False):
         start_time = time.time()
-        X, y_delta, used_rows, sample_weight, pseudo_count = self._fetch_data()
+        X, y, used_rows, sample_weight, pseudo_count = self._fetch_data()
         if X is None:
             logger.info("MLTrainer: no training data")
             return
 
-        n_total = len(y_delta)
+        n_total = len(y)
         n_labeled = len(used_rows)
+        # keep last seen labeled count for search estimator decision
         self.opts["last_n_labeled"] = n_labeled
 
         min_search_labels = int(self.opts.get("min_search_labels", 50))
@@ -342,6 +349,7 @@ class Trainer2:
                 n_iter,
             )
         else:
+            # if expand flag set and we have enough labels, allow extended iterations
             if bool(self.opts.get("expand_search_next", False)) and n_labeled >= int(
                 self.opts.get("min_labels_to_expand", 100)
             ):
@@ -355,7 +363,10 @@ class Trainer2:
         min_val_size = int(self.opts.get("min_val_size", 30))
         min_train_for_search = int(self.opts.get("min_train_for_search", 10))
 
+        # initial val size
         val_size = max(1, int(n_total * val_frac))
+
+        # if dataset large enough for both goals, increase val to min_val_size
         if n_total >= (min_val_size + min_train_for_search):
             if val_size < min_val_size:
                 desired_frac = min(0.5, float(min_val_size) / max(1, n_total))
@@ -382,12 +393,13 @@ class Trainer2:
                 )
                 val_size = max_val_allowed
 
+        # final safety: keep at least one train sample
         val_size = min(val_size, max(1, n_total - 1))
         train_idx = slice(0, n_total - val_size)
         val_idx = slice(n_total - val_size, n_total)
 
-        X_train, y_train = X[train_idx], y_delta[train_idx]
-        X_val, y_val = X[val_idx], y_delta[val_idx]
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[val_idx], y[val_idx]
         sw_train = sample_weight[train_idx] if sample_weight is not None else None
 
         logger.info(
@@ -417,32 +429,34 @@ class Trainer2:
                 "Ignoring unsupported hyperparam keys for estimator: %s",
                 ", ".join(sorted(ignored)),
             )
-        param_dist_pipe = {f"model__{k}": v for k, v in filtered.items()}
+        param_dist_pipe = {}
+        for k, v in filtered.items():
+            param_dist_pipe[f"model__{k}"] = v
 
         n_jobs = int(self.opts.get("n_jobs", 1))
         tss_splits = self._time_splits(n_labeled)
 
+        # create safe CV relative to training set size
+        cv = None
         try:
             n_train = X_train.shape[0]
         except Exception:
             n_train = 0
-        cv = (
-            TimeSeriesSplit(n_splits=tss_splits)
-            if tss_splits and n_train > tss_splits
-            else None
-        )
-        if cv:
+        if tss_splits and n_train > tss_splits:
+            cv = TimeSeriesSplit(n_splits=tss_splits)
             logger.info(
                 "Using TimeSeriesSplit with n_splits=%d (n_train=%d)",
                 tss_splits,
                 n_train,
             )
         else:
+            # fallback to None (no CV) for small training sets; hypersearch will be skipped below if too small
             logger.info(
                 "Not using TimeSeriesSplit for hypersearch (tss_splits=%s n_train=%d)",
                 str(tss_splits),
                 n_train,
             )
+            cv = None
 
         chosen_params = None
         best_pipe = None
@@ -571,13 +585,40 @@ class Trainer2:
         except Exception:
             logger.exception("Failed to capture best_iteration")
 
+        # detect chosen params on grid edges
+        try:
+            if chosen_params:
+                for k, v in chosen_params.items():
+                    key = k.replace("model__", "")
+                    vals = filtered.get(key) or (
+                        param_dist.get(key) if isinstance(param_dist, dict) else None
+                    )
+                    # only check if vals is a concrete list
+                    if isinstance(vals, list) and vals:
+                        try:
+                            if math.isclose(v, min(vals)) or math.isclose(v, max(vals)):
+                                edge_flag = True
+                                logger.warning(
+                                    "Chosen param %s=%s is on grid edge", key, str(v)
+                                )
+                        except Exception:
+                            # fallback string compare if numeric check fails
+                            if str(v) == str(min(vals)) or str(v) == str(max(vals)):
+                                edge_flag = True
+                                logger.warning(
+                                    "Chosen param %s=%s is on grid edge", key, str(v)
+                                )
+        except Exception:
+            logger.exception("Edge detection failed")
+
+        # final refit (optional)
         try:
             final_refit = bool(self.opts.get("refit_on_full", True))
             if final_refit:
                 fit_kwargs_all = {}
                 if sample_weight is not None:
                     fit_kwargs_all["model__sample_weight"] = sample_weight
-                best_pipe.fit(X, y_delta, **fit_kwargs_all)
+                best_pipe.fit(X, y, **fit_kwargs_all)
 
                 def predict_fn(Xq):
                     return best_pipe.predict(Xq)
@@ -591,28 +632,15 @@ class Trainer2:
             logger.exception("MLTrainer: failed final refit/predict setup")
             return
 
+        # OOF MAE on labeled only
         mae = None
         try:
             if n_labeled > 0:
-                # Predict deltas then reconstruct absolute preds for meaningful MAE
-                preds_delta = predict_fn(X[:n_labeled])
-                # reconstruct using each used_row current_setpoint
-                current_arr = np.array(
-                    [
-                        float(r.data.get("current_setpoint", 0.0))
-                        for r in used_rows[:n_labeled]
-                    ],
-                    dtype=float,
-                )
-                preds_abs = current_arr + np.array(preds_delta, dtype=float)
-                y_true_abs = np.array(
-                    [float(r.label_setpoint) for r in used_rows[:n_labeled]],
-                    dtype=float,
-                )
-                mae = float(mean_absolute_error(y_true_abs, preds_abs))
+                preds_labeled = predict_fn(X[:n_labeled])
+                mae = float(mean_absolute_error(y[:n_labeled], preds_labeled))
                 try:
                     self._report_household_drift(
-                        used_rows[:n_labeled], preds_abs, y_true_abs
+                        used_rows, preds_labeled, y[:n_labeled]
                     )
                 except Exception:
                     logger.exception("Per-household drift reporting failed")
@@ -620,23 +648,12 @@ class Trainer2:
             logger.exception("MLTrainer: failed OOF MAE computation")
             mae = None
 
+        # validation MAE
         val_mae = None
         try:
             if X_val is not None and len(X_val):
-                val_preds_delta = predict_fn(X_val)
-                # reconstruct X_val current_setpoint from used rows slice location: use labels in y_val reconstruction is not available
-                # best-effort: use last len(X_val) rows of used_rows if ordered; otherwise compute from X_val using feature index
-                try:
-                    # find index of 'current_setpoint' in feature_order
-                    ci = self.feature_order.index("current_setpoint")
-                    current_val = X_val[:, ci]
-                    val_preds_abs = current_val + np.array(val_preds_delta, dtype=float)
-                    # reconstruct true absolute labels for validation: we have y_val as deltas, so need current_val + y_val
-                    val_true_abs = current_val + np.array(y_val, dtype=float)
-                    val_mae = float(mean_absolute_error(val_true_abs, val_preds_abs))
-                except Exception:
-                    # fallback: compute MAE on deltas
-                    val_mae = float(mean_absolute_error(y_val, val_preds_delta))
+                val_preds = predict_fn(X_val)
+                val_mae = float(mean_absolute_error(y_val, val_preds))
         except Exception:
             logger.exception("Failed computing val MAE")
             val_mae = None
@@ -653,6 +670,7 @@ class Trainer2:
             str(best_iteration),
         )
 
+        # load existing model meta if present
         existing_mae = None
         existing_meta = None
         if self.model_path and os.path.exists(self.model_path):
@@ -750,6 +768,7 @@ class Trainer2:
                 int(self.opts.get("runs_since_expand", 0)) + 1
             )
 
+        # If expansion just triggered but labels are insufficient for safe promotion, prevent immediate save
         if (
             self.opts.get("expand_search_next", False)
             and require_labels_for_expand_promo
@@ -785,12 +804,16 @@ class Trainer2:
             )
             return
 
+        # compute/import feature importances: try native model importances first,
+        # then SHAP TreeExplainer if available and X_val big enough, otherwise permutation_importance.
         top_feats = []
         importance_reliable = False
         try:
+            # 1) native feature_importances_ if present and non-trivial
             model_core = best_pipe.named_steps.get("model")
             imps = getattr(model_core, "feature_importances_", None)
             if imps is not None:
+                # Only accept native importances if they contain non-zero variance
                 if np.any(np.asarray(imps, dtype=float) != 0.0):
                     pairs = []
                     for i, v in enumerate(imps):
@@ -821,6 +844,7 @@ class Trainer2:
                         type(model_for_shap),
                     )
                     try:
+                        # Let SHAP choose the correct explainer; explicit feature_perturbation may raise
                         explainer = shap.Explainer(model_for_shap)
                         shap_vals = explainer(X_val)
                         mean_abs = np.mean(np.abs(shap_vals.values), axis=0)
@@ -837,6 +861,7 @@ class Trainer2:
                         logger.exception(
                             "SHAP analysis failed inside explainer; will fall back to permutation_importance"
                         )
+                        # continue to permutation_importance fallback
                 except Exception:
                     logger.exception(
                         "SHAP import failed or SHAP usage raised; falling back to permutation_importance"
@@ -906,6 +931,7 @@ class Trainer2:
                         if str(pv) == str(min(vals)) or str(pv) == str(max(vals)):
                             grid_edges.append(key)
 
+        # file diagnostics (use UTC timestamps)
         file_info = {"path": self.model_path}
         try:
             st = os.stat(self.model_path) if os.path.exists(self.model_path) else None
@@ -937,10 +963,9 @@ class Trainer2:
             "top_features": [[name, float(imp)] for name, imp in top_feats],
             "feature_importance_reliable": bool(importance_reliable),
             "file": file_info,
-            # crucial: mark target type
-            "target": "delta",
         }
 
+        # persist model and meta
         try:
             if self.model_path and os.path.exists(self.model_path):
                 try:
@@ -962,19 +987,16 @@ class Trainer2:
             logger.exception("MLTrainer: failed saving model")
             return
 
-        # update per-sample predictions (reconstruct absolute preds)
+        # update per-sample predictions
         try:
             if n_labeled > 0:
-                preds_delta = predict_fn(X[:n_labeled])
-                for i, row in enumerate(used_rows[:n_labeled]):
+                preds = predict_fn(X[:n_labeled])
+                for i, row in enumerate(used_rows):
                     try:
-                        pred_d = float(preds_delta[i])
-                        curr = float(row.data.get("current_setpoint", 0.0))
-                        pred_abs = curr + pred_d
-                        true_abs = float(row.label_setpoint)
-                        err = abs(pred_abs - true_abs) if true_abs is not None else None
+                        pred = float(preds[i])
+                        err = abs(pred - float(y[i])) if y is not None else None
                         update_sample_prediction(
-                            row.id, predicted_setpoint=pred_abs, prediction_error=err
+                            row.id, predicted_setpoint=pred, prediction_error=err
                         )
                     except Exception:
                         logger.exception(
