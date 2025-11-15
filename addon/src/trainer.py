@@ -8,7 +8,7 @@ from sklearn.linear_model import SGDRegressor, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error
 
 from db import fetch_training_data, update_sample_prediction, fetch_unlabeled
 from collector import FEATURE_ORDER
@@ -252,9 +252,13 @@ class Trainer:
 
         # Apply caps / subsampling to pseudo samples to avoid domination
         if pseudo_X:
-            pseudo_X, pseudo_y = self._cap_and_sample_pseudo(pseudo_X, pseudo_y, len(used_rows))
+            pseudo_X, pseudo_y = self._cap_and_sample_pseudo(
+                pseudo_X, pseudo_y, len(used_rows)
+            )
             pseudo_count = len(pseudo_X)
-            logger.info("After capping/subsampling, using %d pseudo samples", pseudo_count)
+            logger.info(
+                "After capping/subsampling, using %d pseudo samples", pseudo_count
+            )
 
             X_list.extend(pseudo_X)
             y_list.extend(pseudo_y)
@@ -292,14 +296,19 @@ class Trainer:
             cond_est = np.linalg.cond(X_aug)
             # Guard: ignore non-finite or absurdly large condition numbers
             if not np.isfinite(cond_est) or cond_est > 1e12:
-                logger.warning("Condition estimate not finite or too large (%s); ignoring cond-based lambda adjustment", cond_est)
+                logger.warning(
+                    "Condition estimate not finite or too large (%s); ignoring cond-based lambda adjustment",
+                    cond_est,
+                )
                 cond_est = None
             else:
                 cond_adj = min(1e8, cond_est)
                 lambda_cond = min(max_lambda, max(min_lambda, cond_adj / 1e5))
                 adaptive_lambda = max(adaptive_lambda, lambda_cond)
         except Exception:
-            logger.exception("Condition estimation failed; skipping cond-based lambda adjustment")
+            logger.exception(
+                "Condition estimation failed; skipping cond-based lambda adjustment"
+            )
             cond_est = None
 
         mean_val_mse = None
