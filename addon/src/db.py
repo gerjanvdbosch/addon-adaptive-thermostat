@@ -49,9 +49,7 @@ class Setpoint(Base):
 Base.metadata.create_all(engine)
 
 
-def insert_setpoint(
-    data: dict, setpoint: Optional[float] = None
-) -> int:
+def insert_setpoint(data: dict, setpoint: Optional[float] = None) -> int:
     s: SASession = Session()
     try:
         sample = Setpoint(data=data, setpoint=setpoint)

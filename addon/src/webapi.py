@@ -8,7 +8,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Header, Query, Path
 from pydantic import BaseModel, Field
 from config import load_options
-from db import Session, Sample, insert_sample, update_label
+from db import Session, Sample, Setpoint, insert_sample, update_label
 from ha_client import HAClient
 from trainer import Trainer
 from trainer2 import Trainer2
@@ -39,6 +39,13 @@ class LabelPayload(BaseModel):
     sensors: Optional[dict] = Field(
         None, description="Optional raw sensor snapshot (English keys)"
     )
+
+
+class SetpointOut(BaseModel):
+    id: int
+    timestamp: datetime
+    data: Optional[dict]
+    setpoint: Optional[float]
 
 
 class SampleOut(BaseModel):
@@ -139,6 +146,41 @@ def list_samples(
                     user_override=r.user_override,
                     predicted_setpoint=r.predicted_setpoint,
                     prediction_error=r.prediction_error,
+                )
+            )
+        return out
+    finally:
+        s.close()
+
+
+@app.get("/setpoints", response_model=List[SetpointOut])
+def list_setpoints(
+    labeled: Optional[bool] = Query(
+        None, description="Filter by labeled/unlabeled. None = both"
+    ),
+    user_override: Optional[bool] = Query(
+        None, description="Filter by user_override flag"
+    ),
+    has_prediction: Optional[bool] = Query(
+        None, description="Filter samples that have predicted_setpoint"
+    ),
+    limit: int = Query(100, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    x_addon_token: Optional[str] = Header(None),
+):
+    _check_token(x_addon_token)
+    s = Session()
+    try:
+        q = s.query(Setpoint)
+        rows = q.order_by(Setpoint.timestamp.desc()).limit(limit).offset(offset).all()
+        out = []
+        for r in rows:
+            out.append(
+                SetpointOut(
+                    id=r.id,
+                    timestamp=r.timestamp,
+                    data=r.data or {},
+                    setpoint=r.SetpointOut,
                 )
             )
         return out
