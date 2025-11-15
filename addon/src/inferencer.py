@@ -239,6 +239,21 @@ class Inferencer:
                     # Attempt transform with fallback
                     try:
                         Xs = scaler.transform(X)
+                        logger.debug("Raw X sample: %s", X[0].tolist())
+                        if hasattr(scaler, "mean_"):
+                            logger.debug(
+                                "scaler.mean_ (first10): %s", scaler.mean_[:10].tolist()
+                            )
+                        logger.debug("Scaled X sample (first20): %s", Xs[0].tolist())
+                        logger.debug(
+                            "model.intercept: %s coef (first10): %s",
+                            model.intercept_,
+                            model.coef_[:10].tolist(),
+                        )
+                        logger.debug(
+                            "linear_term: %s",
+                            float(Xs.dot(model.coef_.reshape(-1, 1))[0]),
+                        )
                         logger.debug(
                             "Model %s scaled X sample (first20): %s",
                             name,
