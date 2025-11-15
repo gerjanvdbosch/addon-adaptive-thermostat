@@ -15,17 +15,11 @@ logger = logging.getLogger(__name__)
 
 class Inferencer2:
     """
-    Inferencer voor MLSklearnTrainer (één full model, geen scaler ondersteuning).
+    Inferencer die verwacht dat het model een delta voorspelt:
+      predicted_setpoint = current_setpoint + model.predict(X)[0]
+
     Verwachte model payload op disk: joblib dump van dict {"model": <estimator>, "meta": {...}}
-    Belangrijke opts (met defaults):
-      - model_path_full
-      - sample_interval_seconds: 300
-      - min_setpoint: 15.0
-      - max_setpoint: 24.0
-      - min_change_threshold: 0.3
-      - stable_seconds: 600
-      - cooldown_seconds: 3600
-      - sample_age_threshold: 300
+    Meta moet "feature_order" en "target" bevatten; voor deze implementatie target == "delta"
     """
 
     def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
@@ -44,7 +38,7 @@ class Inferencer2:
         self.load_model()
 
     def load_model(self):
-        """Laad enkel het full model van schijf en valideer feature_order."""
+        """Laad model van schijf en valideer feature_order / target."""
         self.model_payload = None
         path = self.model_path
         if not path or not os.path.exists(path):
@@ -58,6 +52,10 @@ class Inferencer2:
         meta = payload.get("meta", {}) if isinstance(payload, dict) else {}
         if meta.get("feature_order") and meta.get("feature_order") != FEATURE_ORDER:
             logger.warning("Model feature_order mismatch; ignoring model at %s", path)
+            return
+        # require metadata target == "delta"
+        if meta.get("target") and meta.get("target") != "delta":
+            logger.warning("Model target is not 'delta'; ignoring model at %s", path)
             return
         if "model" not in payload or payload["model"] is None:
             logger.warning("Model payload missing 'model'; ignoring %s", path)
@@ -150,25 +148,8 @@ class Inferencer2:
             logger.exception("Failed fetching current vector")
             return None, None
 
-    def _predict(self, X: np.ndarray) -> Optional[float]:
-        """Voorspel met het geladen model; verwacht model.predict(X) op raw features."""
-        if self.model_payload is None:
-            logger.debug("No model loaded for prediction")
-            return None
-        try:
-            model = self.model_payload.get("model")
-            if model is None:
-                return None
-            p = model.predict(X)[0]
-            mae = self.model_payload.get("meta", {}).get("mae")
-            logger.debug("Model predicted %.3f (mae=%s)", p, mae)
-            return float(p)
-        except Exception:
-            logger.exception("Prediction failed")
-            return None
-
     def inference_job(self):
-        """Hoofdlogica: label overrides, laad model, voorspel, check stabiliteit en pas setpoint toe."""
+        """Hoofdlogica: label overrides, laad model, voorspel delta, reconstrueer setpoint en toepassen."""
         try:
             if self.check_and_label_user_override():
                 return
@@ -220,11 +201,18 @@ class Inferencer2:
         model = self.model_payload.get("model")
         logger.debug("DEBUG: model type = %s", type(model))
         try:
-            # call model.predict with logging to capture raw return value and shape
+            # model must predict delta
             pred_raw = model.predict(X)
             logger.debug("DEBUG: model.predict returned = %s", pred_raw)
-            p = float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
-            logger.debug("DEBUG: interpreted prediction p = %s", p)
+            pred_delta = (
+                float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
+            )
+            p = float(current_sp) + pred_delta
+            logger.debug(
+                "DEBUG: predicted_delta = %s, reconstructed_setpoint = %s",
+                pred_delta,
+                p,
+            )
         except Exception:
             logger.exception("Prediction failed during debug predict")
             return
@@ -272,7 +260,7 @@ class Inferencer2:
             logger.info("Cooldown active; skipping predicted setpoint %.2f", p)
             return
 
-        # persist prediction
+        # persist prediction (store absolute predicted_setpoint)
         try:
             unl = fetch_unlabeled(limit=1)
             if unl:
