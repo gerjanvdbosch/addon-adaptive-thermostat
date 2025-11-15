@@ -240,17 +240,26 @@ class TrainerDelta:
 
         # simple train/val split (temporal): last fraction is val
         val_frac = float(self.opts.get("val_fraction", 0.15))
-        val_size = max(1, int(n_total * val_frac))
-        val_size = min(val_size, max(1, n_total - 1))
-        train_idx = slice(0, n_total - val_size)
-        val_idx = slice(n_total - val_size, n_total)
 
-        X_train, y_train = X[train_idx], y_delta[train_idx]
-        X_val, y_val = X[val_idx], y_delta[val_idx]
+        if n_total < 2:
+            logger.info(
+                "Too few labeled samples (%d); using all samples for training and skipping validation",
+                n_total,
+            )
+            X_train, y_train = X, y_delta
+            X_val, y_val = None, None
+        else:
+            val_size = max(1, int(n_total * val_frac))
+            val_size = min(val_size, max(1, n_total - 1))
+            train_idx = slice(0, n_total - val_size)
+            val_idx = slice(n_total - val_size, n_total)
+
+            X_train, y_train = X[train_idx], y_delta[train_idx]
+            X_val, y_val = X[val_idx], y_delta[val_idx]
 
         logger.info(
             "TrainerDelta: train %d val %d (labeled=%d)",
-            len(X_train),
+            len(X_train) if X_train is not None else 0,
             len(X_val) if X_val is not None else 0,
             n_labeled,
         )
