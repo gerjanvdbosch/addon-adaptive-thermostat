@@ -119,18 +119,40 @@ def _assemble_matrix_delta(
     return np.array(X, dtype=float), np.array(y, dtype=float), used_rows
 
 
+def _clean_train_arrays(
+    Xa: np.ndarray, ya: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Ensure numeric, finite arrays.
+    Drops rows where any feature or y is non-finite.
+    Raises ValueError if nothing remains.
+    """
+    Xa = np.asarray(Xa, dtype=float)
+    ya = np.asarray(ya, dtype=float)
+
+    if Xa.ndim != 2:
+        raise ValueError(f"X must be 2D array, got ndim={Xa.ndim}")
+    if ya.ndim != 1:
+        raise ValueError(f"y must be 1D array, got ndim={ya.ndim}")
+    if Xa.shape[0] != ya.shape[0]:
+        raise ValueError(f"Row count mismatch X ({Xa.shape[0]}) vs y ({ya.shape[0]})")
+
+    finite_mask = np.isfinite(ya) & np.all(np.isfinite(Xa), axis=1)
+    dropped = np.count_nonzero(~finite_mask)
+    if dropped:
+        logger.warning("Dropping %d non-finite training rows", int(dropped))
+
+    if not np.any(finite_mask):
+        raise ValueError("No finite training rows after cleaning")
+
+    Xa_clean = Xa[finite_mask]
+    ya_clean = ya[finite_mask]
+    return Xa_clean, ya_clean
+
+
 class TrainerDelta:
     """
     Trainer that learns delta = setpoint - current_setpoint.
-
-    Key opts (defaults):
-      - model_path: path to save model
-      - require_override: True (recommended)
-      - weight_label: 1.0
-      - refit_on_full: True
-      - min_train_for_search: 10
-      - n_iter_compact: 20
-      - n_iter_extended: 100
     """
 
     def __init__(self, ha_client=None, opts: Optional[Dict] = None):
@@ -148,9 +170,7 @@ class TrainerDelta:
 
     def _fetch_data(
         self,
-    ) -> Tuple[
-        Optional[np.ndarray], Optional[np.ndarray], List[Any], Optional[np.ndarray], int
-    ]:
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any], int]:
         rows = fetch_training_setpoints(days=int(self.opts.get("buffer_days", 30)))
         labeled_rows = [r for r in rows if r.setpoint is not None]
         X_lab, y_lab, used_rows = _assemble_matrix_delta(
@@ -158,15 +178,10 @@ class TrainerDelta:
         )
 
         if X_lab is None:
-            return None, None, [], None, 0
+            return None, None, [], 0
 
         X = X_lab
         y = y_lab
-        n_total = len(y)
-
-        # weights (no pseudo)
-        weight_label = float(self.opts.get("weight_label", 1.0))
-        sample_weight = np.ones(n_total, dtype=float) * weight_label
 
         # diagnostics and constant-check
         try:
@@ -189,7 +204,7 @@ class TrainerDelta:
         except Exception:
             logger.exception("Failed logging training delta stats")
 
-        return X, y, used_rows, sample_weight, 0
+        return X, y, used_rows, 0
 
     def _search_param_dist(self):
         compact = {
@@ -214,7 +229,7 @@ class TrainerDelta:
 
     def train_job(self, force: bool = False):
         start = time.time()
-        X, y_delta, used_rows, sample_weight, pseudo_count = self._fetch_data()
+        X, y_delta, used_rows, _ = self._fetch_data()
         if X is None:
             logger.info("TrainerDelta: no training data")
             return
@@ -235,10 +250,41 @@ class TrainerDelta:
 
         logger.info(
             "TrainerDelta: train %d val %d (labeled=%d)",
-            len(y_train),
-            len(y_val),
+            len(X_train),
+            len(X_val) if X_val is not None else 0,
             n_labeled,
         )
+
+        # Clean training arrays before any fit
+        try:
+            X_train, y_train = _clean_train_arrays(X_train, y_train)
+        except Exception as e:
+            logger.exception("Training data invalid after cleaning: %s", e)
+            return
+
+        # Clean validation arrays (non-finite rows removed)
+        try:
+            if X_val is not None and len(X_val):
+                X_val = np.asarray(X_val, dtype=float)
+                y_val = np.asarray(y_val, dtype=float)
+                finite_val_mask = np.isfinite(y_val) & np.all(
+                    np.isfinite(X_val), axis=1
+                )
+                if not np.any(finite_val_mask):
+                    logger.warning(
+                        "Validation set contains no finite rows; skipping val MAE"
+                    )
+                    X_val = None
+                    y_val = None
+                else:
+                    X_val = X_val[finite_val_mask]
+                    y_val = y_val[finite_val_mask]
+        except Exception:
+            logger.exception(
+                "Validation cleaning failed; proceeding without validation metrics"
+            )
+            X_val = None
+            y_val = None
 
         pipe = Pipeline(
             [("model", HistGradientBoostingRegressor(random_state=self.random_state))]
@@ -247,7 +293,6 @@ class TrainerDelta:
         mode = self.opts.get("search_mode", "compact")
         param_dist = compact if mode == "compact" else extended
 
-        # build param dist using scipy distributions
         sampled = {}
         sampled["learning_rate"] = loguniform(1e-4, 1e-1)
         sampled["l2_regularization"] = loguniform(1e-6, 1.0)
@@ -296,11 +341,8 @@ class TrainerDelta:
                     )
                 ]
             )
-            fit_kwargs = {}
-            if sample_weight is not None:
-                fit_kwargs["model__sample_weight"] = sample_weight[train_idx]
             try:
-                best_pipe.fit(X_train, y_train, **fit_kwargs)
+                best_pipe.fit(X_train, y_train)
             except Exception:
                 logger.exception("Fallback fit failed")
                 return
@@ -315,15 +357,12 @@ class TrainerDelta:
                     n_jobs=n_jobs,
                     random_state=self.random_state,
                 )
-                fit_kwargs = {}
-                if sample_weight is not None:
-                    fit_kwargs["model__sample_weight"] = sample_weight[train_idx]
                 logger.info(
                     "Running hyperparameter search (n_iter=%d cv=%s)",
                     n_iter,
                     "TimeSeriesSplit" if cv else "None",
                 )
-                search.fit(X_train, y_train, **fit_kwargs)
+                search.fit(X_train, y_train)
                 best_pipe = search.best_estimator_
                 chosen_params = getattr(search, "best_params_", None)
                 best_score = getattr(search, "best_score_", None)
@@ -346,24 +385,21 @@ class TrainerDelta:
                         )
                     ]
                 )
-                fallback_fit_kwargs = {}
-                if sample_weight is not None:
-                    fallback_fit_kwargs["model__sample_weight"] = sample_weight[
-                        train_idx
-                    ]
                 try:
-                    best_pipe.fit(X_train, y_train, **fallback_fit_kwargs)
+                    best_pipe.fit(X_train, y_train)
                 except Exception:
                     logger.exception("Fallback fit failed")
                     return
 
-        # final refit on full data (optional)
+        # final refit on full data (optional) -- clean full arrays first
         try:
             if bool(self.opts.get("refit_on_full", True)):
-                fit_kwargs_all = {}
-                if sample_weight is not None:
-                    fit_kwargs_all["model__sample_weight"] = sample_weight
-                best_pipe.fit(X, y_delta, **fit_kwargs_all)
+                try:
+                    X_full, y_full = _clean_train_arrays(X, y_delta)
+                except Exception as e:
+                    logger.exception("Full-data cleaning failed: %s", e)
+                    return
+                best_pipe.fit(X_full, y_full)
 
             def predict_fn(Xq):
                 return best_pipe.predict(Xq)
