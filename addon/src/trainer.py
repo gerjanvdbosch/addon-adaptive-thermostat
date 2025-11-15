@@ -8,7 +8,7 @@ from sklearn.linear_model import SGDRegressor, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from db import fetch_training_data, update_sample_prediction, fetch_unlabeled
 from collector import FEATURE_ORDER
@@ -43,9 +43,8 @@ def _walk_forward_val(
             model = Ridge(alpha=float(lambda_reg))
             model.fit(Xt, y_train)
             preds = model.predict(Xv)
-            # return MAE instead of MSE to align with other reported metrics
-            mae = float(mean_absolute_error(y_test, preds))
-            val_mses.append(mae)
+            mse = float(mean_squared_error(y_test, preds))
+            val_mses.append(mse)
         except Exception:
             logger.exception("Walk-forward fold failed; skipping fold")
             continue
@@ -161,21 +160,6 @@ class Trainer:
         except Exception:
             logger.exception("Failed saving partial model")
 
-    def _cap_and_sample_pseudo(self, pseudo_X, pseudo_y, n_labeled):
-        # Cap pseudo samples to avoid overwhelming labeled data
-        max_pseudo_ratio = float(self.opts.get("max_pseudo_ratio", 5.0))
-        max_pseudo_fixed = int(self.opts.get("max_pseudo_fixed", 200))
-        if n_labeled <= 0:
-            # If no labeled samples, still cap to fixed amount
-            target = max_pseudo_fixed
-        else:
-            target = min(max_pseudo_fixed, int(n_labeled * max_pseudo_ratio))
-        if len(pseudo_X) > target:
-            idx = np.random.choice(len(pseudo_X), target, replace=False)
-            pseudo_X = [pseudo_X[i] for i in idx]
-            pseudo_y = [pseudo_y[i] for i in idx]
-        return pseudo_X, pseudo_y
-
     def full_retrain_job(self, force: bool = False):
         use_unlabeled = bool(self.opts.get("use_unlabeled", True))
         pseudo_limit = int(self.opts.get("pseudo_limit", 1000))
@@ -250,16 +234,7 @@ class Trainer:
                 "Pseudo-labeling disabled by configuration (use_unlabeled=False)"
             )
 
-        # Apply caps / subsampling to pseudo samples to avoid domination
         if pseudo_X:
-            pseudo_X, pseudo_y = self._cap_and_sample_pseudo(
-                pseudo_X, pseudo_y, len(used_rows)
-            )
-            pseudo_count = len(pseudo_X)
-            logger.info(
-                "After capping/subsampling, using %d pseudo samples", pseudo_count
-            )
-
             X_list.extend(pseudo_X)
             y_list.extend(pseudo_y)
 
@@ -294,21 +269,11 @@ class Trainer:
             Xn_full, mu_full, sigma_full = _scale_features_for_train(X)
             X_aug = np.hstack([Xn_full, np.ones((Xn_full.shape[0], 1))])
             cond_est = np.linalg.cond(X_aug)
-            # Guard: ignore non-finite or absurdly large condition numbers
-            if not np.isfinite(cond_est) or cond_est > 1e12:
-                logger.warning(
-                    "Condition estimate not finite or too large (%s); ignoring cond-based lambda adjustment",
-                    cond_est,
-                )
-                cond_est = None
-            else:
+            if np.isfinite(cond_est):
                 cond_adj = min(1e8, cond_est)
                 lambda_cond = min(max_lambda, max(min_lambda, cond_adj / 1e5))
                 adaptive_lambda = max(adaptive_lambda, lambda_cond)
         except Exception:
-            logger.exception(
-                "Condition estimation failed; skipping cond-based lambda adjustment"
-            )
             cond_est = None
 
         mean_val_mse = None
@@ -327,7 +292,7 @@ class Trainer:
             mean_val_mse = None
 
         logger.info(
-            "Adaptive lambda=%.6f cond=%s walk_val_mae=%s n=%d",
+            "Adaptive lambda=%.6f cond=%s walk_val_mse=%s n=%d",
             adaptive_lambda,
             str(cond_est),
             str(mean_val_mse),
@@ -404,7 +369,6 @@ class Trainer:
                 for train_idx, test_idx in tss_oof.split(X[:n_labeled]):
                     clone = gs.best_estimator_ if gs else best
                     try:
-                        # fit with sample_weight parameter name matching pipeline step
                         clone.fit(
                             X[train_idx],
                             y[train_idx],
@@ -476,20 +440,13 @@ class Trainer:
             "use_unlabeled": bool(use_unlabeled),
             "adaptive_lambda": float(adaptive_lambda),
             "chosen_alpha": float(chosen_alpha) if chosen_alpha is not None else None,
-            "walk_val_mae": mean_val_mse,
+            "walk_val_mse": mean_val_mse,
             "cond_estimate": float(cond_est) if cond_est is not None else None,
             "top_features": top_features,
         }
 
-        # ensure pipeline flag consistency
-        metadata["is_pipeline"] = isinstance(best, Pipeline)
-
         try:
-            to_save = {"model": best, "meta": metadata}
-            # If there's an external scaler (from partial training), include it for consumers
-            if hasattr(self, "scaler") and self.scaler is not None:
-                to_save["scaler"] = self.scaler
-            joblib.dump(to_save, full_path)
+            joblib.dump({"model": best, "meta": metadata}, full_path)
             logger.info(
                 "Full model updated: OOF-MAE %s improved over %s (trained on %d labeled + %d pseudo samples)",
                 mae,
