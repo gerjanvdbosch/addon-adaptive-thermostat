@@ -16,59 +16,6 @@ from collector import FEATURE_ORDER
 logger = logging.getLogger(__name__)
 
 
-def _build_representative_scaler(self, max_unlabeled=500, min_samples=50):
-    """
-    Try to build a StandardScaler fit on a representative set composed of:
-    - recent unlabeled samples (up to max_unlabeled)
-    - recent training_data rows (buffer_days)
-    Returns a fitted StandardScaler or None if not enough samples.
-    """
-    Xrep = []
-    try:
-        unl_limit = int(self.opts.get("partial_scaler_unl_limit", max_unlabeled))
-        unl = fetch_unlabeled(limit=unl_limit)
-        for r in unl or []:
-            feat = r.data if r.data and isinstance(r.data, dict) else None
-            if not feat:
-                continue
-            vec = [
-                feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER
-            ]
-            Xrep.append(vec)
-    except Exception:
-        logger.exception("Failed fetching unlabeled for representative scaler")
-
-    try:
-        days = int(self.opts.get("partial_scaler_days", 7))
-        past = fetch_training_data(days=days)
-        for r in past or []:
-            feat = r.data if r.data and isinstance(r.data, dict) else None
-            if not feat:
-                continue
-            vec = [
-                feat.get(k) if feat.get(k) is not None else 0.0 for k in FEATURE_ORDER
-            ]
-            Xrep.append(vec)
-    except Exception:
-        logger.exception("Failed fetching past training_data for representative scaler")
-
-    min_req = int(self.opts.get("partial_scaler_min_samples", min_samples))
-    if len(Xrep) >= min_req:
-        try:
-            Xrep = np.array(Xrep, dtype=float)
-            s = StandardScaler().fit(Xrep)
-            logger.info(
-                "Built representative scaler for partial from %d samples", len(Xrep)
-            )
-            return s
-        except Exception:
-            logger.exception("Failed fitting representative scaler")
-            return None
-
-    logger.info("Not enough samples (%d) to build representative scaler", len(Xrep))
-    return None
-
-
 def _scale_features_for_train(X: np.ndarray):
     mu = np.nanmean(X, axis=0)
     sigma = np.nanstd(X, axis=0)
@@ -158,6 +105,62 @@ class Trainer:
                 self.partial = None
                 self.partial_pipeline = None
                 self.scaler = None
+
+    def _build_representative_scaler(self, max_unlabeled=500, min_samples=50):
+        """
+        Try to build a StandardScaler fit on a representative set composed of:
+        - recent unlabeled samples (up to max_unlabeled)
+        - recent training_data rows (buffer_days)
+        Returns a fitted StandardScaler or None if not enough samples.
+        """
+        Xrep = []
+        try:
+            unl_limit = int(self.opts.get("partial_scaler_unl_limit", max_unlabeled))
+            unl = fetch_unlabeled(limit=unl_limit)
+            for r in unl or []:
+                feat = r.data if r.data and isinstance(r.data, dict) else None
+                if not feat:
+                    continue
+                vec = [
+                    feat.get(k) if feat.get(k) is not None else 0.0
+                    for k in FEATURE_ORDER
+                ]
+                Xrep.append(vec)
+        except Exception:
+            logger.exception("Failed fetching unlabeled for representative scaler")
+
+        try:
+            days = int(self.opts.get("partial_scaler_days", 7))
+            past = fetch_training_data(days=days)
+            for r in past or []:
+                feat = r.data if r.data and isinstance(r.data, dict) else None
+                if not feat:
+                    continue
+                vec = [
+                    feat.get(k) if feat.get(k) is not None else 0.0
+                    for k in FEATURE_ORDER
+                ]
+                Xrep.append(vec)
+        except Exception:
+            logger.exception(
+                "Failed fetching past training_data for representative scaler"
+            )
+
+        min_req = int(self.opts.get("partial_scaler_min_samples", min_samples))
+        if len(Xrep) >= min_req:
+            try:
+                Xrep = np.array(Xrep, dtype=float)
+                s = StandardScaler().fit(Xrep)
+                logger.info(
+                    "Built representative scaler for partial from %d samples", len(Xrep)
+                )
+                return s
+            except Exception:
+                logger.exception("Failed fitting representative scaler")
+                return None
+
+        logger.info("Not enough samples (%d) to build representative scaler", len(Xrep))
+        return None
 
     def partial_fit_job(self):
         rows = fetch_training_data(days=self.opts.get("buffer_days", 30))
