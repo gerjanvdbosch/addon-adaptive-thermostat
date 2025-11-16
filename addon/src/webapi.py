@@ -45,6 +45,7 @@ class SetpointOut(BaseModel):
     timestamp: datetime
     data: Optional[dict]
     setpoint: Optional[float]
+    observed_current_setpoint: Optional[float]
 
 
 class SampleOut(BaseModel):
@@ -171,6 +172,9 @@ def list_setpoints(
                     timestamp=r.timestamp,
                     data=getattr(r, "data", None) or {},
                     setpoint=getattr(r, "setpoint", None),
+                    observed_current_setpoint=getattr(
+                        r, "observed_current_setpoint", None
+                    ),
                 )
             )
         return out
