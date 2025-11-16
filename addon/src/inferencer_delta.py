@@ -180,7 +180,7 @@ class InferencerDelta:
 
         # current_sp = featdict.get("current_setpoint") if featdict else None
         rows = fetch_setpoints(1)
-        current_sp = safe_float(rows[0].setpoint if rows else None)
+        current_sp = safe_float(rows[0].data.get("current_setpoint") if rows else None)
         if current_sp is None:
             logger.warning("Current setpoint not available; skipping inference")
             return
