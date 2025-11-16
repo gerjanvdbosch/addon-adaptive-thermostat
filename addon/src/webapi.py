@@ -225,6 +225,29 @@ def delete_sample(
         s.close()
 
 
+@app.delete("/setpoints/{setpoint_id}")
+def delete_setpoint(
+    setpoint_id: int = Path(..., ge=1), x_addon_token: Optional[str] = Header(None)
+):
+    _check_token(x_addon_token)
+    s = Session()
+    try:
+        sample = s.get(Setpoint, setpoint_id)
+        if not sample:
+            raise HTTPException(status_code=404, detail="Setpoint not found")
+        s.delete(sample)
+        s.commit()
+        return {"status": "deleted", "setpoint_id": setpoint_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error deleting setpoint %s: %s", setpoint_id, e)
+        s.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        s.close()
+
+
 @app.get("/predictions", response_model=List[PredictionOut])
 def list_predictions(
     limit: int = Query(100, ge=1, le=2000),
