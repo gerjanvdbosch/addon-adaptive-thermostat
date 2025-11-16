@@ -6,8 +6,6 @@ from datetime import datetime
 from typing import Optional, Tuple, List
 
 from db import (
-    fetch_unlabeled,
-    update_sample_prediction,
     insert_sample,
     fetch,
     insert_setpoint,
@@ -159,7 +157,7 @@ class InferencerDelta:
         Return both vector and original featdict (unchanged) so we can reconstruct baseline.
         """
         try:
-            unl = fetch_unlabeled(limit=1)
+            unl = fetch_setpoints(limit=1)
             if not unl:
                 return None, None
             last = unl[0]
@@ -313,33 +311,6 @@ class InferencerDelta:
         if self.last_pred_ts and (now - self.last_pred_ts).total_seconds() < cooldown:
             logger.info("Cooldown active; skipping predicted setpoint %.2f", p)
             return
-
-        # persist prediction (absolute)
-        try:
-            unl = fetch_unlabeled(limit=1)
-            if unl:
-                latest = unl[0]
-                sample_ts = getattr(latest, "timestamp", None)
-                age = (now - sample_ts).total_seconds() if sample_ts else float("inf")
-                age_thresh = float(self.opts.get("sample_age_threshold", 300))
-                if age <= age_thresh:
-                    update_sample_prediction(
-                        latest.id, predicted_setpoint=p, prediction_error=None
-                    )
-                else:
-                    features = self.collector.get_features(ts=now)
-                    sid = insert_sample(features)
-                    update_sample_prediction(
-                        sid, predicted_setpoint=p, prediction_error=None
-                    )
-            else:
-                features = self.collector.get_features(ts=now)
-                sid = insert_sample(features)
-                update_sample_prediction(
-                    sid, predicted_setpoint=p, prediction_error=None
-                )
-        except Exception:
-            logger.exception("Failed to persist prediction")
 
         # apply setpoint in HA
         try:
