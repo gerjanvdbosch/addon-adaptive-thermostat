@@ -15,7 +15,7 @@ from db import (
 )
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import safe_round, safe_float
+from utils import safe_round, safe_float, round_half
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +204,11 @@ class InferencerDelta:
                 float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
             )
             p = float(current_sp) + pred_delta
-            logger.debug(
-                "DEBUG: predicted_delta=%.4f reconstructed_setpoint=%.4f", pred_delta, p
+            logger.info(
+                "DEBUG: predicted_delta=%.2f reconstructed_setpoint=%.2f raw=%.2f",
+                pred_delta,
+                p,
+                pred_raw,
             )
         except Exception:
             logger.exception("Prediction failed")
@@ -218,6 +221,8 @@ class InferencerDelta:
             logger.warning("Predicted setpoint outside plausible range: %.3f", p)
             return
         p = float(max(min(p, max_sp), min_sp))
+        logger.info("Prediction raw delta (%.2f)", p)
+        p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer

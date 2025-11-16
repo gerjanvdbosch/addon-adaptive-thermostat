@@ -8,7 +8,7 @@ from typing import Optional, Tuple, List
 from db import fetch, fetch_unlabeled, update_sample_prediction, insert_sample
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import safe_round
+from utils import safe_round, round_half
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,8 @@ class Inferencer2:
             logger.warning("Predicted value outside plausible range: %.3f", p)
             return
         p = float(max(min(p, max_sp), min_sp))
+        logger.info("Prediction raw (%.2f)", p)
+        p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer logic
