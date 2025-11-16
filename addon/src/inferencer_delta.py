@@ -8,6 +8,7 @@ from typing import Optional, Tuple, List
 from db import (
     insert_sample,
     fetch,
+    fetch_unlabeled,
     insert_setpoint,
     fetch_setpoints,
 )
@@ -157,7 +158,7 @@ class InferencerDelta:
         Return both vector and original featdict (unchanged) so we can reconstruct baseline.
         """
         try:
-            unl = fetch_setpoints(limit=1)
+            unl = fetch_unlabeled(limit=1)
             if not unl:
                 return None, None
             last = unl[0]
