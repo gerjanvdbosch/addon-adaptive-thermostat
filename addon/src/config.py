@@ -17,9 +17,6 @@ def load_options():
         ),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
         "cooldown_seconds": int(os.getenv("COOLDOWN_SECONDS", 3600)),
-        "partial_fit_interval_seconds": int(
-            os.getenv("PARTIAL_FIT_INTERVAL_SECONDS", 3600)
-        ),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
         "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),

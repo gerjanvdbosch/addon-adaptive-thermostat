@@ -6,11 +6,9 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from collector import Collector
-from trainer import Trainer
 from trainer2 import Trainer2
 from trainer_delta import TrainerDelta
 
-# from inferencer import Inferencer
 from inferencer2 import Inferencer2
 from inferencer_delta import InferencerDelta
 from ha_client import HAClient
@@ -29,10 +27,8 @@ def main():
     opts = load_options()
     ha = HAClient(opts)
     collector = Collector(ha, opts)
-    trainer = Trainer(ha, opts)
     trainer2 = Trainer2(ha, opts)
     trainer_delta = TrainerDelta(ha, opts)
-    # inferencer = Inferencer(ha, collector, opts)
     inferencer2 = Inferencer2(ha, collector, opts)
     inferencer_delta = InferencerDelta(ha, collector, opts)
 
@@ -51,28 +47,15 @@ def main():
         seconds=opts["sample_interval_seconds"],
         id="collector",
     )
-    scheduler.add_job(
-        trainer.partial_fit_job,
-        "interval",
-        seconds=opts["partial_fit_interval_seconds"],
-        id="partial_fit",
-    )
 
     hh, mm = map(int, opts["full_retrain_time"].split(":"))
 
-    # scheduler.add_job(trainer.full_retrain_job, "cron", hour=hh, minute=mm, id="full_retrain")
     scheduler.add_job(
         trainer2.train_job, "cron", hour=hh, minute=mm, id="full_retrain2"
     )
     scheduler.add_job(
         trainer_delta.train_job, "cron", hour=hh, minute=mm, id="full_retrain_delta"
     )
-    # scheduler.add_job(
-    #    inferencer.inference_job,
-    #    "interval",
-    #    seconds=opts["inferencer_interval_seconds"],
-    #    id="inference",
-    # )
     scheduler.add_job(
         inferencer2.inference_job,
         "interval",
