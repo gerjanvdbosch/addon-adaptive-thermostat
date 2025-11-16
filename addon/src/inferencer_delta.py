@@ -203,24 +203,43 @@ class InferencerDelta:
             return
         X = np.array([Xvec], dtype=float)
 
-        # Prefer baseline from the feature snapshot used for this sample (observed baseline).
+        # prefer baseline from featdict
         baseline_raw = None
         if featdict:
             baseline_raw = featdict.get(
                 "observed_current_setpoint", featdict.get("current_setpoint")
             )
 
-        # fallback: try latest setpoint log (Setpoint table)
+        # fallback: try latest setpoint log row
         if baseline_raw is None:
-            rows = fetch_setpoints(1)
-            baseline_raw = rows[0].data.get("current_setpoint") if rows else None
-            # also accept Setpoint.observed_current_setpoint if available in row itself
-            if rows and getattr(rows[0], "observed_current_setpoint", None) is not None:
-                baseline_raw = getattr(rows[0], "observed_current_setpoint")
+            try:
+                rows = fetch_setpoints(1)
+                if rows:
+                    sp_row = rows[0]
+                    if getattr(sp_row, "observed_current_setpoint", None) is not None:
+                        baseline_raw = getattr(sp_row, "observed_current_setpoint")
+                    else:
+                        baseline_raw = (
+                            sp_row.data.get("current_setpoint")
+                            if isinstance(sp_row.data, dict)
+                            else None
+                        )
+            except Exception:
+                logger.exception("Failed fetching fallback setpoint row for baseline")
 
-        baseline = safe_float(baseline_raw, None)
+        baseline = None
+        try:
+            if baseline_raw is not None:
+                baseline = safe_float(baseline_raw)
+        except Exception:
+            logger.exception("safe_float failed on baseline_raw=%r", baseline_raw)
+            baseline = None
+
         if baseline is None:
-            logger.warning("No baseline current_setpoint available; skipping inference")
+            logger.warning(
+                "No usable baseline found (baseline_raw=%r); skipping inference",
+                baseline_raw,
+            )
             return
 
         min_sp = float(self.opts.get("min_setpoint", 5.0))
