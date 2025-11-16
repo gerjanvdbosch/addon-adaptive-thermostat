@@ -72,6 +72,15 @@ def update_setpoint(setpoint_id: int, setpoint: float) -> None:
         s.close()
 
 
+def fetch_setpoints(limit: int = 1) -> List[Setpoint]:
+    s: SASession = Session()
+    try:
+        rows = s.query(Setpoint).order_by(Setpoint.timestamp.desc()).limit(limit).all()
+        return rows
+    finally:
+        s.close()
+
+
 def fetch_training_setpoints(days: int = 30) -> List[Sample]:
     s: SASession = Session()
     try:

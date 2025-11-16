@@ -11,10 +11,11 @@ from db import (
     insert_sample,
     fetch,
     insert_setpoint,
+    fetch_setpoints,
 )
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import safe_round
+from utils import safe_round, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,9 @@ class InferencerDelta:
             return
         X = np.array([Xvec], dtype=float)
 
-        current_sp = featdict.get("current_setpoint") if featdict else None
+        # current_sp = featdict.get("current_setpoint") if featdict else None
+        rows = fetch_setpoints(1)
+        current_sp = safe_float(rows[0].setpoint if rows else None)
         if current_sp is None:
             logger.warning("Current setpoint not available; skipping inference")
             return
