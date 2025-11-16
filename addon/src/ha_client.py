@@ -85,6 +85,7 @@ class HAClient:
                 logger.exception("Failed to update shadow setpoint: %s", shadow)
                 return None
         else:
+            return None
             climate = self.opts.get("climate_entity")
             service_data = {"entity_id": climate, "temperature": setpoint}
             self.call_service("climate", "set_temperature", service_data)

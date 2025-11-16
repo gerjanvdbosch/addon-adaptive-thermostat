@@ -36,56 +36,60 @@ def _assemble_matrix_delta(
     rows: List[Any], feature_order: List[str]
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any]]:
     """
-    Build X and y where y = setpoint - current_setpoint (delta).
+    Build X and y where y = setpoint - baseline_current_setpoint (delta).
+    Prefer Setpoint.observed_current_setpoint as baseline; fallback to feat["current_setpoint"].
     Mask current_setpoint in feature vector (set to 0.0) to avoid trivial echo learning.
-    Skip rows that lack current_setpoint or have trivial delta and are not override.
+    Skip rows that lack a usable baseline or have trivial delta and are not override-like entries.
     """
     X: List[List[float]] = []
     y: List[float] = []
     used_rows: List[Any] = []
 
     for r in rows:
+        # rows are Setpoint objects (from fetch_training_setpoints)
         feat = r.data if r.data and isinstance(r.data, dict) else None
         if not feat:
             continue
         try:
-            if r.setpoint is None:
-                continue
-            label = _safe_float(r.setpoint, None)
+            # label is the logged setpoint (the user override)
+            label = _safe_float(getattr(r, "setpoint", None), None)
             if label is None:
                 continue
             # sanity bounds on absolute setpoint
             if not (5 <= label <= 30):
                 logger.debug(
-                    "Skipping row %s: label out of plausible bounds %s",
+                    "Skipping setpoint row %s: label out of plausible bounds %s",
                     getattr(r, "id", None),
                     label,
                 )
                 continue
-            curr_raw = feat.get("current_setpoint")
+
+            # baseline: prefer explicit observed_current_setpoint field on Setpoint row
+            curr_raw = getattr(r, "observed_current_setpoint", None)
+            if curr_raw is None and feat is not None:
+                curr_raw = feat.get("current_setpoint")
             if curr_raw is None:
                 logger.debug(
-                    "Skipping row %s: missing current_setpoint", getattr(r, "id", None)
+                    "Skipping setpoint row %s: missing baseline current_setpoint",
+                    getattr(r, "id", None),
                 )
                 continue
             current = _safe_float(curr_raw, None)
             if current is None:
                 logger.debug(
-                    "Skipping row %s: non-numeric current_setpoint %r",
+                    "Skipping setpoint row %s: non-numeric baseline current_setpoint %r",
                     getattr(r, "id", None),
                     curr_raw,
                 )
                 continue
 
             delta = label - current
-            # skip trivial deltas unless trusted override or auto_label flag
-            if (
-                abs(delta) < 1e-6
-                and not getattr(r, "override", False)
-                and not getattr(r, "auto_label", False)
-            ):
+
+            # skip trivial deltas unless entry looks like an explicit override
+            # Setpoint rows won't have user_override; use a heuristic: if delta approximately zero, skip
+            if abs(delta) < 1e-6:
                 logger.debug(
-                    "Skipping row %s: trivial delta and not override",
+                    "Skipping setpoint row %s: trivial delta (label == baseline)",
                     getattr(r, "id", None),
                 )
                 continue
@@ -96,7 +100,7 @@ def _assemble_matrix_delta(
                 if k == "current_setpoint":
                     vec.append(0.0)
                     continue
-                v = feat.get(k)
+                v = feat.get(k) if feat is not None else None
                 if v is None:
                     vec.append(0.0)
                 else:
@@ -104,7 +108,7 @@ def _assemble_matrix_delta(
                         vec.append(float(v))
                     except Exception:
                         logger.debug(
-                            "Coercing non-numeric feature %s in row %s to 0.0",
+                            "Coercing non-numeric feature %s in setpoint row %s to 0.0",
                             k,
                             getattr(r, "id", None),
                         )
@@ -115,7 +119,7 @@ def _assemble_matrix_delta(
             used_rows.append(r)
         except Exception:
             logger.exception(
-                "Skipping corrupt row %s in assemble_matrix_delta",
+                "Skipping corrupt setpoint row %s in assemble_matrix_delta",
                 getattr(r, "id", None),
             )
 
@@ -157,7 +161,7 @@ def _clean_train_arrays(
 
 class TrainerDelta:
     """
-    Trainer that learns delta = setpoint - current_setpoint.
+    Trainer that learns delta = setpoint - baseline_current_setpoint.
     """
 
     def __init__(self, ha_client=None, opts: Optional[Dict] = None):
@@ -176,8 +180,9 @@ class TrainerDelta:
     def _fetch_data(
         self,
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any], int]:
+        # fetch_training_setpoints returns Setpoint rows (with .setpoint and optional .observed_current_setpoint)
         rows = fetch_training_setpoints(days=int(self.opts.get("buffer_days", 30)))
-        labeled_rows = [r for r in rows if r.setpoint is not None]
+        labeled_rows = [r for r in rows if getattr(r, "setpoint", None) is not None]
         X_lab, y_lab, used_rows = _assemble_matrix_delta(
             labeled_rows, self.feature_order
         )
@@ -203,7 +208,7 @@ class TrainerDelta:
                 )
                 if std < float(self.opts.get("warning_std_threshold", 1e-3)):
                     logger.warning(
-                        "Training deltas near-constant (std=%.6f); likely labels == current_setpoint across dataset",
+                        "Training deltas near-constant (std=%.6f); likely labels == baseline across dataset",
                         std,
                     )
         except Exception:
@@ -427,16 +432,24 @@ class TrainerDelta:
         try:
             if n_labeled > 0:
                 preds_delta = predict_fn(X[:n_labeled])
+                # reconstruct baseline array using Setpoint.observed_current_setpoint if present, fallback to data.current_setpoint
                 current_arr = np.array(
                     [
-                        _safe_float(r.data.get("current_setpoint", 0.0))
+                        (
+                            _safe_float(getattr(r, "observed_current_setpoint", None))
+                            if getattr(r, "observed_current_setpoint", None) is not None
+                            else _safe_float(r.data.get("current_setpoint", 0.0))
+                        )
                         for r in used_rows[:n_labeled]
                     ],
                     dtype=float,
                 )
                 preds_abs = current_arr + np.array(preds_delta, dtype=float)
                 y_true_abs = np.array(
-                    [_safe_float(r.setpoint, 0.0) for r in used_rows[:n_labeled]],
+                    [
+                        _safe_float(getattr(r, "setpoint", 0.0))
+                        for r in used_rows[:n_labeled]
+                    ],
                     dtype=float,
                 )
                 mae_abs = float(mean_absolute_error(y_true_abs, preds_abs))
@@ -450,27 +463,28 @@ class TrainerDelta:
         try:
             if X_val is not None and len(X_val):
                 val_preds_delta = predict_fn(X_val)
-                ci = (
-                    self.feature_order.index("current_setpoint")
-                    if "current_setpoint" in self.feature_order
-                    else None
+                # reconstruct validation baselines from the tail of used_rows
+                n_val = len(X_val)
+                curr_val = np.array(
+                    [
+                        (
+                            _safe_float(getattr(r, "observed_current_setpoint", None))
+                            if getattr(r, "observed_current_setpoint", None) is not None
+                            else _safe_float(r.data.get("current_setpoint", 0.0))
+                        )
+                        for r in used_rows[n_total - n_val : n_total]
+                    ],
+                    dtype=float,
                 )
-                if ci is not None:
-                    # note: X_val contains masked current_setpoint (0.0) at ci for compatibility
-                    curr_val = np.array(
-                        [
-                            _safe_float(r.data.get("current_setpoint", 0.0))
-                            for r in used_rows[n_total - len(X_val) : n_total]
-                        ],
-                        dtype=float,
-                    )
-                    val_preds_abs = curr_val + np.array(val_preds_delta, dtype=float)
-                    val_true_abs = curr_val + np.array(y_val, dtype=float)
-                    val_mae_abs = float(
-                        mean_absolute_error(val_true_abs, val_preds_abs)
-                    )
-                else:
-                    val_mae_abs = float(mean_absolute_error(y_val, val_preds_delta))
+                val_preds_abs = curr_val + np.array(val_preds_delta, dtype=float)
+                val_true_abs = np.array(
+                    [
+                        _safe_float(getattr(r, "setpoint", 0.0))
+                        for r in used_rows[n_total - n_val : n_total]
+                    ],
+                    dtype=float,
+                )
+                val_mae_abs = float(mean_absolute_error(val_true_abs, val_preds_abs))
         except Exception:
             logger.exception("Failed val MAE computation")
 

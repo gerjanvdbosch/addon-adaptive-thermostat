@@ -24,7 +24,7 @@ class InferencerDelta:
     """
     Inferencer for models trained on delta (predicted_delta).
     It masks current_setpoint in the feature-vector during predict so the model cannot trivially copy it.
-    It reconstructs predicted_setpoint = current_setpoint + pred_delta and applies checks.
+    It reconstructs predicted_setpoint = baseline_current_setpoint + pred_delta and applies checks.
     """
 
     def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
@@ -69,7 +69,7 @@ class InferencerDelta:
     def check_and_label_user_override(self) -> bool:
         """
         If the user manually changed the setpoint (via HA), add a labeled sample with user_override=True.
-        This function should only label when it's a genuine user action (not when our model applied it).
+        Record the pre-override baseline on the Setpoint row using observed_current.
         """
         try:
             now = datetime.now()
@@ -84,6 +84,7 @@ class InferencerDelta:
             if not rows:
                 return False
             last_row = rows[0]
+
             current_sp, *_ = self.ha.get_setpoint()
             min_sp = float(self.opts.get("min_setpoint", 5.0))
             max_sp = float(self.opts.get("max_setpoint", 30.0))
@@ -110,11 +111,35 @@ class InferencerDelta:
                 # user matched our last prediction -> not a human override
                 return False
 
-            features = self.collector.get_features(ts=now)
-            insert_sample(features, label_setpoint=current_sp, user_override=True)
+            # Prepare features snapshot based on the pre-override sample (preferred)
+            try:
+                fallback_features = (
+                    dict(last_row.data)
+                    if last_row.data
+                    else self.collector.get_features(ts=now)
+                )
+            except Exception:
+                fallback_features = self.collector.get_features(ts=now)
 
-            features["current_setpoint"] = last_sample_sp
-            insert_setpoint(features, setpoint=current_sp)
+            # Insert the labeled training sample (use fallback_features so features correspond to pre-override state)
+            try:
+                # insert_sample signature in db may accept observed_current in different places;
+                insert_sample(
+                    fallback_features, label_setpoint=current_sp, user_override=True
+                )
+            except Exception:
+                logger.exception("Failed inserting labeled sample; continuing")
+
+            # Persist setpoint log and ensure observed_current_setpoint is saved on the Setpoint row
+            try:
+                insert_setpoint(
+                    fallback_features,
+                    setpoint=current_sp,
+                    observed_current=last_sample_sp,
+                )
+            except Exception:
+                logger.exception("Failed inserting setpoint log")
+
             logger.info(
                 "Detected user override: inserted labeled sample %.1f (was %.1f)",
                 current_rounded,
@@ -131,7 +156,7 @@ class InferencerDelta:
         """
         Fetch latest unlabelled sample and build feature vector.
         Mask the current_setpoint feature (set to 0.0) so model cannot trivially echo it.
-        Return both vector and original featdict (unchanged) so we can reconstruct current_setpoint.
+        Return both vector and original featdict (unchanged) so we can reconstruct baseline.
         """
         try:
             unl = fetch_unlabeled(limit=1)
@@ -178,11 +203,24 @@ class InferencerDelta:
             return
         X = np.array([Xvec], dtype=float)
 
-        # current_sp = featdict.get("current_setpoint") if featdict else None
-        rows = fetch_setpoints(1)
-        current_sp = safe_float(rows[0].data.get("current_setpoint") if rows else None)
-        if current_sp is None:
-            logger.warning("Current setpoint not available; skipping inference")
+        # Prefer baseline from the feature snapshot used for this sample (observed baseline).
+        baseline_raw = None
+        if featdict:
+            baseline_raw = featdict.get(
+                "observed_current_setpoint", featdict.get("current_setpoint")
+            )
+
+        # fallback: try latest setpoint log (Setpoint table)
+        if baseline_raw is None:
+            rows = fetch_setpoints(1)
+            baseline_raw = rows[0].data.get("current_setpoint") if rows else None
+            # also accept Setpoint.observed_current_setpoint if available in row itself
+            if rows and getattr(rows[0], "observed_current_setpoint", None) is not None:
+                baseline_raw = getattr(rows[0], "observed_current_setpoint")
+
+        baseline = safe_float(baseline_raw, None)
+        if baseline is None:
+            logger.warning("No baseline current_setpoint available; skipping inference")
             return
 
         min_sp = float(self.opts.get("min_setpoint", 5.0))
@@ -203,9 +241,9 @@ class InferencerDelta:
             pred_delta = (
                 float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
             )
-            p = float(current_sp) + pred_delta
+            p = float(baseline) + pred_delta
             logger.debug(
-                "DEBUG: predicted_delta=%.2f reconstructed_setpoint=%.2f raw=%.2f",
+                "DEBUG: predicted_delta=%.2f reconstructed_setpoint=%.2f raw=%s",
                 pred_delta,
                 p,
                 pred_raw,
@@ -244,11 +282,11 @@ class InferencerDelta:
             return
 
         # threshold and cooldown
-        if abs(p - float(current_sp)) < threshold:
+        if abs(p - float(baseline)) < threshold:
             logger.info(
                 "Prediction (%.2f), change %.3f < threshold %.3f; skipping",
                 p,
-                abs(p - float(current_sp)),
+                abs(p - float(baseline)),
                 threshold,
             )
             return
@@ -290,6 +328,6 @@ class InferencerDelta:
             self.last_pred_ts = now
             self.last_pred_value = p
             self.last_pred_model = self.model_path
-            logger.info("Applied predicted setpoint %.2f (was %.2f)", p, current_sp)
+            logger.info("Applied predicted setpoint %.2f (baseline %.2f)", p, baseline)
         except Exception:
             logger.exception("Failed to apply setpoint via HA client")
