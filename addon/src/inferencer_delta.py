@@ -201,7 +201,7 @@ class InferencerDelta:
                 float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
             )
             p = float(current_sp) + pred_delta
-            logger.debug(
+            logger.info(
                 "DEBUG: predicted_delta=%.4f reconstructed_setpoint=%.4f", pred_delta, p
             )
         except Exception:
@@ -238,7 +238,8 @@ class InferencerDelta:
         # threshold and cooldown
         if abs(p - float(current_sp)) < threshold:
             logger.info(
-                "Predicted change %.3f < threshold %.3f; skipping",
+                "Prediction (%.2f), change %.3f < threshold %.3f; skipping",
+                p,
                 abs(p - float(current_sp)),
                 threshold,
             )
