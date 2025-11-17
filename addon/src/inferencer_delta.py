@@ -116,7 +116,7 @@ class InferencerDelta:
             try:
                 update_setpoint(
                     last_row.id,
-                    setpoint=last_row.setpoint,
+                    setpoint=current_rounded,
                     observed_current=last_sample_sp,
                 )
             except Exception:

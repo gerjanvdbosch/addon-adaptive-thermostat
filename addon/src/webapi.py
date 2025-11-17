@@ -8,7 +8,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Header, Query, Path
 from pydantic import BaseModel, Field
 from config import load_options
-from db import Session, Sample, Setpoint, insert_sample, update_label
+from db import Session, Sample, Setpoint, insert_sample, update_label, update_setpoint
 from ha_client import HAClient
 from trainer2 import Trainer2
 from trainer_delta import TrainerDelta
@@ -178,6 +178,71 @@ def list_setpoints(
                 )
             )
         return out
+    finally:
+        s.close()
+
+
+class SetpointPatch(BaseModel):
+    setpoint: Optional[float] = Field(
+        None, description="New setpoint value or null to clear"
+    )
+    observed_current_setpoint: Optional[float] = Field(
+        None, description="Observed baseline to store"
+    )
+
+
+@app.patch("/setpoints/{setpoint_id}", status_code=200)
+def patch_setpoint_minimal(
+    setpoint_id: int = Path(..., ge=1),
+    payload: SetpointPatch = None,
+    x_addon_token: Optional[str] = Header(None),
+):
+    _check_token(x_addon_token)
+
+    if payload is None:
+        raise HTTPException(status_code=400, detail="Empty payload")
+
+    # Coerce / validate fields
+    sp_val = None
+    if payload.setpoint is not None:
+        try:
+            sp_val = float(payload.setpoint)
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail="setpoint must be numeric or null"
+            )
+
+    obs_val = None
+    if payload.observed_current_setpoint is not None:
+        try:
+            obs_val = float(payload.observed_current_setpoint)
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="observed_current_setpoint must be numeric or null",
+            )
+
+    # Apply update
+    try:
+        update_setpoint(setpoint_id, setpoint=sp_val, observed_current=obs_val)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed updating setpoint")
+
+    # Return updated row
+    s = Session()
+    try:
+        row = s.get(Setpoint, setpoint_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Setpoint not found")
+        return {
+            "id": row.id,
+            "timestamp": row.timestamp if isinstance(row.timestamp, datetime) else None,
+            "setpoint": getattr(row, "setpoint", None),
+            "observed_current_setpoint": getattr(
+                row, "observed_current_setpoint", None
+            ),
+            "data": getattr(row, "data", {}) or {},
+        }
     finally:
         s.close()
 
