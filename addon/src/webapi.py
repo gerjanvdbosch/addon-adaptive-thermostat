@@ -191,7 +191,7 @@ class SetpointPatch(BaseModel):
     )
 
 
-@app.patch("/setpoints/{setpoint_id}", status_code=200)
+@app.post("/setpoints/{setpoint_id}", status_code=200)
 def patch_setpoint_minimal(
     setpoint_id: int = Path(..., ge=1),
     payload: SetpointPatch = None,
