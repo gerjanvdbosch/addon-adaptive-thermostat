@@ -43,7 +43,7 @@ class Setpoint(Base):
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.now, index=True)
     # setpoint and observed_current_setpoint == override
-    setpoint = Column(Float, nullable=False)
+    setpoint = Column(Float, nullable=True)
     observed_current_setpoint = Column(Float, nullable=True)
     data = Column(JSON)
 
