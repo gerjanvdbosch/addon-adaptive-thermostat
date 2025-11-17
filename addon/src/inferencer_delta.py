@@ -6,10 +6,8 @@ from datetime import datetime
 from typing import Optional, Tuple, List
 
 from db import (
-    insert_sample,
-    fetch,
-    fetch_unlabeled,
-    insert_setpoint,
+    fetch_unlabeled_setpoint,
+    update_setpoint,
     fetch_setpoints,
 )
 from collector import FEATURE_ORDER, Collector
@@ -79,14 +77,14 @@ class InferencerDelta:
             ):
                 return False
 
-            rows = fetch(limit=1)
+            rows = fetch_setpoints(limit=1)
             if not rows:
                 return False
             last_row = rows[0]
 
             current_sp, *_ = self.ha.get_setpoint()
-            min_sp = float(self.opts.get("min_setpoint", 5.0))
-            max_sp = float(self.opts.get("max_setpoint", 30.0))
+            min_sp = float(self.opts.get("min_setpoint", 15.0))
+            max_sp = float(self.opts.get("max_setpoint", 25.0))
             if not (min_sp <= current_sp <= max_sp):
                 return False
 
@@ -110,34 +108,19 @@ class InferencerDelta:
                 # user matched our last prediction -> not a human override
                 return False
 
-            # Prepare features snapshot based on the pre-override sample (preferred)
-            try:
-                fallback_features = (
-                    dict(last_row.data)
-                    if last_row.data
-                    else self.collector.get_features(ts=now)
-                )
-            except Exception:
-                fallback_features = self.collector.get_features(ts=now)
+            # fallback_features = self.collector.get_features(ts=now)
 
-            # Insert the labeled training sample (use fallback_features so features correspond to pre-override state)
-            try:
-                # insert_sample signature in db may accept observed_current in different places;
-                insert_sample(
-                    fallback_features, label_setpoint=current_sp, user_override=True
-                )
-            except Exception:
-                logger.exception("Failed inserting labeled sample; continuing")
+            # todo , check predicted_setpoint, then insert labeled setpoint
 
             # Persist setpoint log and ensure observed_current_setpoint is saved on the Setpoint row
             try:
-                insert_setpoint(
-                    fallback_features,
-                    setpoint=current_sp,
+                update_setpoint(
+                    last_row.id,
+                    setpoint=last_row.setpoint,
                     observed_current=last_sample_sp,
                 )
             except Exception:
-                logger.exception("Failed inserting setpoint log")
+                logger.exception("Failed updating setpoint log")
 
             logger.info(
                 "Detected user override: inserted labeled sample %.1f (was %.1f)",
@@ -158,7 +141,7 @@ class InferencerDelta:
         Return both vector and original featdict (unchanged) so we can reconstruct baseline.
         """
         try:
-            unl = fetch_unlabeled(limit=1)
+            unl = fetch_unlabeled_setpoint(limit=1)
             if not unl:
                 return None, None
             last = unl[0]

@@ -42,6 +42,7 @@ class Setpoint(Base):
     __tablename__ = "setpoints"
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.now, index=True)
+    # setpoint and observed_current_setpoint == override
     setpoint = Column(Float, nullable=False)
     observed_current_setpoint = Column(Float, nullable=True)
     data = Column(JSON)
@@ -68,13 +69,17 @@ def insert_setpoint(
         s.close()
 
 
-def update_setpoint(setpoint_id: int, setpoint: float) -> None:
+def update_setpoint(
+    setpoint_id: int, setpoint: float, observed_current: Optional[float] = None
+) -> None:
     s: SASession = Session()
     try:
         row = s.get(Setpoint, setpoint_id)
         if row is not None:
             row.setpoint = setpoint
-            s.commit()
+        if observed_current is not None:
+            row.observed_current_setpoint = observed_current
+        s.commit()
     finally:
         s.close()
 
@@ -88,6 +93,22 @@ def fetch_setpoints(limit: int = 1) -> List[Setpoint]:
         s.close()
 
 
+def fetch_unlabeled_setpoints(limit: int = 1) -> List[Setpoint]:
+    s: SASession = Session()
+    try:
+        rows = (
+            s.query(Setpoint)
+            .filter(Setpoint.observed_current_setpoint.is_(None))
+            .filter(Setpoint.setpoint.is_(None))
+            .order_by(Setpoint.timestamp.desc())
+            .limit(limit)
+            .all()
+        )
+        return rows
+    finally:
+        s.close()
+
+
 def fetch_training_setpoints(days: int = 30) -> List[Sample]:
     s: SASession = Session()
     try:
@@ -96,6 +117,7 @@ def fetch_training_setpoints(days: int = 30) -> List[Sample]:
             s.query(Setpoint)
             .filter(Setpoint.timestamp >= cutoff)
             .filter(Setpoint.setpoint.isnot(None))
+            .filter(Setpoint.observed_current_setpoint.isnot(None))
             .all()
         )
         return rows

@@ -13,7 +13,7 @@ from utils import (
     month_to_season,
     day_or_night,
 )
-from db import insert_sample
+from db import insert_sample, insert_setpoint
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,7 @@ class Collector:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)
             insert_sample(features)
+            insert_setpoint(features)
             logger.info(
                 "Sample stored: current_setpoint=%s current_temp=%s",
                 sensors.get("current_setpoint"),

@@ -5,7 +5,13 @@ import numpy as np
 from datetime import datetime
 from typing import Optional, Tuple, List
 
-from db import fetch, fetch_unlabeled, update_sample_prediction, insert_sample
+from db import (
+    fetch,
+    fetch_unlabeled,
+    update_sample_prediction,
+    insert_sample,
+    update_label,
+)
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
 from utils import safe_round, round_half
@@ -67,7 +73,6 @@ class Inferencer2:
 
     def check_and_label_user_override(self) -> bool:
         """Detecteer en label een echte gebruikeroverride; return True als gelabeld."""
-        return False
         try:
             now = datetime.now()
             interval = float(self.opts.get("sample_interval_seconds", 300))
@@ -101,17 +106,25 @@ class Inferencer2:
                 else None
             )
 
+            predicted_setpoint = row.predicted_setpoint if row else None
+
             if current_rounded == last_sample_rounded:
                 return False
 
-            if last_pred_rounded is not None and current_rounded == last_pred_rounded:
+            if (
+                last_pred_rounded is not None and current_rounded == last_pred_rounded
+            ) or (
+                predicted_setpoint is not None
+                and current_rounded == safe_round(predicted_setpoint)
+            ):
                 logger.info(
                     "Current setpoint matches last predicted value; not user override"
                 )
                 return False
 
-            features = self.collector.get_features(ts=now)
-            insert_sample(features, label_setpoint=current_sp, user_override=True)
+            # features = self.collector.get_features(ts=now)
+            # insert_sample(features, label_setpoint=current_sp, user_override=True)
+            update_label(row.id, label_setpoint=current_sp, user_override=True)
             logger.info(
                 "Detected user override and inserted labeled sample: last %.1f -> current %.1f",
                 last_sample_rounded,
