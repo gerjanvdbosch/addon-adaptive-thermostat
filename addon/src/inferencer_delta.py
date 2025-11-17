@@ -141,7 +141,7 @@ class InferencerDelta:
         Return both vector and original featdict (unchanged) so we can reconstruct baseline.
         """
         try:
-            unl = fetch_unlabeled_setpoint(limit=1)
+            unl = fetch_unlabeled_setpoints(limit=1)
             if not unl:
                 return None, None
             last = unl[0]
