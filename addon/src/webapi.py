@@ -241,7 +241,6 @@ def patch_setpoint_minimal(
             "observed_current_setpoint": getattr(
                 row, "observed_current_setpoint", None
             ),
-            "data": getattr(row, "data", {}) or {},
         }
     finally:
         s.close()
