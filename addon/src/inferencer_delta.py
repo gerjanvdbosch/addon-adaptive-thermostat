@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Tuple, List
 
 from db import (
-    fetch_unlabeled_setpoint,
+    fetch_unlabeled_setpoints,
     update_setpoint,
     fetch_setpoints,
 )
