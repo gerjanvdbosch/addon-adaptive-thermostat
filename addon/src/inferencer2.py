@@ -259,7 +259,7 @@ class Inferencer2:
             return
         p = float(max(min(p, max_sp), min_sp))
         logger.info("Prediction raw (%.2f)", p)
-        p = safe_round(round_half(p))
+        #p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer logic
