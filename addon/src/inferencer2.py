@@ -3,7 +3,6 @@ import logging
 import joblib
 import numpy as np
 from datetime import datetime
-from typing import Optional, Tuple, List
 
 from db import (
     fetch,
@@ -14,7 +13,7 @@ from db import (
 )
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import safe_round
+from utils import safe_round, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +40,11 @@ class Inferencer2:
         # self.model_path = self.opts.get("model_path_full")
         self.model_path = "/config/models/full_model2.joblib"
         self.model_payload = None  # loaded payload dict {"model","meta"}
-        self.last_pred_ts: Optional[datetime] = None
-        self.last_pred_value: Optional[float] = None
-        self.last_pred_model: Optional[str] = None
-        self.last_eval_value: Optional[float] = None
-        self.last_eval_ts: Optional[datetime] = None
+        self.last_pred_ts = None
+        self.last_pred_value = None
+        self.last_pred_model = None
+        self.last_eval_value = None
+        self.last_eval_ts = None
 
         self.load_model()
 
@@ -71,7 +70,7 @@ class Inferencer2:
         self.model_payload = payload
         logger.info("Loaded model from %s (mae=%s)", path, meta.get("mae"))
 
-    def check_and_label_user_override(self) -> bool:
+    def check_and_label_user_override(self):
         """Detecteer en label een echte gebruikeroverride; return True als gelabeld."""
         try:
             now = datetime.now()
@@ -90,13 +89,14 @@ class Inferencer2:
             current_sp, *rest = self.ha.get_setpoint()
             min_sp = float(self.opts.get("min_setpoint", 15.0))
             max_sp = float(self.opts.get("max_setpoint", 24.0))
+
             if not (min_sp <= current_sp <= max_sp):
                 logger.warning("Setpoint outside plausible range: %s", current_sp)
                 return False
 
             last_sample_sp = (
                 row.label_setpoint
-                if row.label_setpoint is not None
+                if safe_float(row.label_setpoint) is not None
                 else (row.data.get("current_setpoint") if row.data else None)
             )
             if last_sample_sp is None:
@@ -126,8 +126,6 @@ class Inferencer2:
                 )
                 return False
 
-            # features = self.collector.get_features(ts=now)
-            # insert_sample(features, label_setpoint=current_sp, user_override=True)
             update_label(row.id, label_setpoint=current_sp, user_override=True)
             logger.info(
                 "Detected user override and inserted labeled sample: last %.1f -> current %.1f",
@@ -139,7 +137,7 @@ class Inferencer2:
             logger.exception("Error detecting/labeling user override")
             return False
 
-    def _fetch_current_vector(self) -> Tuple[Optional[List[float]], Optional[dict]]:
+    def _fetch_current_vector(self):
         """Haal de laatste unlabelled sample features op en maak vector volgens FEATURE_ORDER.
         Mask current_setpoint in de featurevector (prevent trivial identity/echo)."""
         try:
@@ -175,7 +173,7 @@ class Inferencer2:
             logger.exception("Failed fetching current vector")
             return None, None
 
-    def _predict(self, X: np.ndarray) -> Optional[float]:
+    def _predict(self, X: np.ndarray):
         """Voorspel met het geladen model; verwacht model.predict(X) op raw features."""
         if self.model_payload is None:
             logger.debug("No model loaded for prediction")
@@ -216,6 +214,8 @@ class Inferencer2:
         max_sp = float(self.opts.get("max_setpoint", 24.0))
         threshold = float(self.opts.get("min_change_threshold", 0.3))
         stable_seconds = float(self.opts.get("stable_seconds", 600))
+        shadow_mode = self.opts.get("shadow_mode")
+
         current_sp = featdict.get("current_setpoint") if featdict else None
         if current_sp is None:
             logger.warning("Current setpoint unknown; skipping inference")
@@ -263,7 +263,6 @@ class Inferencer2:
             return
         p = float(max(min(p, max_sp), min_sp))
         logger.info("Prediction raw (%.2f)", p)
-        # p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer logic
@@ -284,7 +283,7 @@ class Inferencer2:
             )
             return
 
-        if abs(p - current_sp) < threshold:
+        if not shadow_mode and abs(p - current_sp) < threshold:
             logger.info(
                 "Prediction (%.2f), change %.3f below threshold %.3f; skipping",
                 p,

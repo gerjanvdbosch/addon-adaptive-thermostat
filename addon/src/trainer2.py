@@ -6,7 +6,6 @@ import time
 import math
 import numpy as np
 from datetime import datetime, timezone
-from typing import Any, Dict
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
@@ -19,7 +18,7 @@ from scipy.stats import loguniform, randint
 logger = logging.getLogger(__name__)
 
 
-def _atomic_dump(obj: Any, path: str) -> None:
+def _atomic_dump(obj, path: str):
     tmp = f"{path}.tmp"
     joblib.dump(obj, tmp)
     os.replace(tmp, path)
@@ -954,7 +953,7 @@ class Trainer2:
         except Exception:
             pass
 
-        metadata: Dict[str, Any] = {
+        metadata = {
             "feature_order": self.feature_order,
             "backend": self.backend,
             "trained_at": datetime.now(timezone.utc).isoformat(),

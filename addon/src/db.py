@@ -1,5 +1,4 @@
 import os
-from typing import List, Optional
 from datetime import datetime, timedelta
 
 from sqlalchemy import (
@@ -53,8 +52,8 @@ Base.metadata.create_all(engine)
 
 def insert_setpoint(
     data: dict,
-    setpoint: Optional[float] = None,
-    observed_current: Optional[float] = None,
+    setpoint=None,
+    observed_current=None,
 ) -> int:
     s: SASession = Session()
     try:
@@ -69,9 +68,7 @@ def insert_setpoint(
         s.close()
 
 
-def update_setpoint(
-    setpoint_id: int, setpoint: float, observed_current: Optional[float] = None
-) -> None:
+def update_setpoint(setpoint_id: int, setpoint: float, observed_current=None) -> None:
     s: SASession = Session()
     try:
         row = s.get(Setpoint, setpoint_id)
@@ -84,7 +81,7 @@ def update_setpoint(
         s.close()
 
 
-def fetch_setpoints(limit: int = 1) -> List[Setpoint]:
+def fetch_setpoints(limit: int = 1):
     s: SASession = Session()
     try:
         rows = s.query(Setpoint).order_by(Setpoint.timestamp.desc()).limit(limit).all()
@@ -93,7 +90,7 @@ def fetch_setpoints(limit: int = 1) -> List[Setpoint]:
         s.close()
 
 
-def fetch_unlabeled_setpoints(limit: int = 1) -> List[Setpoint]:
+def fetch_unlabeled_setpoints(limit: int = 1):
     s: SASession = Session()
     try:
         rows = (
@@ -109,7 +106,7 @@ def fetch_unlabeled_setpoints(limit: int = 1) -> List[Setpoint]:
         s.close()
 
 
-def fetch_training_setpoints(days: int = 30) -> List[Sample]:
+def fetch_training_setpoints(days: int = 30):
     s: SASession = Session()
     try:
         cutoff = datetime.now() - timedelta(days=days)
@@ -125,9 +122,7 @@ def fetch_training_setpoints(days: int = 30) -> List[Sample]:
         s.close()
 
 
-def insert_sample(
-    data: dict, label_setpoint: Optional[float] = None, user_override: bool = False
-) -> int:
+def insert_sample(data: dict, label_setpoint=None, user_override: bool = False) -> int:
     s: SASession = Session()
     try:
         sample = Sample(
@@ -141,7 +136,7 @@ def insert_sample(
         s.close()
 
 
-def fetch_training_data(days: int = 30) -> List[Sample]:
+def fetch_training_data(days: int = 30):
     s: SASession = Session()
     try:
         cutoff = datetime.now() - timedelta(days=days)
@@ -156,7 +151,7 @@ def fetch_training_data(days: int = 30) -> List[Sample]:
         s.close()
 
 
-def fetch_unlabeled(limit: int = 1) -> List[Sample]:
+def fetch_unlabeled(limit: int = 1):
     s: SASession = Session()
     try:
         rows = (
@@ -171,7 +166,7 @@ def fetch_unlabeled(limit: int = 1) -> List[Sample]:
         s.close()
 
 
-def fetch(limit: int = 1) -> List[Sample]:
+def fetch(limit: int = 1):
     s: SASession = Session()
     try:
         rows = s.query(Sample).order_by(Sample.timestamp.desc()).limit(limit).all()
@@ -180,9 +175,7 @@ def fetch(limit: int = 1) -> List[Sample]:
         s.close()
 
 
-def update_label(
-    sample_id: int, label_setpoint: float, user_override: bool = False
-) -> None:
+def update_label(sample_id: int, label_setpoint: float, user_override: bool = False):
     s: SASession = Session()
     try:
         row = s.get(Sample, sample_id)
@@ -203,9 +196,9 @@ def update_label(
 
 def update_sample_prediction(
     sample_id: int,
-    predicted_setpoint: Optional[float] = None,
-    prediction_error: Optional[float] = None,
-) -> None:
+    predicted_setpoint=None,
+    prediction_error=None,
+):
     s: SASession = Session()
     try:
         row = s.get(Sample, sample_id)

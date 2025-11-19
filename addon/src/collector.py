@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 import time
-from typing import Optional, Dict, Any, List
 
 from utils import (
     safe_float,
@@ -17,7 +16,7 @@ from db import insert_sample, insert_setpoint
 
 logger = logging.getLogger(__name__)
 
-FEATURE_ORDER: List[str] = [
+FEATURE_ORDER = [
     "hour_sin",
     "hour_cos",
     "day_sin",
@@ -61,13 +60,13 @@ class Collector:
                 "Please configure sensor entity IDs in the add-on options."
             )
 
-    def read_sensors(self) -> Dict[str, Optional[float]]:
+    def read_sensors(self):
         """
         Read current setpoint/temp from HA client and then each mapped sensor.
         Returns a dict with raw numeric values or None.
         """
         current_setpoint, current_temp, hvac_mode = self.ha.get_setpoint()
-        data: Dict[str, Optional[float]] = {
+        data = {
             "current_setpoint": current_setpoint,
             "current_temp": current_temp,
             "hvac_mode": hvac_mode,
@@ -84,9 +83,7 @@ class Collector:
             time.sleep(0.01)
         return data
 
-    def features_from_raw(
-        self, sensor_dict: Dict[str, Any], timestamp: Optional[datetime] = None
-    ) -> Dict[str, Any]:
+    def features_from_raw(self, sensor_dict, timestamp=None):
         """
         Convert raw sensor dict into feature dictionary following FEATURE_ORDER keys.
         Defensive: uses safe_float and encoding helpers.

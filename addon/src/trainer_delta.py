@@ -4,7 +4,6 @@ import logging
 import joblib
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -19,7 +18,7 @@ from collector import FEATURE_ORDER
 logger = logging.getLogger(__name__)
 
 
-def _atomic_dump(obj: Any, path: str) -> None:
+def _atomic_dump(obj, path: str):
     tmp = f"{path}.tmp"
     joblib.dump(obj, tmp)
     os.replace(tmp, path)
@@ -32,18 +31,16 @@ def _safe_float(v, default=None):
         return default
 
 
-def _assemble_matrix_delta(
-    rows: List[Any], feature_order: List[str]
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any]]:
+def _assemble_matrix_delta(rows, feature_order):
     """
     Build X and y where y = setpoint - baseline_current_setpoint (delta).
     Prefer Setpoint.observed_current_setpoint as baseline; fallback to feat["current_setpoint"].
     Mask current_setpoint in feature vector (set to 0.0) to avoid trivial echo learning.
     Skip rows that lack a usable baseline or have trivial delta and are not override-like entries.
     """
-    X: List[List[float]] = []
-    y: List[float] = []
-    used_rows: List[Any] = []
+    X = []
+    y = []
+    used_rows = []
 
     for r in rows:
         # rows are Setpoint objects (from fetch_training_setpoints)
@@ -94,7 +91,7 @@ def _assemble_matrix_delta(
                 )
                 continue
 
-            vec: List[float] = []
+            vec = []
             for k in feature_order:
                 # Mask current_setpoint during training to prevent echo learning
                 if k == "current_setpoint":
@@ -128,9 +125,7 @@ def _assemble_matrix_delta(
     return np.array(X, dtype=float), np.array(y, dtype=float), used_rows
 
 
-def _clean_train_arrays(
-    Xa: np.ndarray, ya: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+def _clean_train_arrays(Xa: np.ndarray, ya: np.ndarray):
     """
     Ensure numeric, finite arrays.
     Drops rows where any feature or y is non-finite.
@@ -164,7 +159,7 @@ class TrainerDelta:
     Trainer that learns delta = setpoint - baseline_current_setpoint.
     """
 
-    def __init__(self, ha_client=None, opts: Optional[Dict] = None):
+    def __init__(self, ha_client=None, opts=None):
         self.ha = ha_client
         self.opts = opts or {}
         self.model_path = self.opts.get(
@@ -179,7 +174,7 @@ class TrainerDelta:
 
     def _fetch_data(
         self,
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Any], int]:
+    ):
         # fetch_training_setpoints returns Setpoint rows (with .setpoint and optional .observed_current_setpoint)
         rows = fetch_training_setpoints(days=int(self.opts.get("buffer_days", 30)))
         labeled_rows = [r for r in rows if getattr(r, "setpoint", None) is not None]
@@ -500,7 +495,7 @@ class TrainerDelta:
 
         # persist model + meta
         try:
-            meta: Dict[str, Any] = {
+            meta = {
                 "feature_order": self.feature_order,
                 "backend": "sklearn_histgb",
                 "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -526,7 +521,7 @@ class TrainerDelta:
             logger.exception("Failed saving model")
             return
 
-    def _time_splits(self, n_labeled: int) -> Optional[int]:
+    def _time_splits(self, n_labeled: int):
         min_train = int(self.opts.get("min_train_size", 30))
         if n_labeled < min_train:
             return None
@@ -535,9 +530,7 @@ class TrainerDelta:
             return None
         return n_splits
 
-    def _report_household_drift(
-        self, used_rows: List[Any], preds_abs: np.ndarray, y_true_abs: np.ndarray
-    ):
+    def _report_household_drift(self, used_rows, preds_abs, y_true_abs):
         try:
             hh_map = {}
             for i, r in enumerate(used_rows):

@@ -3,7 +3,6 @@ import logging
 import joblib
 import numpy as np
 from datetime import datetime
-from typing import Optional, Tuple, List
 
 from db import (
     fetch_unlabeled_setpoints,
@@ -63,7 +62,7 @@ class InferencerDelta:
         self.model_payload = payload
         logger.info("Loaded model from %s (mae=%s)", path, meta.get("mae"))
 
-    def check_and_label_user_override(self) -> bool:
+    def check_and_label_user_override(self):
         """
         If the user manually changed the setpoint (via HA), add a labeled sample with user_override=True.
         Record the pre-override baseline on the Setpoint row using observed_current.
@@ -110,10 +109,6 @@ class InferencerDelta:
                 # user matched our last prediction -> not a human override
                 return False
 
-            # fallback_features = self.collector.get_features(ts=now)
-
-            # todo , check predicted_setpoint, then insert labeled setpoint
-
             # Persist setpoint log and ensure observed_current_setpoint is saved on the Setpoint row
             try:
                 update_setpoint(
@@ -136,7 +131,7 @@ class InferencerDelta:
 
     def _fetch_current_vector_masked(
         self,
-    ) -> Tuple[Optional[List[float]], Optional[dict]]:
+    ):
         """
         Fetch latest unlabelled sample and build feature vector.
         Mask the current_setpoint feature (set to 0.0) so model cannot trivially echo it.
@@ -230,6 +225,7 @@ class InferencerDelta:
         max_sp = float(self.opts.get("max_setpoint", 30.0))
         threshold = float(self.opts.get("min_change_threshold", 0.25))
         stable_seconds = float(self.opts.get("stable_seconds", 600))
+        shadow_mode = self.opts.get("shadow_mode")
 
         # debug
         logger.debug(
@@ -263,7 +259,6 @@ class InferencerDelta:
             return
         p = float(max(min(p, max_sp), min_sp))
         logger.info("Prediction raw delta (%.2f)", p)
-        # p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer
@@ -285,7 +280,7 @@ class InferencerDelta:
             return
 
         # threshold and cooldown
-        if abs(p - float(baseline)) < threshold:
+        if not shadow_mode and abs(p - float(baseline)) < threshold:
             logger.info(
                 "Prediction (%.2f), change %.3f < threshold %.3f; skipping",
                 p,
