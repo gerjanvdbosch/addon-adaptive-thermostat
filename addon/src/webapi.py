@@ -155,6 +155,9 @@ def list_samples(
 
 @app.get("/setpoints", response_model=List[SetpointOut])
 def list_setpoints(
+    labeled: Optional[bool] = Query(
+        None, description="Filter by labeled/unlabeled. None = both"
+    ),
     limit: int = Query(100, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     x_addon_token: Optional[str] = Header(None),
@@ -163,6 +166,8 @@ def list_setpoints(
     s = Session()
     try:
         q = s.query(Setpoint)
+        if labeled is True:
+            q = q.filter(Setpoint.setpoint.isnot(None))
         rows = q.order_by(Setpoint.timestamp.desc()).limit(limit).offset(offset).all()
         out = []
         for r in rows:
