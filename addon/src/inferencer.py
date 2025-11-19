@@ -18,7 +18,7 @@ from utils import safe_round, safe_float
 logger = logging.getLogger(__name__)
 
 
-class Inferencer2:
+class Inferencer:
     """
     Inferencer voor MLSklearnTrainer (één full model, geen scaler ondersteuning).
     Verwachte model payload op disk: joblib dump van dict {"model": <estimator>, "meta": {...}}

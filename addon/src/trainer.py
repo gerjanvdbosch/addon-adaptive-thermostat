@@ -72,7 +72,7 @@ def _assemble_matrix(rows, feature_order):
     return np.array(X, dtype=float), np.array(y, dtype=float), used_rows
 
 
-class Trainer2:
+class Trainer:
     """
     Production-ready sklearn ML trainer using HistGradientBoostingRegressor.
 

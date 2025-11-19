@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from config import load_options
 from db import Session, Sample, Setpoint, insert_sample, update_label, update_setpoint
 from ha_client import HAClient
-from trainer2 import Trainer2
+from trainer import Trainer
 from trainer_delta import TrainerDelta
 
 logger = logging.getLogger(__name__)
@@ -617,14 +617,14 @@ def trigger_full_train(
     opts = load_options()
     ha = HAClient(opts)
     # trainer = Trainer(ha, opts)
-    trainer2 = Trainer2(ha, opts)
+    trainer = Trainer(ha, opts)
     trainer_delta = TrainerDelta(ha, opts)
 
     def _run():
         try:
             logger.info("Triggered full retrain via API (force=%s)", force)
             # trainer.full_retrain_job(force=force)
-            trainer2.train_job(force=force)
+            trainer.train_job(force=force)
             trainer_delta.train_job(force=force)
             logger.info("Full retrain job finished (API-triggered)")
         except Exception:

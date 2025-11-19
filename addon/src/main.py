@@ -6,10 +6,10 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from collector import Collector
-from trainer2 import Trainer2
+from trainer import Trainer
 from trainer_delta import TrainerDelta
 
-from inferencer2 import Inferencer2
+from inferencer import Inferencer
 from inferencer_delta import InferencerDelta
 from ha_client import HAClient
 from config import load_options
@@ -27,9 +27,9 @@ def main():
     opts = load_options()
     ha = HAClient(opts)
     collector = Collector(ha, opts)
-    trainer2 = Trainer2(ha, opts)
+    trainer = Trainer(ha, opts)
     trainer_delta = TrainerDelta(ha, opts)
-    inferencer2 = Inferencer2(ha, collector, opts)
+    inferencer = Inferencer(ha, collector, opts)
     inferencer_delta = InferencerDelta(ha, collector, opts)
 
     api_thread = threading.Thread(
@@ -50,14 +50,12 @@ def main():
 
     hh, mm = map(int, opts["full_retrain_time"].split(":"))
 
-    scheduler.add_job(
-        trainer2.train_job, "cron", hour=hh, minute=mm, id="full_retrain2"
-    )
+    scheduler.add_job(trainer.train_job, "cron", hour=hh, minute=mm, id="full_retrain")
     scheduler.add_job(
         trainer_delta.train_job, "cron", hour=hh, minute=mm, id="full_retrain_delta"
     )
     scheduler.add_job(
-        inferencer2.inference_job,
+        inferencer.inference_job,
         "interval",
         seconds=opts["inferencer_interval_seconds"],
         id="inference2",
