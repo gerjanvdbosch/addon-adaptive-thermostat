@@ -12,7 +12,7 @@ from db import (
 )
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import safe_round, safe_float, round_half
+from utils import safe_round, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,9 @@ class InferencerDelta:
                 return False
 
             last_sample_sp = (
-                last_row.data.get("current_setpoint") if last_row.data else None
+                last_row.setpoint
+                if safe_float(last_row.setpoint) is not None
+                else (last_row.data.get("current_setpoint") if last_row.data else None)
             )
             if last_sample_sp is None:
                 return False
@@ -261,7 +263,7 @@ class InferencerDelta:
             return
         p = float(max(min(p, max_sp), min_sp))
         logger.info("Prediction raw delta (%.2f)", p)
-        #p = safe_round(round_half(p))
+        # p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer

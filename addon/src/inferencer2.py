@@ -14,7 +14,7 @@ from db import (
 )
 from collector import FEATURE_ORDER, Collector
 from ha_client import HAClient
-from utils import safe_round, round_half
+from utils import safe_round
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,11 @@ class Inferencer2:
                 logger.warning("Setpoint outside plausible range: %s", current_sp)
                 return False
 
-            last_sample_sp = row.data.get("current_setpoint") if row.data else None
+            last_sample_sp = (
+                row.label_setpoint
+                if row.label_setpoint is not None
+                else (row.data.get("current_setpoint") if row.data else None)
+            )
             if last_sample_sp is None:
                 return False
 
@@ -259,7 +263,7 @@ class Inferencer2:
             return
         p = float(max(min(p, max_sp), min_sp))
         logger.info("Prediction raw (%.2f)", p)
-        #p = safe_round(round_half(p))
+        # p = safe_round(round_half(p))
         rounded_p = safe_round(p)
 
         # stability timer logic
