@@ -48,50 +48,87 @@ def analyze_feature_leakage(
     eps_identical: float = 1e-6,
     pearson_thr: float = 0.9,
     spearman_thr: float = 0.9,
-    mi_rel_thr: float = 5.0,
+    mi_rel_thr: float = 10.0,
+    mi_abs_thr: float = 0.02,
     frac_ident_thr: float = 0.8,
+    min_rows_for_stats: int = 30,
 ):
     """
-    Return (leak_report, suspicious_features).
-    leak_report is a list of dicts with diagnostics per feature.
-    suspicious_features is a set of feature names that crossed thresholds.
+    Robust leakage analysis. Returns (leak_report, suspicious_features).
+    - leak_report: list of dicts per feature with diagnostics
+    - suspicious_features: set(feature_names) flagged by heuristics
+
+    Notes:
+    - Skips constant/near-constant features.
+    - Uses robust MI scaling to avoid exploding mi_relative when median MI ~ 0.
+    - For small n (< min_rows_for_stats) returns advisory results; caller should avoid auto-masking.
     """
-    logger.info("Running leakage analysis on X.shape=%s y.shape=%s", X.shape, y.shape)
+    if X is None or y is None:
+        return [], set()
+
     n, f = X.shape
     results = []
     suspicious_features = set()
 
+    if n < 2:
+        logger.info("Too few rows for leakage analysis: n=%d", n)
+        return [], set()
+
+    # detect constant / near-constant columns
+    col_var = np.nanvar(X, axis=0)
+    const_mask = col_var <= 1e-12
+
+    # compute MI (catch failures)
     try:
         mi = mutual_info_regression(X, y, random_state=0)
     except Exception:
         logger.exception("mutual_info_regression failed; MI set to zeros")
         mi = np.zeros(f, dtype=float)
 
-    mi_median = float(np.median(mi)) if len(mi) else 0.0
-    mi_scale = max(mi_median, 1e-12)
+    # robust MI scale: use median of MI>0 or 75th percentile heuristic, avoid dividing by ~0
+    mi_nonzero = mi[mi > 0]
+    if mi_nonzero.size:
+        mi_median_nonzero = float(np.median(mi_nonzero))
+        mi_p75 = float(np.percentile(mi_nonzero, 75))
+        mi_scale = max(mi_median_nonzero, mi_p75 * 0.1, 1e-6)
+    else:
+        mi_scale = 1e-6
 
     for j, name in enumerate(feature_order):
         col = X[:, j]
         finite_mask = np.isfinite(col) & np.isfinite(y)
-        if finite_mask.sum() < 2:
-            r_pearson = None
-            r_spearman = None
-            frac_ident = 0.0
-        else:
-            try:
-                r_pearson = float(pearsonr(col[finite_mask], y[finite_mask])[0])
-            except Exception:
-                r_pearson = None
-            try:
-                r_spearman = float(
-                    spearmanr(col[finite_mask], y[finite_mask]).correlation
-                )
-            except Exception:
-                r_spearman = None
-            frac_ident = _fraction_identical(col, y, tol=eps_identical)
+        n_finite = int(np.count_nonzero(finite_mask))
 
+        if const_mask[j] or n_finite < 2:
+            # report minimal info; skip heavy stats
+            mi_val = float(mi[j]) if j < len(mi) else 0.0
+            mi_rel = mi_val / mi_scale
+            rec = {
+                "feature": name,
+                "pearson": None,
+                "spearman": None,
+                "mutual_info": mi_val,
+                "mi_relative": mi_rel,
+                "fraction_identical": 0.0,
+                "n_rows": n_finite,
+                "note": "constant_or_too_few",
+            }
+            results.append(rec)
+            continue
+
+        # compute correlations robustly
+        try:
+            r_pearson = float(pearsonr(col[finite_mask], y[finite_mask])[0])
+        except Exception:
+            r_pearson = None
+        try:
+            r_spearman = float(spearmanr(col[finite_mask], y[finite_mask]).correlation)
+        except Exception:
+            r_spearman = None
+
+        frac_ident = _fraction_identical(col, y, tol=eps_identical)
         mi_val = float(mi[j]) if j < len(mi) else 0.0
-        mi_rel = mi_val / mi_scale if mi_scale > 0 else 0.0
+        mi_rel = mi_val / mi_scale
 
         rec = {
             "feature": name,
@@ -100,27 +137,30 @@ def analyze_feature_leakage(
             "mutual_info": mi_val,
             "mi_relative": mi_rel,
             "fraction_identical": frac_ident,
-            "n_rows": int(finite_mask.sum()),
+            "n_rows": n_finite,
+            "note": None,
         }
         results.append(rec)
 
+        # suspicion heuristics: require multiple signals or very strong single signal
         reasons = []
         suspicious = False
+
         if r_pearson is not None and abs(r_pearson) >= pearson_thr:
-            suspicious = True
             reasons.append(f"pearson={r_pearson:.3f}")
+            suspicious = True
         if r_spearman is not None and abs(r_spearman) >= spearman_thr:
-            suspicious = True
             reasons.append(f"spearman={r_spearman:.3f}")
-        if mi_rel >= mi_rel_thr:
             suspicious = True
-            reasons.append(f"mi_rel={mi_rel:.1f}")
+        # require absolute MI to be meaningful before trusting mi_relative
+        if mi_val >= mi_abs_thr and mi_rel >= mi_rel_thr:
+            reasons.append(f"mi={mi_val:.3f} mi_rel={mi_rel:.1f}")
+            suspicious = True
         if frac_ident >= frac_ident_thr:
-            suspicious = True
             reasons.append(f"frac_ident={frac_ident:.2f}")
+            suspicious = True
 
         if suspicious:
-            suspicious_features.add(name)
             logger.warning(
                 "POTENTIAL LEAKAGE: feature=%s reasons=%s pearson=%s spearman=%s mi=%s mi_rel=%.2f frac_ident=%.3f n=%d",
                 name,
@@ -130,8 +170,14 @@ def analyze_feature_leakage(
                 mi_val,
                 mi_rel,
                 frac_ident,
-                int(finite_mask.sum()),
+                n_finite,
             )
+            suspicious_features.add(name)
+
+    if n < min_rows_for_stats:
+        logger.info(
+            "Leakage analysis ran on small sample n=%d; treat results as advisory", n
+        )
 
     return results, suspicious_features
 
@@ -187,8 +233,7 @@ def _assemble_matrix_delta(rows, feature_order):
 
             delta = label - current
 
-            # skip trivial deltas unless entry looks like an explicit override
-            # Setpoint rows won't have user_override; use a heuristic: if delta approximately zero, skip
+            # skip trivial deltas
             if abs(delta) < 1e-6:
                 logger.debug(
                     "Skipping setpoint row %s: trivial delta (label == baseline)",
@@ -344,59 +389,73 @@ class TrainerDelta:
             logger.info("TrainerDelta: no training data")
             return
 
+        n_total = len(y_delta)
+        n_labeled = len(used_rows)
+        self.opts["last_n_labeled"] = n_labeled
+
         # --- Leakage analysis (use local copies so we don't mutate global feature_order)
         leak_report = None
         suspicious = set()
+        training_feature_order = list(self.feature_order)
+        X_trainable = X
         try:
-            min_rows_for_leakage = int(self.opts.get("min_rows_for_leakage", 10))
-            if X.shape[0] >= min_rows_for_leakage:
+            min_rows = int(self.opts.get("min_rows_for_leakage", 30))
+            if X.shape[0] >= min_rows:
                 leak_report, suspicious = analyze_feature_leakage(
-                    X, y_delta, self.feature_order
+                    X,
+                    y_delta,
+                    self.feature_order,
+                    eps_identical=float(self.opts.get("eps_identical", 1e-6)),
+                    pearson_thr=float(self.opts.get("leakage_pearson_thr", 0.9)),
+                    spearman_thr=float(self.opts.get("leakage_spearman_thr", 0.9)),
+                    mi_rel_thr=float(self.opts.get("leakage_mi_rel_thr", 10.0)),
+                    mi_abs_thr=float(self.opts.get("leakage_mi_abs_thr", 0.02)),
+                    frac_ident_thr=float(self.opts.get("leakage_frac_ident_thr", 0.8)),
+                    min_rows_for_stats=min_rows,
                 )
-                # cautious automatic masking policy:
-                # only auto-mask if feature name contains "setpoint" OR fraction_identical > 0.9
-                if suspicious:
+                # optional automatic masking
+                if bool(self.opts.get("auto_mask_enabled", False)) and suspicious:
                     auto_mask = set()
                     for rec in leak_report:
                         name = rec["feature"]
                         if name in suspicious:
-                            if rec["fraction_identical"] >= float(
-                                self.opts.get("auto_mask_frac_ident_thr", 0.9)
+                            # strict auto-mask: fraction_ident high OR explicit name hint
+                            if rec.get("fraction_identical", 0.0) >= float(
+                                self.opts.get("auto_mask_frac_ident_thr", 0.95)
                             ):
                                 auto_mask.add(name)
-                            elif "setpoint" in name:
-                                # allow mask if name obviously references setpoint and correlation moderate
+                            elif "setpoint" in name and (
+                                (
+                                    rec.get("pearson") is not None
+                                    and abs(rec.get("pearson")) >= 0.85
+                                )
+                                or rec.get("fraction_identical", 0.0) >= 0.6
+                            ):
                                 auto_mask.add(name)
                     if auto_mask:
                         logger.info(
                             "Automatically masking suspicious features: %s", auto_mask
                         )
-                        local_feat_order = list(self.feature_order)
+                        local_feat_order = list(training_feature_order)
                         keep_idxs = [
                             i
                             for i, k in enumerate(local_feat_order)
                             if k not in auto_mask
                         ]
-                        X = X[:, keep_idxs]
-                        # store local feature order used for training in meta later
                         training_feature_order = [
                             k for k in local_feat_order if k not in auto_mask
                         ]
-                    else:
-                        training_feature_order = list(self.feature_order)
-                else:
-                    training_feature_order = list(self.feature_order)
+                        X_trainable = X[:, keep_idxs]
             else:
-                training_feature_order = list(self.feature_order)
+                logger.info(
+                    "Skipping leakage stats: only %d rows (min %d)",
+                    X.shape[0],
+                    min_rows,
+                )
         except Exception:
             logger.exception(
                 "Leakage analysis failed; continuing training without automatic masking"
             )
-            training_feature_order = list(self.feature_order)
-
-        n_total = len(y_delta)
-        n_labeled = len(used_rows)
-        self.opts["last_n_labeled"] = n_labeled
 
         # simple train/val split (temporal): last fraction is val
         val_frac = float(self.opts.get("val_fraction", 0.15))
@@ -406,7 +465,7 @@ class TrainerDelta:
                 "Too few labeled samples (%d); using all samples for training and skipping validation",
                 n_total,
             )
-            X_train, y_train = X, y_delta
+            X_train, y_train = X_trainable, y_delta
             X_val, y_val = None, None
         else:
             val_size = max(1, int(n_total * val_frac))
@@ -414,8 +473,8 @@ class TrainerDelta:
             train_idx = slice(0, n_total - val_size)
             val_idx = slice(n_total - val_size, n_total)
 
-            X_train, y_train = X[train_idx], y_delta[train_idx]
-            X_val, y_val = X[val_idx], y_delta[val_idx]
+            X_train, y_train = X_trainable[train_idx], y_delta[train_idx]
+            X_val, y_val = X_trainable[val_idx], y_delta[val_idx]
 
         logger.info(
             "TrainerDelta: train %d val %d (labeled=%d)",
@@ -474,7 +533,6 @@ class TrainerDelta:
         ms_min, ms_max = min(param_dist["min_samples_leaf"]), max(
             param_dist["min_samples_leaf"]
         )
-        sampled["training_feature_order"] = training_feature_order
         sampled["min_samples_leaf"] = randint(ms_min, ms_max + 1)
         sampled["max_features"] = param_dist.get("max_features", [1.0])
         sampled["validation_fraction"] = param_dist.get("validation_fraction", [0.1])
@@ -652,7 +710,7 @@ class TrainerDelta:
         # persist model + meta (include leak_report and training_feature_order)
         try:
             meta = {
-                "feature_order": self.feature_order,
+                "feature_order": training_feature_order,
                 "backend": "sklearn_histgb",
                 "trained_at": datetime.now(timezone.utc).isoformat(),
                 "mae": mae_abs,
