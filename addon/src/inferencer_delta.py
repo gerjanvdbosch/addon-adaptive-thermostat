@@ -188,7 +188,6 @@ class InferencerDelta:
             baseline_raw = featdict.get(
                 "observed_current_setpoint", featdict.get("current_setpoint")
             )
-            logger.info("Using baseline from feature dict: %r", baseline_raw)
 
         # fallback: try latest setpoint log row
         if baseline_raw is None:
@@ -204,11 +203,6 @@ class InferencerDelta:
                             if isinstance(sp_row.data, dict)
                             else None
                         )
-                    logger.info(
-                        "Using fallback baseline from setpoint row id=%d: %r",
-                        sp_row.id,
-                        baseline_raw,
-                    )
             except Exception:
                 logger.exception("Failed fetching fallback setpoint row for baseline")
 
