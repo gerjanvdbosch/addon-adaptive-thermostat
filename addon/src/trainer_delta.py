@@ -9,10 +9,8 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
-from sklearn.feature_selection import mutual_info_regression
 from sklearn.metrics import mean_absolute_error
 from scipy.stats import loguniform, randint
-from scipy.stats import pearsonr, spearmanr
 
 from db import fetch_training_setpoints
 from collector import FEATURE_ORDER
@@ -31,109 +29,6 @@ def _safe_float(v, default=None):
         return float(v)
     except Exception:
         return default
-
-
-def _fraction_identical(a: np.ndarray, b: np.ndarray, tol: float = 1e-6):
-    mask = np.isfinite(a) & np.isfinite(b)
-    if mask.sum() == 0:
-        return 0.0
-    return float(np.count_nonzero(np.abs(a[mask] - b[mask]) <= tol)) / float(mask.sum())
-
-
-def analyze_feature_leakage(
-    X: np.ndarray,
-    y: np.ndarray,
-    feature_order: list,
-    *,
-    eps_identical: float = 1e-6,
-    pearson_thr: float = 0.9,
-    spearman_thr: float = 0.9,
-    mi_rel_thr: float = 5.0,
-    frac_ident_thr: float = 0.8,
-):
-    """
-    Return (leak_report, suspicious_features).
-    leak_report is a list of dicts with diagnostics per feature.
-    suspicious_features is a set of feature names that crossed thresholds.
-    """
-    logger.info("Running leakage analysis on X.shape=%s y.shape=%s", X.shape, y.shape)
-    n, f = X.shape
-    results = []
-    suspicious_features = set()
-
-    try:
-        mi = mutual_info_regression(X, y, random_state=0)
-    except Exception:
-        logger.exception("mutual_info_regression failed; MI set to zeros")
-        mi = np.zeros(f, dtype=float)
-
-    mi_median = float(np.median(mi)) if len(mi) else 0.0
-    mi_scale = max(mi_median, 1e-12)
-
-    for j, name in enumerate(feature_order):
-        col = X[:, j]
-        finite_mask = np.isfinite(col) & np.isfinite(y)
-        if finite_mask.sum() < 2:
-            r_pearson = None
-            r_spearman = None
-            frac_ident = 0.0
-        else:
-            try:
-                r_pearson = float(pearsonr(col[finite_mask], y[finite_mask])[0])
-            except Exception:
-                r_pearson = None
-            try:
-                r_spearman = float(
-                    spearmanr(col[finite_mask], y[finite_mask]).correlation
-                )
-            except Exception:
-                r_spearman = None
-            frac_ident = _fraction_identical(col, y, tol=eps_identical)
-
-        mi_val = float(mi[j]) if j < len(mi) else 0.0
-        mi_rel = mi_val / mi_scale if mi_scale > 0 else 0.0
-
-        rec = {
-            "feature": name,
-            "pearson": r_pearson,
-            "spearman": r_spearman,
-            "mutual_info": mi_val,
-            "mi_relative": mi_rel,
-            "fraction_identical": frac_ident,
-            "n_rows": int(finite_mask.sum()),
-        }
-        results.append(rec)
-
-        reasons = []
-        suspicious = False
-        if r_pearson is not None and abs(r_pearson) >= pearson_thr:
-            suspicious = True
-            reasons.append(f"pearson={r_pearson:.3f}")
-        if r_spearman is not None and abs(r_spearman) >= spearman_thr:
-            suspicious = True
-            reasons.append(f"spearman={r_spearman:.3f}")
-        if mi_rel >= mi_rel_thr:
-            suspicious = True
-            reasons.append(f"mi_rel={mi_rel:.1f}")
-        if frac_ident >= frac_ident_thr:
-            suspicious = True
-            reasons.append(f"frac_ident={frac_ident:.2f}")
-
-        if suspicious:
-            suspicious_features.add(name)
-            logger.warning(
-                "POTENTIAL LEAKAGE: feature=%s reasons=%s pearson=%s spearman=%s mi=%s mi_rel=%.2f frac_ident=%.3f n=%d",
-                name,
-                ",".join(reasons),
-                r_pearson,
-                r_spearman,
-                mi_val,
-                mi_rel,
-                frac_ident,
-                int(finite_mask.sum()),
-            )
-
-    return results, suspicious_features
 
 
 def _assemble_matrix_delta(rows, feature_order):
@@ -344,56 +239,6 @@ class TrainerDelta:
             logger.info("TrainerDelta: no training data")
             return
 
-        # --- Leakage analysis (use local copies so we don't mutate global feature_order)
-        leak_report = None
-        suspicious = set()
-        try:
-            min_rows_for_leakage = int(self.opts.get("min_rows_for_leakage", 10))
-            if X.shape[0] >= min_rows_for_leakage:
-                leak_report, suspicious = analyze_feature_leakage(
-                    X, y_delta, self.feature_order
-                )
-                # cautious automatic masking policy:
-                # only auto-mask if feature name contains "setpoint" OR fraction_identical > 0.9
-                if suspicious:
-                    auto_mask = set()
-                    for rec in leak_report:
-                        name = rec["feature"]
-                        if name in suspicious:
-                            if rec["fraction_identical"] >= float(
-                                self.opts.get("auto_mask_frac_ident_thr", 0.9)
-                            ):
-                                auto_mask.add(name)
-                            elif "setpoint" in name:
-                                # allow mask if name obviously references setpoint and correlation moderate
-                                auto_mask.add(name)
-                    if auto_mask:
-                        logger.info(
-                            "Automatically masking suspicious features: %s", auto_mask
-                        )
-                        local_feat_order = list(self.feature_order)
-                        keep_idxs = [
-                            i
-                            for i, k in enumerate(local_feat_order)
-                            if k not in auto_mask
-                        ]
-                        X = X[:, keep_idxs]
-                        # store local feature order used for training in meta later
-                        training_feature_order = [
-                            k for k in local_feat_order if k not in auto_mask
-                        ]
-                    else:
-                        training_feature_order = list(self.feature_order)
-                else:
-                    training_feature_order = list(self.feature_order)
-            else:
-                training_feature_order = list(self.feature_order)
-        except Exception:
-            logger.exception(
-                "Leakage analysis failed; continuing training without automatic masking"
-            )
-            training_feature_order = list(self.feature_order)
-
         n_total = len(y_delta)
         n_labeled = len(used_rows)
         self.opts["last_n_labeled"] = n_labeled
@@ -474,7 +319,6 @@ class TrainerDelta:
         ms_min, ms_max = min(param_dist["min_samples_leaf"]), max(
             param_dist["min_samples_leaf"]
         )
-        sampled["training_feature_order"] = training_feature_order
         sampled["min_samples_leaf"] = randint(ms_min, ms_max + 1)
         sampled["max_features"] = param_dist.get("max_features", [1.0])
         sampled["validation_fraction"] = param_dist.get("validation_fraction", [0.1])
@@ -649,7 +493,7 @@ class TrainerDelta:
             str(chosen_params),
         )
 
-        # persist model + meta (include leak_report and training_feature_order)
+        # persist model + meta
         try:
             meta = {
                 "feature_order": self.feature_order,
@@ -664,7 +508,6 @@ class TrainerDelta:
                 "random_state": self.random_state,
                 "runtime_seconds": runtime,
                 "target": "delta",
-                "leak_report": leak_report,
             }
             if self.model_path and os.path.exists(self.model_path):
                 try:
