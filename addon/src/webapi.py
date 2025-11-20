@@ -503,7 +503,7 @@ def _extract_model_info(payload: dict) -> Dict[str, Any]:
     return info
 
 
-@app.get("/model/full2", response_model=Dict[str, Any])
+@app.get("/model/full", response_model=Dict[str, Any])
 def get_full_model_fullmeta():
     """
     Return everything in payload['meta'] (if present) plus derived model info and file diagnostics.
