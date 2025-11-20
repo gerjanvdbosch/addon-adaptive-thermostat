@@ -19,3 +19,15 @@ Key Features
 *   **Inference engines:** Inferencer (full-model) and InferencerDelta (delta-model) with baseline reconstruction, masked vectors and per-sample persistence.
 *   **Explainability & metrics:** saved model.meta includes feature\_order, trained\_at, mae/val\_mae, n\_samples, chosen\_params, runtime\_seconds, top\_features (native/SHAP/permutation) and file diagnostics.
 *   **Operational defaults & opts:** configurable buffer\_days, min\_train\_size, val\_fraction, stable\_seconds, cooldown\_seconds, min\_change\_threshold, auto-mask controls and promotion/refit/promotion guards.
+
+
+Installation
+------------
+
+Use the following URL to add this repository:
+
+```txt
+https://github.com/gerjanvdbosch/addon-adaptive-thermostat
+```
+
+[![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgerjanvdbosch%2Faddon-adaptive-thermostat)
