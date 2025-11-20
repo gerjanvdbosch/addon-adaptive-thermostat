@@ -553,7 +553,7 @@ def get_full_model_fullmeta():
     return _to_builtin_type(response)
 
 
-@app.get("/model/full_delta", response_model=Dict[str, Any])
+@app.get("/model/delta", response_model=Dict[str, Any])
 def get_full_model_full_delta_meta():
     """
     Return everything in payload['meta'] (if present) plus derived model info and file diagnostics.

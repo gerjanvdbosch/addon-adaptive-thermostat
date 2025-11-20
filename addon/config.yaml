@@ -1,5 +1,5 @@
 name: "Adaptive Thermostat"
-version: "0.1"
+version: "0.2"
 slug: "adaptive_thermostat"
 description: "A scikit-learn based adaptive thermostat addon for Home Assistant"
 arch:
