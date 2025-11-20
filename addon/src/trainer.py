@@ -11,12 +11,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
 from sklearn.inspection import permutation_importance
-from sklearn.feature_selection import mutual_info_regression
-from scipy.stats import loguniform, randint
-from scipy.stats import pearsonr, spearmanr
-
 from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
 from collector import FEATURE_ORDER
+from scipy.stats import loguniform, randint
 
 logger = logging.getLogger(__name__)
 
@@ -25,154 +22,6 @@ def _atomic_dump(obj, path: str):
     tmp = f"{path}.tmp"
     joblib.dump(obj, tmp)
     os.replace(tmp, path)
-
-
-def _fraction_identical(a: np.ndarray, b: np.ndarray, tol: float = 1e-6):
-    mask = np.isfinite(a) & np.isfinite(b)
-    if mask.sum() == 0:
-        return 0.0
-    return float(np.count_nonzero(np.abs(a[mask] - b[mask]) <= tol)) / float(mask.sum())
-
-
-def analyze_feature_leakage(
-    X: np.ndarray,
-    y: np.ndarray,
-    feature_order: list,
-    *,
-    eps_identical: float = 1e-6,
-    pearson_thr: float = 0.9,
-    spearman_thr: float = 0.9,
-    mi_rel_thr: float = 10.0,
-    mi_abs_thr: float = 0.02,
-    frac_ident_thr: float = 0.8,
-    min_rows_for_stats: int = 30,
-):
-    """
-    Robust leakage analysis. Returns (leak_report, suspicious_features).
-    - leak_report: list of dicts per feature with diagnostics
-    - suspicious_features: set(feature_names) flagged by heuristics
-
-    Notes:
-    - Skips constant/near-constant features.
-    - Uses robust MI scaling to avoid exploding mi_relative when median MI ~ 0.
-    - For small n (< min_rows_for_stats) returns advisory results; caller should avoid auto-masking.
-    """
-    if X is None or y is None:
-        return [], set()
-
-    n, f = X.shape
-    results = []
-    suspicious_features = set()
-
-    if n < 2:
-        logger.debug("Too few rows for leakage analysis: n=%d", n)
-        return [], set()
-
-    # detect constant / near-constant columns
-    col_var = np.nanvar(X, axis=0)
-    const_mask = col_var <= 1e-12
-
-    # compute MI (catch failures)
-    try:
-        mi = mutual_info_regression(X, y, random_state=0)
-    except Exception:
-        logger.exception("mutual_info_regression failed; MI set to zeros")
-        mi = np.zeros(f, dtype=float)
-
-    # robust MI scale: use median of MI>0 or 75th percentile heuristic, avoid dividing by ~0
-    mi_nonzero = mi[mi > 0]
-    if mi_nonzero.size:
-        mi_median_nonzero = float(np.median(mi_nonzero))
-        mi_p75 = float(np.percentile(mi_nonzero, 75))
-        mi_scale = max(mi_median_nonzero, mi_p75 * 0.1, 1e-6)
-    else:
-        mi_scale = 1e-6
-
-    for j, name in enumerate(feature_order):
-        col = X[:, j]
-        finite_mask = np.isfinite(col) & np.isfinite(y)
-        n_finite = int(np.count_nonzero(finite_mask))
-
-        if const_mask[j] or n_finite < 2:
-            mi_val = float(mi[j]) if j < len(mi) else 0.0
-            mi_rel = mi_val / mi_scale
-            rec = {
-                "feature": name,
-                "pearson": None,
-                "spearman": None,
-                "mutual_info": mi_val,
-                "mi_relative": mi_rel,
-                "fraction_identical": 0.0,
-                "n_rows": n_finite,
-                "note": "constant_or_too_few",
-            }
-            results.append(rec)
-            continue
-
-        # compute correlations robustly
-        try:
-            r_pearson = float(pearsonr(col[finite_mask], y[finite_mask])[0])
-        except Exception:
-            r_pearson = None
-        try:
-            r_spearman = float(spearmanr(col[finite_mask], y[finite_mask]).correlation)
-        except Exception:
-            r_spearman = None
-
-        frac_ident = _fraction_identical(col, y, tol=eps_identical)
-        mi_val = float(mi[j]) if j < len(mi) else 0.0
-        mi_rel = mi_val / mi_scale
-
-        rec = {
-            "feature": name,
-            "pearson": r_pearson,
-            "spearman": r_spearman,
-            "mutual_info": mi_val,
-            "mi_relative": mi_rel,
-            "fraction_identical": frac_ident,
-            "n_rows": n_finite,
-            "note": None,
-        }
-        results.append(rec)
-
-        # suspicion heuristics: require multiple signals or very strong single signal
-        reasons = []
-        suspicious = False
-
-        if r_pearson is not None and abs(r_pearson) >= pearson_thr:
-            reasons.append(f"pearson={r_pearson:.3f}")
-            suspicious = True
-        if r_spearman is not None and abs(r_spearman) >= spearman_thr:
-            reasons.append(f"spearman={r_spearman:.3f}")
-            suspicious = True
-        # require absolute MI to be meaningful before trusting mi_relative
-        if mi_val >= mi_abs_thr and mi_rel >= mi_rel_thr:
-            reasons.append(f"mi={mi_val:.3f} mi_rel={mi_rel:.1f}")
-            suspicious = True
-        if frac_ident >= frac_ident_thr:
-            reasons.append(f"frac_ident={frac_ident:.2f}")
-            suspicious = True
-
-        if suspicious:
-            logger.warning(
-                "POTENTIAL LEAKAGE: feature=%s reasons=%s pearson=%s spearman=%s mi=%s mi_rel=%.2f frac_ident=%.3f n=%d",
-                name,
-                ",".join(reasons),
-                r_pearson,
-                r_spearman,
-                mi_val,
-                mi_rel,
-                frac_ident,
-                n_finite,
-            )
-            suspicious_features.add(name)
-
-    if n < min_rows_for_stats:
-        logger.info(
-            "Leakage analysis ran on small sample n=%d; treat results as advisory", n
-        )
-
-    return results, suspicious_features
 
 
 def _assemble_matrix(rows, feature_order):
@@ -223,30 +72,6 @@ def _assemble_matrix(rows, feature_order):
     return np.array(X, dtype=float), np.array(y, dtype=float), used_rows
 
 
-def _clean_train_arrays(Xa: np.ndarray, ya: np.ndarray):
-    Xa = np.asarray(Xa, dtype=float)
-    ya = np.asarray(ya, dtype=float)
-
-    if Xa.ndim != 2:
-        raise ValueError(f"X must be 2D array, got ndim={Xa.ndim}")
-    if ya.ndim != 1:
-        raise ValueError(f"y must be 1D array, got ndim={ya.ndim}")
-    if Xa.shape[0] != ya.shape[0]:
-        raise ValueError(f"Row count mismatch X ({Xa.shape[0]}) vs y ({ya.shape[0]})")
-
-    finite_mask = np.isfinite(ya) & np.all(np.isfinite(Xa), axis=1)
-    dropped = np.count_nonzero(~finite_mask)
-    if dropped:
-        logger.warning("Dropping %d non-finite training rows", int(dropped))
-
-    if not np.any(finite_mask):
-        raise ValueError("No finite training rows after cleaning")
-
-    Xa_clean = Xa[finite_mask]
-    ya_clean = ya[finite_mask]
-    return Xa_clean, ya_clean
-
-
 class Trainer:
     """
     Production-ready sklearn ML trainer using HistGradientBoostingRegressor.
@@ -275,9 +100,6 @@ class Trainer:
       - require_user_override: True (if set true, only rows with user_override are considered labeled)
       - min_val_size: 30
       - min_train_for_search: 10
-      - min_rows_for_leakage: 30
-      - auto_mask_enabled: False
-      - auto_mask_frac_ident_thr: 0.95
     """
 
     def __init__(self, ha_client, opts: dict):
@@ -524,68 +346,6 @@ class Trainer:
         # keep last seen labeled count for search estimator decision
         self.opts["last_n_labeled"] = n_labeled
 
-        # --- Leakage analysis integration (early, before train/val split)
-        leak_report = None
-        suspicious = set()
-        training_feature_order = list(self.feature_order)
-        X_trainable = X
-        try:
-            min_rows = int(self.opts.get("min_rows_for_leakage", 30))
-            if X.shape[0] >= min_rows:
-                leak_report, suspicious = analyze_feature_leakage(
-                    X,
-                    y,
-                    self.feature_order,
-                    eps_identical=float(self.opts.get("eps_identical", 1e-6)),
-                    pearson_thr=float(self.opts.get("leakage_pearson_thr", 0.9)),
-                    spearman_thr=float(self.opts.get("leakage_spearman_thr", 0.9)),
-                    mi_rel_thr=float(self.opts.get("leakage_mi_rel_thr", 10.0)),
-                    mi_abs_thr=float(self.opts.get("leakage_mi_abs_thr", 0.02)),
-                    frac_ident_thr=float(self.opts.get("leakage_frac_ident_thr", 0.8)),
-                    min_rows_for_stats=min_rows,
-                )
-                if bool(self.opts.get("auto_mask_enabled", False)) and suspicious:
-                    auto_mask = set()
-                    for rec in leak_report:
-                        name = rec["feature"]
-                        if name in suspicious:
-                            if rec.get("fraction_identical", 0.0) >= float(
-                                self.opts.get("auto_mask_frac_ident_thr", 0.95)
-                            ):
-                                auto_mask.add(name)
-                            elif "setpoint" in name and (
-                                (
-                                    rec.get("pearson") is not None
-                                    and abs(rec.get("pearson")) >= 0.85
-                                )
-                                or rec.get("fraction_identical", 0.0) >= 0.6
-                            ):
-                                auto_mask.add(name)
-                    if auto_mask:
-                        logger.info(
-                            "Automatically masking suspicious features: %s", auto_mask
-                        )
-                        local_feat_order = list(training_feature_order)
-                        keep_idxs = [
-                            i
-                            for i, k in enumerate(local_feat_order)
-                            if k not in auto_mask
-                        ]
-                        training_feature_order = [
-                            k for k in local_feat_order if k not in auto_mask
-                        ]
-                        X_trainable = X[:, keep_idxs]
-            else:
-                logger.info(
-                    "Skipping leakage stats: only %d rows (min %d)",
-                    X.shape[0],
-                    min_rows,
-                )
-        except Exception:
-            logger.exception(
-                "Leakage analysis failed; continuing training without automatic masking"
-            )
-
         min_search_labels = int(self.opts.get("min_search_labels", 50))
         n_iter_compact = int(self.opts.get("n_iter_compact", 20))
         n_iter_extended = int(self.opts.get("n_iter_extended", 100))
@@ -648,8 +408,8 @@ class Trainer:
         train_idx = slice(0, n_total - val_size)
         val_idx = slice(n_total - val_size, n_total)
 
-        X_train, y_train = X_trainable[train_idx], y[train_idx]
-        X_val, y_val = X_trainable[val_idx], y[val_idx]
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[val_idx], y[val_idx]
         sw_train = sample_weight[train_idx] if sample_weight is not None else None
 
         logger.info(
@@ -1213,7 +973,6 @@ class Trainer:
             "top_features": [[name, float(imp)] for name, imp in top_feats],
             "feature_importance_reliable": bool(importance_reliable),
             "file": file_info,
-            "leak_report": leak_report,
         }
 
         # persist model and meta
