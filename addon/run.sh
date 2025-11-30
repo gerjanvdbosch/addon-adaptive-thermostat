@@ -17,10 +17,6 @@ if bashio::config.true 'shadow_mode'; then
   export SHADOW_MODE=1
 fi
 
-if bashio::config.true 'use_unlabeled'; then
-  export USE_UNLABELED=1
-fi
-
 export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
 export SHADOW_SETPOINT="$(bashio::config 'shadow_setpoint')"
 export INFERENCER_INTERVAL_SECONDS="$(bashio::config 'inferencer_interval_seconds')"
@@ -31,10 +27,7 @@ export MIN_SETPOINT="$(bashio::config 'min_setpoint')"
 export MAX_SETPOINT="$(bashio::config 'max_setpoint')"
 export MIN_CHANGE_THRESHOLD="$(bashio::config 'min_change_threshold')"
 export STABLE_SECONDS="$(bashio::config 'stable_seconds')"
-export BUFFER_DAYS="$(bashio::config 'buffer_days')"       
-export PSEUDO_LIMIT="$(bashio::config 'pseudo_limit')"
-export WEIGHT_LABEL="$(bashio::config 'weight_label')"
-export WEIGHT_PSEUDO="$(bashio::config 'weight_pseudo')"
+export BUFFER_DAYS="$(bashio::config 'buffer_days')"
 export LOG_LEVEL="$(bashio::config 'log_level')"
 export SENSORS="$(bashio::config 'sensors' || echo '{}')"
 

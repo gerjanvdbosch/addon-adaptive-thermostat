@@ -22,11 +22,7 @@ options:
   min_setpoint: 15.0
   max_setpoint: 25.0
   min_change_threshold: 0.4
-  buffer_days: 30
-  use_unlabeled: true
-  pseudo_limit: 1000
-  weight_label: 1.0
-  weight_pseudo: 0.25
+  buffer_days: 1000
   log_level: info
   sensors:
     temp_change: sensor.woonkamer_temperatuur_verandering
@@ -56,10 +52,6 @@ schema:
   max_setpoint: "float?"
   min_change_threshold: "float?"
   buffer_days: "int?"
-  use_unlabeled: "bool?"
-  pseudo_limit: "int?"
-  weight_label: "float?"
-  weight_pseudo: "float?"
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
   sensors:
     temp_change: "str?"
