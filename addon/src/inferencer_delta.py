@@ -19,8 +19,13 @@ logger = logging.getLogger(__name__)
 class InferencerDelta:
     """
     Inferencer for models trained on delta (predicted_delta).
-    It masks current_setpoint in the feature-vector during predict so the model cannot trivially copy it.
-    It reconstructs predicted_setpoint = baseline_current_setpoint + pred_delta and applies checks.
+
+    Target Calculation:
+      predicted_setpoint = baseline_current_setpoint + pred_delta
+
+    Features:
+      We do NOT mask current_setpoint. The model needs the current state
+      to determine if an adjustment (positive or negative delta) is needed.
     """
 
     def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
@@ -31,11 +36,19 @@ class InferencerDelta:
             "model_path", "/config/models/full_model_delta.joblib"
         )
         self.model_payload = None
+
+        # State tracking for inference (debounce/cooldown)
         self.last_pred_ts = None
         self.last_pred_value = None
         self.last_pred_model = None
         self.last_eval_value = None
         self.last_eval_ts = None
+
+        # State tracking for 'implied satisfaction' (learning delta=0)
+        # We track these in memory for reliability and speed
+        self.stable_candidate_sp = None  # The setpoint currently being monitored
+        self.stable_start_ts = None  # When this setpoint became active/stable
+
         self.load_model()
 
     def load_model(self):
@@ -64,6 +77,7 @@ class InferencerDelta:
 
     def check_and_label_user_override(self):
         """
+        STRATEGY 1: Explicit User Override.
         If the user manually changed the setpoint (via HA), add a labeled sample with user_override=True.
         Record the pre-override baseline on the Setpoint row using observed_current.
         """
@@ -103,13 +117,16 @@ class InferencerDelta:
                 else None
             )
 
+            # If current matches DB log, no change happened
             if current_rounded == last_sample_rounded:
                 return False
+
+            # If current matches what WE predicted, it's not a user override
             if last_pred_rounded is not None and current_rounded == last_pred_rounded:
-                # user matched our last prediction -> not a human override
                 return False
 
             # Persist setpoint log and ensure observed_current_setpoint is saved on the Setpoint row
+            # This creates a training sample: Baseline=last_sample_sp, Target=current_rounded
             try:
                 update_setpoint(
                     last_row.id,
@@ -129,13 +146,101 @@ class InferencerDelta:
             logger.exception("Error detecting user override")
             return False
 
-    def _fetch_current_vector_masked(
-        self,
-    ):
+    def check_and_label_stability(self):
+        """
+        STRATEGY 3: Implied Satisfaction (In-Memory Tracker).
+        If the setpoint remains unchanged for 'stability_hours' AND the temperature is reached,
+        we assume the user is satisfied. We label the current moment as delta=0.
+
+        This balances the dataset so the model learns that "doing nothing" is also a valid action.
+        """
+        try:
+            # 1. Configuration
+            # Default to 6.0 hours to avoid making the model too lazy with too many '0' samples.
+            stability_hours = float(self.opts.get("stability_hours", 6.0))
+            temp_threshold = float(self.opts.get("stability_temp_threshold", 0.3))
+
+            # 2. Fetch current status
+            unl = fetch_unlabeled_setpoints(limit=1)
+            if not unl:
+                return False
+            current_row = unl[0]
+
+            feat = current_row.data
+            if not feat:
+                return False
+
+            curr_sp = safe_float(feat.get("current_setpoint"))
+            curr_temp = safe_float(feat.get("current_temperature"))
+
+            if curr_sp is None or curr_temp is None:
+                return False
+
+            curr_sp_rounded = safe_round(curr_sp)
+            now = datetime.now()
+
+            # 3. Logic Check
+
+            # RESET CONDITION 1: Setpoint changed since we last checked
+            if (self.stable_candidate_sp is None) or (
+                safe_round(self.stable_candidate_sp) != curr_sp_rounded
+            ):
+                self.stable_candidate_sp = curr_sp
+                self.stable_start_ts = now
+                logger.debug(
+                    "Stability tracker started/reset for setpoint %.1f", curr_sp
+                )
+                return False
+
+            # RESET CONDITION 2: Temperature is not yet reached (or overshot)
+            # If room is 18C and setpoint is 20C, the system is working, not stable.
+            if abs(curr_temp - curr_sp) > temp_threshold:
+                # Reset timer; we only count stability starting from when the target temp is reached
+                self.stable_start_ts = now
+                return False
+
+            # 4. Duration Check
+            duration = (now - self.stable_start_ts).total_seconds()
+            required_seconds = stability_hours * 3600
+
+            if duration < required_seconds:
+                # Not stable long enough yet
+                return False
+
+            # 5. Success: Stable for > X hours
+            try:
+                update_setpoint(
+                    current_row.id,
+                    setpoint=curr_sp,  # Target = Current
+                    observed_current=curr_sp,  # Baseline = Current (Result: Delta 0)
+                )
+                logger.info(
+                    "Detected stability (In-Memory): Setpoint %.1f stable for %.1f hours. Labeled as delta=0.",
+                    curr_sp,
+                    (duration / 3600.0),
+                )
+
+                # IMPORTANT: Reset timer after logging to avoid spamming '0' samples every cycle.
+                # It must be stable for another full period before logging again.
+                self.stable_start_ts = now
+
+                return True
+            except Exception:
+                logger.exception("Failed updating stability log")
+                return False
+
+        except Exception:
+            logger.exception("Error in stability check")
+            # In case of error, reset state to be safe
+            self.stable_candidate_sp = None
+            return False
+
+    def _fetch_current_vector_masked(self):
         """
         Fetch latest unlabelled sample and build feature vector.
-        Mask the current_setpoint feature (set to 0.0) so model cannot trivially echo it.
-        Return both vector and original featdict (unchanged) so we can reconstruct baseline.
+
+        NOTE: For the Delta model, we do NOT mask 'current_setpoint'.
+        The model relies on the current setpoint to calculate the relative change (delta).
         """
         try:
             unl = fetch_unlabeled_setpoints(limit=1)
@@ -161,15 +266,20 @@ class InferencerDelta:
                         vec.append(0.0)
             return vec, feat
         except Exception:
-            logger.exception("Failed fetching current vector (masked)")
+            logger.exception("Failed fetching current vector")
             return None, None
 
     def inference_job(self):
         try:
+            # 1. Check for User Override (High Priority)
             if self.check_and_label_user_override():
                 return
+
+            # 2. Check for Stability / Implied Satisfaction
+            if self.check_and_label_stability():
+                return
         except Exception:
-            logger.exception("Error in override check; continuing")
+            logger.exception("Error in checks; continuing")
 
         self.load_model()
         if self.model_payload is None:
@@ -182,14 +292,14 @@ class InferencerDelta:
             return
         X = np.array([Xvec], dtype=float)
 
-        # prefer baseline from featdict
+        # Prefer baseline from featdict (captured at collection time)
         baseline_raw = None
         if featdict:
             baseline_raw = featdict.get(
                 "observed_current_setpoint", featdict.get("current_setpoint")
             )
 
-        # fallback: try latest setpoint log row
+        # Fallback: try latest setpoint log row from DB
         if baseline_raw is None:
             try:
                 rows = fetch_setpoints(1)
@@ -206,6 +316,7 @@ class InferencerDelta:
             except Exception:
                 logger.exception("Failed fetching fallback setpoint row for baseline")
 
+        # Convert baseline to float
         baseline = None
         try:
             if baseline_raw is not None:
@@ -221,19 +332,21 @@ class InferencerDelta:
             )
             return
 
+        # Inference Parameters
         min_sp = float(self.opts.get("min_setpoint", 5.0))
         max_sp = float(self.opts.get("max_setpoint", 30.0))
         threshold = float(self.opts.get("min_change_threshold", 0.25))
         stable_seconds = float(self.opts.get("stable_seconds", 600))
         shadow_mode = self.opts.get("shadow_mode")
 
-        # debug
+        # Debug info
         logger.debug(
             "DEBUG: featdict keys = %s", sorted(featdict.keys()) if featdict else None
         )
         logger.debug("DEBUG: Xvec = %s", Xvec)
         logger.debug("DEBUG: model type = %s", type(self.model_payload.get("model")))
 
+        # Predict
         try:
             model = self.model_payload.get("model")
             pred_raw = model.predict(X)
@@ -251,6 +364,7 @@ class InferencerDelta:
             logger.exception("Prediction failed")
             return
 
+        # Validation
         if not np.isfinite(p):
             logger.debug("Invalid prediction")
             return
@@ -262,7 +376,8 @@ class InferencerDelta:
         rounded_p = safe_round(p)
         return
 
-        # stability timer
+        # Stability Timer (prevent flip-flopping)
+        # This is distinct from check_and_label_stability (which is for training)
         now = datetime.now()
         if (
             self.last_eval_value is None
@@ -280,7 +395,7 @@ class InferencerDelta:
             )
             return
 
-        # threshold and cooldown
+        # Change Threshold (ignore micro-adjustments)
         if not shadow_mode and abs(p - float(baseline)) < threshold:
             logger.info(
                 "Prediction (%.2f), change %.3f < threshold %.3f; skipping",
@@ -289,12 +404,14 @@ class InferencerDelta:
                 threshold,
             )
             return
+
+        # Cooldown Check
         cooldown = float(self.opts.get("cooldown_seconds", 3600))
         if self.last_pred_ts and (now - self.last_pred_ts).total_seconds() < cooldown:
             logger.info("Cooldown active; skipping predicted setpoint %.2f", p)
             return
 
-        # apply setpoint in HA
+        # Apply Setpoint to HA
         try:
             self.ha.set_setpoint(p)
             self.last_pred_ts = now

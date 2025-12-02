@@ -84,12 +84,12 @@ def _assemble_matrix_delta(rows, feature_order):
 
             # skip trivial deltas unless entry looks like an explicit override
             # Setpoint rows won't have user_override; use a heuristic: if delta approximately zero, skip
-            if abs(delta) < 1e-6:
-                logger.debug(
-                    "Skipping setpoint row %s: trivial delta (label == baseline)",
-                    getattr(r, "id", None),
-                )
-                continue
+            #             if abs(delta) < 1e-6:
+            #                 logger.debug(
+            #                     "Skipping setpoint row %s: trivial delta (label == baseline)",
+            #                     getattr(r, "id", None),
+            #                 )
+            #                 continue
 
             vec = []
             for k in feature_order:
