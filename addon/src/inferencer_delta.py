@@ -148,9 +148,9 @@ class InferencerDelta:
             vec = []
             for k in FEATURE_ORDER:
                 v = feat.get(k)
-                if k == "current_setpoint":
-                    vec.append(0.0)
-                    continue
+                #                 if k == "current_setpoint":
+                #                     vec.append(0.0)
+                #                     continue
                 if v is None:
                     vec.append(0.0)
                 else:
