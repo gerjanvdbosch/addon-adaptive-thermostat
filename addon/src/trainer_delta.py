@@ -94,9 +94,9 @@ def _assemble_matrix_delta(rows, feature_order):
             vec = []
             for k in feature_order:
                 # Mask current_setpoint during training to prevent echo learning
-                if k == "current_setpoint":
-                    vec.append(0.0)
-                    continue
+                #                 if k == "current_setpoint":
+                #                     vec.append(0.0)
+                #                     continue
                 v = feat.get(k) if feat is not None else None
                 if v is None:
                     vec.append(0.0)
