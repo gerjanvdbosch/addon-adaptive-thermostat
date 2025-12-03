@@ -18,6 +18,8 @@ def load_options():
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
         "cooldown_seconds": int(os.getenv("COOLDOWN_SECONDS", 3600)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
+        "stability_hours": float(os.getenv("STABILITY_HOURS", 6.0)),
+        "stability_temp_threshold": float(os.getenv("STABILITY_TEMP_THRESHOLD", 0.3)),
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
         "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),
         "min_change_threshold": float(os.getenv("MIN_CHANGE_THRESHOLD", 0.3)),
