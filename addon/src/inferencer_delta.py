@@ -187,7 +187,7 @@ class InferencerDelta:
             ):
                 self.stable_candidate_sp = curr_sp
                 self.stable_start_ts = now
-                logger.debug(
+                logger.info(
                     "Stability tracker started/reset for setpoint %.1f", curr_sp
                 )
                 return False
