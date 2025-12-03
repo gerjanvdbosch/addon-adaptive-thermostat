@@ -336,10 +336,10 @@ class InferencerDelta:
             )
             p = float(baseline) + pred_delta
             logger.info(
-                "DEBUG: predicted_delta=%.2f reconstructed_setpoint=%.2f raw=%s",
+                "Predicted delta=%.2f, reconstructed_setpoint=%.2f, current_setpoint=%.2f",
                 pred_delta,
                 p,
-                pred_raw,
+                baseline,
             )
         except Exception:
             logger.exception("Prediction failed")
