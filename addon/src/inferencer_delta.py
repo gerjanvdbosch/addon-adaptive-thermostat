@@ -335,7 +335,7 @@ class InferencerDelta:
                 float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
             )
             p = float(baseline) + pred_delta
-            logger.info(
+            logger.debug(
                 "Predicted delta=%.2f, reconstructed_setpoint=%.2f, current_setpoint=%.2f",
                 pred_delta,
                 p,
