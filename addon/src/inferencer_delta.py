@@ -196,6 +196,12 @@ class InferencerDelta:
             # If room is 18C and setpoint is 20C, the system is working, not stable.
             if abs(curr_temp - curr_sp) > temp_threshold:
                 # Reset timer; we only count stability starting from when the target temp is reached
+                logger.info(
+                    "Stability tracker paused for setpoint %.1f; temp %.1f not within threshold %.2f",
+                    curr_sp,
+                    curr_temp,
+                    temp_threshold,
+                )
                 self.stable_start_ts = now
                 return False
 
@@ -205,6 +211,12 @@ class InferencerDelta:
 
             if duration < required_seconds:
                 # Not stable long enough yet
+                logger.info(
+                    "Stability tracker waiting: setpoint %.1f stable for %.1f/%.1f hours",
+                    curr_sp,
+                    (duration / 3600.0),
+                    stability_hours,
+                )
                 return False
 
             # 5. Success: Stable for > X hours
@@ -253,9 +265,6 @@ class InferencerDelta:
             vec = []
             for k in FEATURE_ORDER:
                 v = feat.get(k)
-                #                 if k == "current_setpoint":
-                #                     vec.append(0.0)
-                #                     continue
                 if v is None:
                     vec.append(0.0)
                 else:
@@ -283,54 +292,33 @@ class InferencerDelta:
 
         self.load_model()
         if self.model_payload is None:
-            logger.debug("No model loaded for inference")
+            logger.warning("No model loaded for inference")
             return
 
         Xvec, featdict = self._fetch_current_vector_masked()
-        if Xvec is None:
-            logger.debug("No features available for inference")
+        if Xvec is None or featdict is None:
+            logger.warning("No features available for inference")
             return
         X = np.array([Xvec], dtype=float)
 
-        # Prefer baseline from featdict (captured at collection time)
-        baseline_raw = None
-        if featdict:
-            baseline_raw = featdict.get(
-                "observed_current_setpoint", featdict.get("current_setpoint")
-            )
+        feature_sp = safe_float(featdict.get("current_setpoint"))
+        current_sp, *_ = self.ha.get_setpoint()
 
-        # Fallback: try latest setpoint log row from DB
-        if baseline_raw is None:
-            try:
-                rows = fetch_setpoints(1)
-                if rows:
-                    sp_row = rows[0]
-                    if getattr(sp_row, "observed_current_setpoint", None) is not None:
-                        baseline_raw = getattr(sp_row, "observed_current_setpoint")
-                    else:
-                        baseline_raw = (
-                            sp_row.data.get("current_setpoint")
-                            if isinstance(sp_row.data, dict)
-                            else None
-                        )
-            except Exception:
-                logger.exception("Failed fetching fallback setpoint row for baseline")
-
-        # Convert baseline to float
-        baseline = None
-        try:
-            if baseline_raw is not None:
-                baseline = safe_float(baseline_raw)
-        except Exception:
-            logger.exception("safe_float failed on baseline_raw=%r", baseline_raw)
-            baseline = None
-
-        if baseline is None:
+        if current_sp is None:
             logger.warning(
-                "No usable baseline found (baseline_raw=%r); skipping inference",
-                baseline_raw,
+                "Failed to read current setpoint from HA; skipping inference"
             )
             return
+
+        if feature_sp is not None and abs(current_sp - feature_sp) > 0.1:
+            logger.warning(
+                "Mismatch! current setpoint (%.2f) != database (%.2f); skipping inference",
+                current_sp,
+                feature_sp,
+            )
+            return
+
+        baseline = current_sp
 
         # Inference Parameters
         min_sp = float(self.opts.get("min_setpoint", 5.0))
@@ -338,13 +326,6 @@ class InferencerDelta:
         threshold = float(self.opts.get("min_change_threshold", 0.25))
         stable_seconds = float(self.opts.get("stable_seconds", 600))
         shadow_mode = self.opts.get("shadow_mode")
-
-        # Debug info
-        logger.debug(
-            "DEBUG: featdict keys = %s", sorted(featdict.keys()) if featdict else None
-        )
-        logger.debug("DEBUG: Xvec = %s", Xvec)
-        logger.debug("DEBUG: model type = %s", type(self.model_payload.get("model")))
 
         # Predict
         try:
@@ -354,7 +335,7 @@ class InferencerDelta:
                 float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
             )
             p = float(baseline) + pred_delta
-            logger.debug(
+            logger.info(
                 "DEBUG: predicted_delta=%.2f reconstructed_setpoint=%.2f raw=%s",
                 pred_delta,
                 p,
