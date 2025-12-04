@@ -157,7 +157,7 @@ class InferencerDelta:
         try:
             # 1. Configuration
             # Default to 6.0 hours to avoid making the model too lazy with too many '0' samples.
-            stability_hours = float(self.opts.get("stability_hours", 6.0))
+            stability_hours = float(self.opts.get("stability_hours", 4.0))
             temp_threshold = float(self.opts.get("stability_temp_threshold", 0.3))
 
             # 2. Fetch current status
@@ -171,7 +171,7 @@ class InferencerDelta:
                 return False
 
             curr_sp = safe_float(feat.get("current_setpoint"))
-            curr_temp = safe_float(feat.get("current_temperature"))
+            curr_temp = safe_float(feat.get("current_temp"))
 
             if curr_sp is None or curr_temp is None:
                 return False
@@ -227,7 +227,7 @@ class InferencerDelta:
                     observed_current=curr_sp,  # Baseline = Current (Result: Delta 0)
                 )
                 logger.info(
-                    "Detected stability (In-Memory): Setpoint %.1f stable for %.1f hours. Labeled as delta=0.",
+                    "Detected stability: Setpoint %.1f stable for %.1f hours. Labeled as delta=0.",
                     curr_sp,
                     (duration / 3600.0),
                 )
