@@ -23,7 +23,6 @@ export INFERENCER_INTERVAL_SECONDS="$(bashio::config 'inferencer_interval_second
 export SAMPLE_INTERVAL_SECONDS="$(bashio::config 'sample_interval_seconds')"
 export COOLDOWN_SECONDS="$(bashio::config 'cooldown_seconds')"
 export STABILITY_HOURS="$(bashio::config 'stability_hours')"
-export STABILITY_TEMP_THRESHOLD="$(bashio::config 'stability_temp_threshold')"
 export FULL_RETRAIN_TIME="$(bashio::config 'full_retrain_time')"
 export MIN_SETPOINT="$(bashio::config 'min_setpoint')"
 export MAX_SETPOINT="$(bashio::config 'max_setpoint')"

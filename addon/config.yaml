@@ -18,8 +18,7 @@ options:
   sample_interval_seconds: 600
   stable_seconds: 1800
   cooldown_seconds: 3600
-  stability_hours: 4
-  stability_temp_threshold: 0.3
+  stability_hours: 6
   full_retrain_time: "03:00"
   min_setpoint: 15.0
   max_setpoint: 25.0
@@ -50,7 +49,6 @@ schema:
   stable_seconds: "int?"
   cooldown_seconds: "int?"
   stability_hours: "int?"
-  stability_temp_threshold: "float?"
   full_retrain_time: "str?"
   min_setpoint: "float?"
   max_setpoint: "float?"

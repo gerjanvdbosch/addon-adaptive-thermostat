@@ -157,8 +157,7 @@ class InferencerDelta:
         try:
             # 1. Configuration
             # Default to 6.0 hours to avoid making the model too lazy with too many '0' samples.
-            stability_hours = float(self.opts.get("stability_hours", 4.0))
-            temp_threshold = float(self.opts.get("stability_temp_threshold", 0.3))
+            stability_hours = float(self.opts.get("stability_hours", 6.0))
 
             # 2. Fetch current status
             unl = fetch_unlabeled_setpoints(limit=1)
@@ -192,15 +191,15 @@ class InferencerDelta:
                 )
                 return False
 
-            # RESET CONDITION 2: Temperature is not yet reached (or overshot)
-            # If room is 18C and setpoint is 20C, the system is working, not stable.
-            if abs(curr_temp - curr_sp) > temp_threshold:
-                # Reset timer; we only count stability starting from when the target temp is reached
+            # RESET CONDITION 2: Temperature & Activity Check
+            # Logic:
+            # - If Temp >= Setpoint: Stable (Target reached).
+            # - If Temp < Setpoint: NOT Stable (System is working on it, user is waiting).
+            if curr_temp < curr_sp:
                 logger.info(
-                    "Stability tracker paused for setpoint %.1f; temp %.1f not within threshold %.2f",
-                    curr_sp,
+                    "Stability tracker paused: temp %.1f is too low for setpoint %.1f",
                     curr_temp,
-                    temp_threshold,
+                    curr_sp,
                 )
                 self.stable_start_ts = now
                 return False
