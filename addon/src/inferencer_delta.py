@@ -354,7 +354,6 @@ class InferencerDelta:
         p = float(max(min(p, max_sp), min_sp))
         logger.info("Prediction raw delta (%.2f)", p)
         rounded_p = safe_round(p)
-        return
 
         # Stability Timer (prevent flip-flopping)
         # This is distinct from check_and_label_stability (which is for training)
