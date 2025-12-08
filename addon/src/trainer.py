@@ -973,6 +973,7 @@ class Trainer:
             "top_features": [[name, float(imp)] for name, imp in top_feats],
             "feature_importance_reliable": bool(importance_reliable),
             "file": file_info,
+            "opts": self.opts,
         }
 
         # persist model and meta
