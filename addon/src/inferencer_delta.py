@@ -100,7 +100,7 @@ class InferencerDelta:
             # Check 1: Klopt de waarde met wat de AI wilde?
             value_match = (
                 self.last_ai_prediction is not None
-                and safe_round(self.last_ai_prediction) == curr_sp_rounded
+                and self.last_ai_prediction == curr_sp_rounded
             )
 
             # Check 2: Was de AI actie recent genoeg?
@@ -127,14 +127,13 @@ class InferencerDelta:
                 )
 
                 # Opslaan: Input=Features(met prev_sp), Target=curr_sp
-                if prev_sp is not None and curr_sp_rounded is not None:
-                    try:
-                        insert_setpoint(
-                            features, setpoint=curr_sp_rounded, observed_current=prev_sp
-                        )
-                        logger.info("Saved labeled training sample (User Override).")
-                    except Exception:
-                        logger.exception("DB Save failed")
+                try:
+                    insert_setpoint(
+                        features, setpoint=curr_sp_rounded, observed_current=prev_sp
+                    )
+                    logger.info("Saved labeled training sample (User Override).")
+                except Exception:
+                    logger.exception("DB Save failed")
 
             # Update state en reset stability timer
             self.last_known_setpoint = curr_sp_rounded
@@ -166,7 +165,7 @@ class InferencerDelta:
                 duration = (ts - self.stability_start_ts).total_seconds()
                 hours_required = float(self.opts.get("stability_hours", 8.0))
 
-                if curr_sp_rounded is not None and duration > (hours_required * 3600):
+                if duration > (hours_required * 3600):
                     logger.info(
                         f"Stability detected ({duration/3600:.1f}h). User implies satisfaction."
                     )
@@ -222,11 +221,12 @@ class InferencerDelta:
                 self.ha.set_setpoint(new_target)
 
                 # State updaten voor volgende run (zodat we het niet als user override zien)
-                self.last_ai_prediction = new_target
+
                 if shadow_mode:
-                    self.last_known_setpoint = curr_sp_rounded
+                    self.last_ai_prediction = curr_sp_rounded
                 else:
-                    self.last_known_setpoint = safe_round(new_target)
+                    self.last_ai_prediction = safe_round(new_target)
+                self.last_known_setpoint = safe_round(new_target)
                 self.last_ai_action_ts = ts  # Timestamp updaten
                 self.stability_start_ts = None
 
