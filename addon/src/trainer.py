@@ -11,7 +11,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
 from sklearn.inspection import permutation_importance
-from db import fetch_training_data, fetch_unlabeled, update_sample_prediction
+from db import (
+    fetch_training_data,
+    fetch_unlabeled,
+    update_sample_prediction,
+    remove_unlabeled_samples,
+)
 from collector import FEATURE_ORDER
 from scipy.stats import loguniform, randint
 
@@ -335,6 +340,8 @@ class Trainer:
             logger.exception("Failed computing per-household drift")
 
     def train_job(self, force: bool = False):
+        remove_unlabeled_samples(days=1)
+
         start_time = time.time()
         X, y, used_rows, sample_weight, pseudo_count = self._fetch_data()
         if X is None:

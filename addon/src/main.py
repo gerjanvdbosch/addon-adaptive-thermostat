@@ -58,10 +58,10 @@ def main():
         inferencer.inference_job,
         "interval",
         seconds=opts["inferencer_interval_seconds"],
-        id="inference2",
+        id="inference",
     )
     scheduler.add_job(
-        inferencer_delta.inference_job,
+        inferencer_delta.run_cycle,
         "interval",
         seconds=opts["inferencer_interval_seconds"],
         id="inference_delta",

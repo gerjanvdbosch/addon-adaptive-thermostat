@@ -1,15 +1,12 @@
 import os
 import logging
 import joblib
-import numpy as np
 from datetime import datetime
 
 from db import (
-    fetch_unlabeled_setpoints,
-    update_setpoint,
-    fetch_setpoints,
+    insert_setpoint,
 )
-from collector import FEATURE_ORDER, Collector
+from collector import Collector
 from ha_client import HAClient
 from utils import safe_round, safe_float
 
@@ -17,385 +14,216 @@ logger = logging.getLogger(__name__)
 
 
 class InferencerDelta:
-    """
-    Inferencer for models trained on delta (predicted_delta).
-
-    Target Calculation:
-      predicted_setpoint = baseline_current_setpoint + pred_delta
-
-    Features:
-      We do NOT mask current_setpoint. The model needs the current state
-      to determine if an adjustment (positive or negative delta) is needed.
-    """
-
-    def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
+    def __init__(self, ha_client: HAClient, opts: dict):
         self.ha = ha_client
-        self.collector = collector
         self.opts = opts or {}
+        self.collector = Collector(ha_client, self.opts)
+
         self.model_path = self.opts.get(
             "model_path", "/config/models/full_model_delta.joblib"
         )
-        self.model_payload = None
+        self.model = None
 
-        # State tracking for inference (debounce/cooldown)
-        self.last_pred_ts = None
-        self.last_pred_value = None
-        self.last_pred_model = None
-        self.last_eval_value = None
-        self.last_eval_ts = None
+        # State Tracking
+        self.last_known_setpoint = None  # De 'waarheid' volgens ons geheugen
+        self.last_ai_prediction = None  # Wat wij de vorige keer hebben ingesteld
+        self.last_ai_action_ts = None  # Timestamp van laatste AI actie
+        self.stability_start_ts = None  # Timer voor stabiliteit
+        self.last_run_ts = None
 
-        # State tracking for 'implied satisfaction' (learning delta=0)
-        # We track these in memory for reliability and speed
-        self.stable_candidate_sp = None  # The setpoint currently being monitored
-        self.stable_start_ts = None  # When this setpoint became active/stable
+        self._load_model()
+        self._init_state()
 
-        self.load_model()
+    def _init_state(self):
+        """Initialiseer de state zodat we niet meteen crashen of false positives krijgen."""
+        sp, _, _ = self.ha.get_setpoint()
+        if sp is not None:
+            self.last_known_setpoint = safe_round(sp)
+        logger.info(
+            f"Initialized state. Last known setpoint: {self.last_known_setpoint}"
+        )
 
-    def load_model(self):
-        self.model_payload = None
-        path = self.model_path
-        if not path or not os.path.exists(path):
-            logger.debug("No model found at %s", path)
+    def _load_model(self):
+        if not os.path.exists(self.model_path):
+            logger.warning("No model found at %s", self.model_path)
             return
         try:
-            payload = joblib.load(path)
+            payload = joblib.load(self.model_path)
+            self.model = payload.get("model")
+            logger.info("Model loaded successfully.")
         except Exception:
-            logger.exception("Failed loading model file %s", path)
-            return
-        meta = payload.get("meta", {}) if isinstance(payload, dict) else {}
-        if meta.get("feature_order") and meta.get("feature_order") != FEATURE_ORDER:
-            logger.warning("Model feature_order mismatch; ignoring model at %s", path)
-            return
-        if meta.get("target") and meta.get("target") != "delta":
-            logger.warning("Model target != delta; ignoring model at %s", path)
-            return
-        if "model" not in payload or payload["model"] is None:
-            logger.warning("Model payload missing model; ignoring %s", path)
-            return
-        self.model_payload = payload
-        logger.info("Loaded model from %s (mae=%s)", path, meta.get("mae"))
+            logger.exception("Failed loading model")
 
-    def check_and_label_user_override(self):
+    def run_cycle(self):
         """
-        STRATEGY 1: Explicit User Override.
-        If the user manually changed the setpoint (via HA), add a labeled sample with user_override=True.
-        Record the pre-override baseline on the Setpoint row using observed_current.
+        Draait elke X minuten.
+        Flow:
+        1. Lees sensoren.
+        2. Is Setpoint anders dan in geheugen?
+           JA -> Was het de AI?
+                 JA -> Update geheugen, klaar.
+                 NEE -> User Override! Sla sample op (Oude SP -> Nieuwe SP).
+           NEE -> Check Stabiliteit.
+                 Is het al lang stabiel? -> Sla sample op (Delta 0).
+                 Zo niet -> Draai AI predictie -> Pas aan indien nodig.
         """
+        ts = datetime.now()
+
+        # Cooldown ophalen uit config (default 1 uur)
+        cooldown_seconds = float(self.opts.get("cooldown_seconds", 3600))
+
+        if self.last_run_ts and (ts - self.last_run_ts).total_seconds() < 5:
+            return
+        self.last_run_ts = ts
+
+        # 1. Lees ruwe data
         try:
-            now = datetime.now()
-            interval = float(self.opts.get("sample_interval_seconds", 300))
-            if (
-                self.last_pred_ts
-                and (now - self.last_pred_ts).total_seconds() < interval
-            ):
-                return False
+            raw_data = self.collector.read_sensors()
+        except Exception:
+            logger.exception("Sensor read failed")
+            return
 
-            rows = fetch_setpoints(limit=1)
-            if not rows:
-                return False
-            last_row = rows[0]
+        curr_sp = safe_float(raw_data.get("current_setpoint"))
+        curr_temp = safe_float(raw_data.get("current_temp"))
 
-            current_sp, *_ = self.ha.get_setpoint()
+        if curr_sp is None:
+            return
+
+        curr_sp_rounded = safe_round(curr_sp)
+
+        # --- FASE 2: VERANDERING DETECTIE ---
+        if (
+            self.last_known_setpoint is not None
+            and curr_sp_rounded != self.last_known_setpoint
+        ):
+
+            # Check 1: Klopt de waarde met wat de AI wilde?
+            value_match = (
+                self.last_ai_prediction is not None
+                and safe_round(self.last_ai_prediction) == curr_sp_rounded
+            )
+
+            # Check 2: Was de AI actie recent genoeg?
+            # We gebruiken cooldown_seconds als 'geldigheidsduur' van het eigenaarschap.
+            is_recent = False
+            if self.last_ai_action_ts is not None:
+                delta_t = (ts - self.last_ai_action_ts).total_seconds()
+                if delta_t < cooldown_seconds:
+                    is_recent = True
+
+            is_ai_work = value_match and is_recent
+
+            if is_ai_work:
+                logger.info(f"Confirmed AI setpoint update to {curr_sp_rounded}")
+            else:
+                # USER OVERRIDE!
+                prev_sp = self.last_known_setpoint
+                logger.info(f"User Override Detected: {prev_sp} -> {curr_sp_rounded}")
+
+                # We genereren features met de OUDE setpoint.
+                # Want de gebruiker voelde zich oncomfortabel bij de OUDE situatie.
+                features = self.collector.features_from_raw(
+                    raw_data, timestamp=ts, override_setpoint=prev_sp
+                )
+
+                # Opslaan: Input=Features(met prev_sp), Target=curr_sp
+                try:
+                    insert_setpoint(
+                        features, setpoint=curr_sp_rounded, observed_current=prev_sp
+                    )
+                    logger.info("Saved labeled training sample (User Override).")
+                except Exception:
+                    logger.exception("DB Save failed")
+
+            # Update state en reset stability timer
+            self.last_known_setpoint = curr_sp_rounded
+            self.stability_start_ts = None
+
+            # Geen nieuwe predictie direct na een verandering
+            return
+
+        # Init case voor als script net start
+        if self.last_known_setpoint is None:
+            self.last_known_setpoint = curr_sp_rounded
+
+        # --- FASE 3: STABILITEIT CHECK ---
+        # Als we hier zijn, is setpoint == last_known_setpoint (niets veranderd)
+
+        # We maken features met de HUIDIGE setpoint
+        features = self.collector.features_from_raw(raw_data, timestamp=ts)
+
+        is_stable_temp = (
+            curr_temp is not None
+            and curr_sp is not None
+            and abs(curr_temp - curr_sp) < 0.5
+        )
+
+        if is_stable_temp:
+            if self.stability_start_ts is None:
+                self.stability_start_ts = ts
+            else:
+                duration = (ts - self.stability_start_ts).total_seconds()
+                hours_required = float(self.opts.get("stability_hours", 8.0))
+
+                if duration > (hours_required * 3600):
+                    logger.info(
+                        f"Stability detected ({duration/3600:.1f}h). User implies satisfaction."
+                    )
+                    try:
+                        # Opslaan als delta=0 (Target == Current)
+                        insert_setpoint(
+                            features,
+                            setpoint=curr_sp_rounded,
+                            observed_current=curr_sp_rounded,
+                        )
+                        # Timer resetten om spam te voorkomen (e.g. pas over nog eens 8 uur weer loggen)
+                        self.stability_start_ts = ts
+                    except Exception:
+                        logger.exception("Stability log failed")
+        else:
+            # Als temperatuur afwijkt, resetten we de timer (systeem is nog bezig)
+            self.stability_start_ts = None
+
+        # --- FASE 4: AI INFERENCE ---
+        if not self.model:
+            return
+
+        # Cooldown check voor NIEUWE acties
+        if self.last_ai_action_ts is not None:
+            time_since_last = (ts - self.last_ai_action_ts).total_seconds()
+            if time_since_last < cooldown_seconds:
+                # We loggen dit niet als warning, maar als info/debug om spam te voorkomen
+                # of we returnen gewoon stilzwijgend.
+                return
+
+        try:
+            # Feature vector maken
+            X = self.collector.features_to_vector(features)
+
+            # Predictie (Delta)
+            pred_delta = float(self.model.predict(X)[0])
+            new_target = curr_sp + pred_delta
+
+            # Limits & Thresholds
             min_sp = float(self.opts.get("min_setpoint", 15.0))
             max_sp = float(self.opts.get("max_setpoint", 25.0))
-            if not (min_sp <= current_sp <= max_sp):
-                return False
+            new_target = max(min(new_target, max_sp), min_sp)
 
-            last_sample_sp = (
-                last_row.setpoint
-                if safe_float(last_row.setpoint) is not None
-                else (last_row.data.get("current_setpoint") if last_row.data else None)
-            )
-            if last_sample_sp is None:
-                return False
+            threshold = float(self.opts.get("min_change_threshold", 0.5))
 
-            current_rounded = safe_round(current_sp)
-            last_sample_rounded = safe_round(last_sample_sp)
-            last_pred_rounded = (
-                safe_round(self.last_pred_value)
-                if self.last_pred_value is not None
-                else None
-            )
-
-            # If current matches DB log, no change happened
-            if current_rounded == last_sample_rounded:
-                return False
-
-            # If current matches what WE predicted, it's not a user override
-            if last_pred_rounded is not None and current_rounded == last_pred_rounded:
-                return False
-
-            # Persist setpoint log and ensure observed_current_setpoint is saved on the Setpoint row
-            # This creates a training sample: Baseline=last_sample_sp, Target=current_rounded
-            try:
-                update_setpoint(
-                    last_row.id,
-                    setpoint=current_rounded,
-                    observed_current=last_sample_sp,
-                )
-            except Exception:
-                logger.exception("Failed updating setpoint log")
-
-            logger.info(
-                "Detected user override: inserted labeled sample %.1f (was %.1f)",
-                current_rounded,
-                last_sample_rounded,
-            )
-            return True
-        except Exception:
-            logger.exception("Error detecting user override")
-            return False
-
-    def check_and_label_stability(self):
-        """
-        STRATEGY 3: Implied Satisfaction (In-Memory Tracker).
-        If the setpoint remains unchanged for 'stability_hours' AND the temperature is reached,
-        we assume the user is satisfied. We label the current moment as delta=0.
-
-        This balances the dataset so the model learns that "doing nothing" is also a valid action.
-        """
-        try:
-            # 1. Configuration
-            # Default to 6.0 hours to avoid making the model too lazy with too many '0' samples.
-            stability_hours = float(self.opts.get("stability_hours", 6.0))
-
-            # 2. Fetch current status
-            unl = fetch_unlabeled_setpoints(limit=1)
-            if not unl:
-                return False
-            current_row = unl[0]
-
-            feat = current_row.data
-            if not feat:
-                return False
-
-            curr_sp = safe_float(feat.get("current_setpoint"))
-            curr_temp = safe_float(feat.get("current_temp"))
-
-            if curr_sp is None or curr_temp is None:
-                return False
-
-            curr_sp_rounded = safe_round(curr_sp)
-            now = datetime.now()
-
-            # 3. Logic Check
-
-            # RESET CONDITION 1: Setpoint changed since we last checked
-            if (self.stable_candidate_sp is None) or (
-                safe_round(self.stable_candidate_sp) != curr_sp_rounded
-            ):
-                self.stable_candidate_sp = curr_sp
-                self.stable_start_ts = now
+            if abs(new_target - curr_sp) >= threshold:
                 logger.info(
-                    "Stability tracker started/reset for setpoint %.1f", curr_sp
-                )
-                return False
-
-            # RESET CONDITION 2: Temperature & Activity Check
-            # Logic:
-            # - If Temp >= Setpoint: Stable (Target reached).
-            # - If Temp < Setpoint: NOT Stable (System is working on it, user is waiting).
-            if curr_temp < curr_sp:
-                logger.info(
-                    "Stability tracker paused: temp %.1f is too low for setpoint %.1f",
-                    curr_temp,
-                    curr_sp,
-                )
-                self.stable_start_ts = now
-                return False
-
-            # 4. Duration Check
-            duration = (now - self.stable_start_ts).total_seconds()
-            required_seconds = stability_hours * 3600
-
-            if duration < required_seconds:
-                # Not stable long enough yet
-                logger.info(
-                    "Stability tracker waiting: setpoint %.1f stable for %.1f/%.1f hours",
-                    curr_sp,
-                    (duration / 3600.0),
-                    stability_hours,
-                )
-                return False
-
-            # 5. Success: Stable for > X hours
-            try:
-                update_setpoint(
-                    current_row.id,
-                    setpoint=curr_sp,  # Target = Current
-                    observed_current=curr_sp,  # Baseline = Current (Result: Delta 0)
-                )
-                logger.info(
-                    "Detected stability: Setpoint %.1f stable for %.1f hours. Labeled as delta=0.",
-                    curr_sp,
-                    (duration / 3600.0),
+                    f"AI suggests change: {curr_sp} -> {new_target:.2f} (Delta {pred_delta:.2f})"
                 )
 
-                # IMPORTANT: Reset timer after logging to avoid spamming '0' samples every cycle.
-                # It must be stable for another full period before logging again.
-                self.stable_start_ts = now
+                # Uitvoeren
+                self.ha.set_setpoint(new_target)
 
-                return True
-            except Exception:
-                logger.exception("Failed updating stability log")
-                return False
+                # State updaten voor volgende run (zodat we het niet als user override zien)
+                self.last_ai_prediction = new_target
+                self.last_known_setpoint = safe_round(new_target)
+                self.last_ai_action_ts = ts  # Timestamp updaten
+                self.stability_start_ts = None
 
         except Exception:
-            logger.exception("Error in stability check")
-            # In case of error, reset state to be safe
-            self.stable_candidate_sp = None
-            return False
-
-    def _fetch_current_vector_masked(self):
-        """
-        Fetch latest unlabelled sample and build feature vector.
-
-        NOTE: For the Delta model, we do NOT mask 'current_setpoint'.
-        The model relies on the current setpoint to calculate the relative change (delta).
-        """
-        try:
-            unl = fetch_unlabeled_setpoints(limit=1)
-            if not unl:
-                return None, None
-            last = unl[0]
-            feat = last.data if last.data and isinstance(last.data, dict) else None
-            if not feat:
-                return None, None
-            vec = []
-            for k in FEATURE_ORDER:
-                v = feat.get(k)
-                if v is None:
-                    vec.append(0.0)
-                else:
-                    try:
-                        vec.append(float(v))
-                    except Exception:
-                        logger.debug("Coercing non-numeric feature %s to 0.0", k)
-                        vec.append(0.0)
-            return vec, feat
-        except Exception:
-            logger.exception("Failed fetching current vector")
-            return None, None
-
-    def inference_job(self):
-        try:
-            # 1. Check for User Override (High Priority)
-            if self.check_and_label_user_override():
-                return
-
-            # 2. Check for Stability / Implied Satisfaction
-            if self.check_and_label_stability():
-                return
-        except Exception:
-            logger.exception("Error in checks; continuing")
-
-        self.load_model()
-        if self.model_payload is None:
-            logger.warning("No model loaded for inference")
-            return
-
-        Xvec, featdict = self._fetch_current_vector_masked()
-        if Xvec is None or featdict is None:
-            logger.warning("No features available for inference")
-            return
-        X = np.array([Xvec], dtype=float)
-
-        feature_sp = safe_float(featdict.get("current_setpoint"))
-        current_sp, *_ = self.ha.get_setpoint()
-
-        if current_sp is None:
-            logger.warning(
-                "Failed to read current setpoint from HA; skipping inference"
-            )
-            return
-
-        if feature_sp is not None and abs(current_sp - feature_sp) > 0.1:
-            logger.warning(
-                "Mismatch! current setpoint (%.2f) != database (%.2f); skipping inference",
-                current_sp,
-                feature_sp,
-            )
-            return
-
-        baseline = current_sp
-
-        # Inference Parameters
-        min_sp = float(self.opts.get("min_setpoint", 5.0))
-        max_sp = float(self.opts.get("max_setpoint", 30.0))
-        threshold = float(self.opts.get("min_change_threshold", 0.25))
-        stable_seconds = float(self.opts.get("stable_seconds", 600))
-        shadow_mode = self.opts.get("shadow_mode")
-
-        # Predict
-        try:
-            model = self.model_payload.get("model")
-            pred_raw = model.predict(X)
-            pred_delta = (
-                float(pred_raw[0]) if hasattr(pred_raw, "__len__") else float(pred_raw)
-            )
-            p = float(baseline) + pred_delta
-            logger.debug(
-                "Predicted delta=%.2f, reconstructed_setpoint=%.2f, current_setpoint=%.2f",
-                pred_delta,
-                p,
-                baseline,
-            )
-        except Exception:
-            logger.exception("Prediction failed")
-            return
-
-        # Validation
-        if not np.isfinite(p):
-            logger.debug("Invalid prediction")
-            return
-        if p < min_sp or p > max_sp:
-            logger.warning("Predicted setpoint outside plausible range: %.3f", p)
-            return
-        p = float(max(min(p, max_sp), min_sp))
-        logger.info("Prediction raw delta (%.2f)", p)
-        rounded_p = safe_round(p)
-
-        # Stability Timer (prevent flip-flopping)
-        # This is distinct from check_and_label_stability (which is for training)
-        now = datetime.now()
-        if (
-            self.last_eval_value is None
-            or safe_round(self.last_eval_value) != rounded_p
-        ):
-            self.last_eval_value = p
-            self.last_eval_ts = now
-            logger.info("Starting stability timer for predicted value %.2f", p)
-            return
-        if (now - self.last_eval_ts).total_seconds() < stable_seconds:
-            logger.info(
-                "Prediction %.2f not yet stable; waiting (%.0fs remaining)",
-                p,
-                stable_seconds - (now - self.last_eval_ts).total_seconds(),
-            )
-            return
-
-        # Change Threshold (ignore micro-adjustments)
-        if not shadow_mode and abs(p - float(baseline)) < threshold:
-            logger.info(
-                "Prediction (%.2f), change %.3f < threshold %.3f; skipping",
-                p,
-                abs(p - float(baseline)),
-                threshold,
-            )
-            return
-
-        # Cooldown Check
-        cooldown = float(self.opts.get("cooldown_seconds", 3600))
-        if self.last_pred_ts and (now - self.last_pred_ts).total_seconds() < cooldown:
-            logger.info("Cooldown active; skipping predicted setpoint %.2f", p)
-            return
-
-        # Apply Setpoint to HA
-        try:
-            self.ha.set_setpoint(p)
-            self.last_pred_ts = now
-            self.last_pred_value = p
-            self.last_pred_model = self.model_path
-            logger.info("Applied predicted setpoint %.2f (baseline %.2f)", p, baseline)
-        except Exception:
-            logger.exception("Failed to apply setpoint via HA client")
+            logger.exception("Inference failed")

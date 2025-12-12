@@ -153,6 +153,16 @@ class Collector:
             logger.exception("Unexpected error while reading sensors")
             return None
 
+    def features_to_vector(self, features: dict):
+        """Converts feature dict to list in correct order for model."""
+        vec = []
+        for k in FEATURE_ORDER:
+            val = safe_float(features.get(k, 0.0))
+            if val is None:
+                val = 0.0
+            vec.append(val)
+        return [vec]  # Return as 2D array [1, n_features]
+
     def sample_and_store(self):
         ts = datetime.now()
         try:

@@ -216,3 +216,30 @@ def update_sample_prediction(
             s.commit()
     finally:
         s.close()
+
+
+def remove_unlabeled_samples(days: int = 30):
+    s: SASession = Session()
+    try:
+        cutoff = datetime.now() - timedelta(days=days)
+        s.query(Sample).filter(
+            Sample.timestamp < cutoff,
+            Sample.label_setpoint.is_(None),
+        ).delete()
+        s.commit()
+    finally:
+        s.close()
+
+
+def remove_unlabeled_setpoints(days: int = 30):
+    s: SASession = Session()
+    try:
+        cutoff = datetime.now() - timedelta(days=days)
+        s.query(Setpoint).filter(
+            Setpoint.timestamp < cutoff,
+            Setpoint.observed_current_setpoint.is_(None),
+            Setpoint.setpoint.is_(None),
+        ).delete()
+        s.commit()
+    finally:
+        s.close()

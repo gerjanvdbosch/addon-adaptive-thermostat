@@ -12,7 +12,7 @@ from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
 from scipy.stats import loguniform, randint
 
-from db import fetch_training_setpoints
+from db import fetch_training_setpoints, remove_unlabeled_setpoints
 from collector import FEATURE_ORDER
 
 logger = logging.getLogger(__name__)
@@ -233,6 +233,8 @@ class TrainerDelta:
         return compact, extended
 
     def train_job(self, force: bool = False):
+        remove_unlabeled_setpoints(days=1)
+
         start = time.time()
         X, y_delta, used_rows, _ = self._fetch_data()
         if X is None:
