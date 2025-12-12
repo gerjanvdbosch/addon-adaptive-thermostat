@@ -73,6 +73,7 @@ class InferencerDelta:
         cooldown_seconds = float(self.opts.get("cooldown_seconds", 3600))
 
         if self.last_run_ts and (ts - self.last_run_ts).total_seconds() < 5:
+            logger.info("Cycle ran too recently, skipping.")
             return
         self.last_run_ts = ts
 
@@ -87,6 +88,7 @@ class InferencerDelta:
         curr_temp = safe_float(raw_data.get("current_temp"))
 
         if curr_sp is None:
+            logger.info("Current setpoint is None, skipping cycle.")
             return
 
         curr_sp_rounded = safe_round(curr_sp)
@@ -153,9 +155,7 @@ class InferencerDelta:
         features = self.collector.features_from_raw(raw_data, timestamp=ts)
 
         is_stable_temp = (
-            curr_temp is not None
-            and curr_sp is not None
-            and abs(curr_temp - curr_sp) < 0.5
+            curr_temp is not None and curr_sp is not None and curr_temp >= curr_sp
         )
 
         if is_stable_temp:
@@ -180,6 +180,10 @@ class InferencerDelta:
                         self.stability_start_ts = ts
                     except Exception:
                         logger.exception("Stability log failed")
+                else:
+                    logger.debug(
+                        f"Stable temp detected, but duration {duration/3600:.1f}h < {hours_required:.1f}h required."
+                    )
         else:
             # Als temperatuur afwijkt, resetten we de timer (systeem is nog bezig)
             self.stability_start_ts = None
@@ -194,6 +198,9 @@ class InferencerDelta:
             if time_since_last < cooldown_seconds:
                 # We loggen dit niet als warning, maar als info/debug om spam te voorkomen
                 # of we returnen gewoon stilzwijgend.
+                logger.info(
+                    f"Cooldown active ({time_since_last:.0f}s < {cooldown_seconds:.0f}s), skipping AI action."
+                )
                 return
 
         try:
