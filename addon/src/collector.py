@@ -83,7 +83,7 @@ class Collector:
             time.sleep(0.01)
         return data
 
-    def features_from_raw(self, sensor_dict, timestamp=None):
+    def features_from_raw(self, sensor_dict, timestamp=None, override_setpoint=None):
         """
         Convert raw sensor dict into feature dictionary following FEATURE_ORDER keys.
         Defensive: uses safe_float and encoding helpers.
@@ -105,6 +105,11 @@ class Collector:
             sensor_dict.get("hvac_mode"), 0
         )
 
+        if override_setpoint is not None:
+            raw_sp = override_setpoint
+        else:
+            raw_sp = sensor_dict.get("current_setpoint")
+
         return {
             "hour_sin": hx,
             "hour_cos": hy,
@@ -114,7 +119,7 @@ class Collector:
             "month_cos": my,
             "season": float(season_idx),
             "day_or_night": float(day_or_night(ts)),
-            "current_setpoint": safe_float(sensor_dict.get("current_setpoint")),
+            "current_setpoint": safe_float(raw_sp),
             "current_temp": safe_float(sensor_dict.get("current_temp")),
             "temp_change": safe_float(sensor_dict.get("temp_change")),
             "min_temp_today": safe_float(sensor_dict.get("min_temp_today")),
