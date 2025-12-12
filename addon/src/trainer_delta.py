@@ -233,7 +233,7 @@ class TrainerDelta:
         return compact, extended
 
     def train_job(self, force: bool = False):
-        remove_unlabeled_setpoints(days=1)
+        remove_unlabeled_setpoints(days=0)
 
         start = time.time()
         X, y_delta, used_rows, _ = self._fetch_data()
