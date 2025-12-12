@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 class InferencerDelta:
-    def __init__(self, ha_client: HAClient, opts: dict):
+    def __init__(self, ha_client: HAClient, collector: Collector, opts: dict):
         self.ha = ha_client
         self.opts = opts or {}
-        self.collector = Collector(ha_client, self.opts)
+        self.collector = collector
 
         self.model_path = self.opts.get(
             "model_path", "/config/models/full_model_delta.joblib"
