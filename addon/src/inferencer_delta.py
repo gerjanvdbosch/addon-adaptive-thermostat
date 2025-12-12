@@ -238,6 +238,10 @@ class InferencerDelta:
 
                 self.last_ai_action_ts = ts  # Timestamp updaten
                 self.stability_start_ts = None
+            else:
+                logger.info(
+                    f"AI change {new_target:.2f} within threshold {threshold}, no action taken."
+                )
 
         except Exception:
             logger.exception("Inference failed")
