@@ -181,12 +181,13 @@ class InferencerDelta:
                     except Exception:
                         logger.exception("Stability log failed")
                 else:
-                    logger.debug(
+                    logger.info(
                         f"Stable temp detected, but duration {duration/3600:.1f}h < {hours_required:.1f}h required."
                     )
         else:
             # Als temperatuur afwijkt, resetten we de timer (systeem is nog bezig)
             self.stability_start_ts = None
+            logger.info("Temperature not stable, resetting stability timer.")
 
         # --- FASE 4: AI INFERENCE ---
         if not self.model:
