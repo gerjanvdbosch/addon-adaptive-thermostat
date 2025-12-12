@@ -221,12 +221,13 @@ class InferencerDelta:
                 self.ha.set_setpoint(new_target)
 
                 # State updaten voor volgende run (zodat we het niet als user override zien)
-
                 if shadow_mode:
                     self.last_ai_prediction = curr_sp_rounded
+                    self.last_known_setpoint = curr_sp_rounded
                 else:
                     self.last_ai_prediction = safe_round(new_target)
-                self.last_known_setpoint = safe_round(new_target)
+                    self.last_known_setpoint = safe_round(new_target)
+
                 self.last_ai_action_ts = ts  # Timestamp updaten
                 self.stability_start_ts = None
 
