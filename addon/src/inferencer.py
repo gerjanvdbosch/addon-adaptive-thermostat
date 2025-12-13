@@ -68,7 +68,7 @@ class Inferencer:
             logger.warning("Model payload missing 'model'; ignoring %s", path)
             return
         self.model_payload = payload
-        logger.info("Loaded model from %s (mae=%s)", path, meta.get("mae"))
+        logger.debug("Loaded model from %s (mae=%s)", path, meta.get("mae"))
 
     def check_and_label_user_override(self):
         """Detecteer en label een echte gebruikeroverride; return True als gelabeld."""
