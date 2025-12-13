@@ -174,7 +174,7 @@ class Collector:
             sensors = self.read_sensors()
             features = self.features_from_raw(sensors, timestamp=ts)
             insert_sample(features)
-            logger.info(
+            logger.debug(
                 "Sample stored: current_setpoint=%s current_temp=%s",
                 sensors.get("current_setpoint"),
                 sensors.get("current_temp"),
