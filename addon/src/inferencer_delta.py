@@ -30,6 +30,7 @@ class InferencerDelta:
         self.last_ai_action_ts = None  # Timestamp van laatste AI actie
         self.stability_start_ts = None  # Timer voor stabiliteit
         self.last_run_ts = None
+        self.last_model_load_ts = None
 
         self._load_model()
         self._init_state()
@@ -44,6 +45,9 @@ class InferencerDelta:
         )
 
     def _load_model(self):
+        # Update de timestamp zodat we weten wanneer we dit voor het laatst probeerden
+        self.last_model_load_ts = datetime.now()
+
         if not os.path.exists(self.model_path):
             logger.warning("No model found at %s", self.model_path)
             return
@@ -68,6 +72,12 @@ class InferencerDelta:
                  Zo niet -> Draai AI predictie -> Pas aan indien nodig.
         """
         ts = datetime.now()
+
+        # Check voor periodieke herlaadactie
+        if self.last_model_load_ts:
+            if (ts - self.last_model_load_ts).total_seconds() > (3600 * 6):
+                logger.info("Hourly model reload triggered.")
+                self._load_model()
 
         # Cooldown ophalen uit config (default 1 uur)
         cooldown_seconds = float(self.opts.get("cooldown_seconds", 3600))
