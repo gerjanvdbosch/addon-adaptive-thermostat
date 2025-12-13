@@ -246,9 +246,9 @@ class InferencerDelta:
                 else:
                     self.last_ai_prediction = safe_round(new_target)
                     self.last_known_setpoint = safe_round(new_target)
+                    self.stability_start_ts = None
 
                 self.last_ai_action_ts = ts  # Timestamp updaten
-                self.stability_start_ts = None
             else:
                 logger.info(
                     f"AI change {new_target:.2f} within threshold {threshold}, no action taken."
