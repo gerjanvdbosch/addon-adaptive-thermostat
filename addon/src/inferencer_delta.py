@@ -161,6 +161,7 @@ class InferencerDelta:
         if is_stable_temp:
             if self.stability_start_ts is None:
                 self.stability_start_ts = ts
+                logger.info("Stable temperature detected, starting stability timer.")
             else:
                 duration = (ts - self.stability_start_ts).total_seconds()
                 hours_required = float(self.opts.get("stability_hours", 8.0))
