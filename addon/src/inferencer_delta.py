@@ -22,7 +22,7 @@ class InferencerDelta:
         self.trainer = TrainerDelta(ha_client, opts)
 
         self.model_path = self.opts.get(
-            "model_path", "/config/models/full_model_delta.joblib"
+            "model_path", "/config/models/delta_model.joblib"
         )
         self.model = None
 
@@ -73,7 +73,9 @@ class InferencerDelta:
         ts = datetime.now()
 
         # Cooldown ophalen uit config (default 1 uur)
-        cooldown_seconds = float(self.opts.get("cooldown_seconds", 3600))
+        cooldown_hours = float(self.opts.get("cooldown_hours", 1))
+        # Omrekenen naar seconden voor de technische vergelijking
+        cooldown_seconds = cooldown_hours * 3600
         threshold = float(self.opts.get("min_change_threshold", 0.25))
 
         if self.last_run_ts and (ts - self.last_run_ts).total_seconds() < 5:
@@ -215,8 +217,9 @@ class InferencerDelta:
             if time_since_last < cooldown_seconds:
                 # We loggen dit niet als warning, maar als info/debug om spam te voorkomen
                 # of we returnen gewoon stilzwijgend.
+                wait_hours = time_since_last / 3600
                 logger.info(
-                    f"Cooldown active ({time_since_last:.0f}s < {cooldown_seconds:.0f}s), skipping AI action."
+                    f"Cooldown active ({wait_hours:.2f}h < {cooldown_hours:.2f}h), skipping AI action."
                 )
                 return
 

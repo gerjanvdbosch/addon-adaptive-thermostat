@@ -16,13 +16,12 @@ options:
   climate_entity: climate.danfoss_icon_woonkamer
   inferencer_interval_seconds: 60
   sample_interval_seconds: 600
-  stable_seconds: 1800
-  cooldown_seconds: 3600
+  cooldown_hours: 3600
   stability_hours: 6.0
   full_retrain_time: "03:00"
   min_setpoint: 15.0
   max_setpoint: 25.0
-  min_change_threshold: 0.4
+  min_change_threshold: 0.5
   buffer_days: 1000
   log_level: info
   sensors:
@@ -46,8 +45,7 @@ schema:
   climate_entity: "str?"
   inferencer_interval_seconds: "int?"
   sample_interval_seconds: "int?"
-  stable_seconds: "int?"
-  cooldown_seconds: "int?"
+  cooldown_hours: "float?"
   stability_hours: "float?"
   full_retrain_time: "str?"
   min_setpoint: "float?"
