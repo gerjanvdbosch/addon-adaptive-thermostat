@@ -37,6 +37,7 @@ class InferencerDelta:
 
     def _init_state(self):
         """Initialiseer de state zodat we niet meteen crashen of false positives krijgen."""
+        # Let op: Zorg dat get_shadow_setpoint de actuele waarde teruggeeft
         sp = self.ha.get_shadow_setpoint()
         if sp is not None:
             self.last_known_setpoint = safe_round(sp)
@@ -66,7 +67,7 @@ class InferencerDelta:
         2. Is Setpoint anders dan in geheugen?
            JA -> Was het de AI?
                  JA -> Update geheugen, klaar.
-                 NEE -> User Override! Sla sample op (Oude SP -> Nieuwe SP).
+                 NEE -> User Override! Sla sample op & Start Cooldown.
            NEE -> Check Stabiliteit.
                  Is het al lang stabiel? -> Sla sample op (Delta 0).
                  Zo niet -> Draai AI predictie -> Pas aan indien nodig.
@@ -149,6 +150,9 @@ class InferencerDelta:
                 except Exception:
                     logger.exception("DB Save failed")
 
+                # Hierdoor slaat de AI de komende cyclus(sen) over en vecht hij niet terug.
+                self.last_ai_action_ts = ts
+
             # Update state en reset stability timer
             self.last_known_setpoint = curr_sp_rounded
             self.stability_start_ts = None
@@ -170,7 +174,7 @@ class InferencerDelta:
         is_stable_temp = (
             curr_temp is not None
             and curr_sp is not None
-            and abs(curr_temp - curr_sp) < threshold
+            and abs(curr_temp - curr_sp) <= threshold
         )
 
         if is_stable_temp:
