@@ -82,7 +82,7 @@ class HAClient:
         if self.opts.get("shadow_mode"):
             try:
                 shadow = self.opts.get("shadow_setpoint")
-                service_data = {"entity_id": shadow, "value": setpoint}
+                service_data = {"entity_id": shadow, "value": safe_round(float(value))}
                 self.call_service("input_number", "set_value", service_data)
             except Exception:
                 logger.exception("Failed to update shadow setpoint: %s", shadow)
