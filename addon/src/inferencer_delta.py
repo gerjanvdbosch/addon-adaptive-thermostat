@@ -1,15 +1,15 @@
 import os
 import logging
 import joblib
-from datetime import datetime
 
+from datetime import datetime
 from db import (
     insert_setpoint,
 )
 from collector import Collector
 from ha_client import HAClient
 from utils import safe_round, safe_float
-from trainer_delta import train_job
+from trainer_delta import TrainerDelta
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ class InferencerDelta:
         self.ha = ha_client
         self.opts = opts or {}
         self.collector = collector
+        self.trainer = TrainerDelta(ha_client, opts)
 
         self.model_path = self.opts.get(
             "model_path", "/config/models/full_model_delta.joblib"
@@ -144,7 +145,7 @@ class InferencerDelta:
                 # Hierdoor slaat de AI de komende cyclus(sen) over en vecht hij niet terug.
                 self.last_ai_action_ts = ts
 
-                train_job()
+                self.trainer.train_job(force=True)
                 self._load_model()
 
                 logger.info("Retraining complete. Reloading model in memory...")
