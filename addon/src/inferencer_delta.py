@@ -167,11 +167,10 @@ class InferencerDelta:
         # We maken features met de HUIDIGE setpoint
         features = self.collector.features_from_raw(raw_data, timestamp=ts)
 
-        # is_stable_temp = (curr_temp is not None and curr_sp is not None and curr_temp >= curr_sp)
         is_stable_temp = (
             curr_temp is not None
             and curr_sp is not None
-            and abs(curr_temp - curr_sp) <= threshold
+            and curr_temp >= (curr_sp - 0.1)
         )
 
         if is_stable_temp:
