@@ -71,7 +71,7 @@ class HAClient:
         return current_setpoint, current_temp, hvac_mode
 
     def get_shadow_setpoint(self):
-        return safe_float(self.get_state(self.opts.get("shadow_setpoint")))
+        return safe_float(self.get_state(self.opts.get("shadow_setpoint")).get("state"))
 
     def set_setpoint(self, value):
         try:
