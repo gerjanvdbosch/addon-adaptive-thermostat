@@ -16,7 +16,7 @@ def load_options():
             os.getenv("INFERENCER_INTERVAL_SECONDS", 60)
         ),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
-        "cooldown_hours": int(os.getenv("COOLDOWN_HOURS", 3600)),
+        "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 1)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
         "stability_hours": float(os.getenv("STABILITY_HOURS", 6.0)),
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
