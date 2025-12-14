@@ -146,9 +146,9 @@ class InferencerDelta:
                 self.last_ai_action_ts = ts
 
                 self.trainer.train_job(force=True)
-                self._load_model()
+                logger.info("Retraining complete.")
 
-                logger.info("Retraining complete. Reloading model in memory...")
+                self._load_model()
 
             # Update state en reset stability timer
             self.last_known_setpoint = curr_sp_rounded

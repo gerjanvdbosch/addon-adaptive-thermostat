@@ -193,7 +193,7 @@ class TrainerDelta:
             if y is not None and len(y):
                 mean = float(np.mean(y))
                 std = float(np.std(y))
-                logger.info(
+                logger.debug(
                     "Training deltas: n=%d mean=%.4f std=%.4f min=%.4f max=%.4f",
                     len(y),
                     mean,
@@ -373,7 +373,7 @@ class TrainerDelta:
                     n_jobs=n_jobs,
                     random_state=self.random_state,
                 )
-                logger.info(
+                logger.debug(
                     "Running hyperparameter search (n_iter=%d cv=%s)",
                     n_iter,
                     "TimeSeriesSplit" if cv else "None",
@@ -382,7 +382,7 @@ class TrainerDelta:
                 best_pipe = search.best_estimator_
                 chosen_params = getattr(search, "best_params_", None)
                 best_score = getattr(search, "best_score_", None)
-                logger.info(
+                logger.debug(
                     "Hypersearch complete: best_score=%s best_params=%s",
                     str(best_score),
                     str(chosen_params),
@@ -487,12 +487,11 @@ class TrainerDelta:
 
         runtime = time.time() - start
         logger.info(
-            "Training finished runtime_seconds=%.2f n_labeled=%d mae_abs=%s val_mae_abs=%s chosen_params=%s",
+            "Training finished runtime_seconds=%.2f n_labeled=%d mae_abs=%s val_mae_abs=%s",
             runtime,
             n_labeled,
             str(mae_abs),
             str(val_mae_abs),
-            str(chosen_params),
         )
 
         # persist model + meta
@@ -518,7 +517,9 @@ class TrainerDelta:
                     logger.warning("Failed creating model backup")
             payload = {"model": best_pipe, "meta": meta}
             _atomic_dump(payload, self.model_path)
-            logger.info("Saved model to %s (mae_abs=%s)", self.model_path, str(mae_abs))
+            logger.debug(
+                "Saved model to %s (mae_abs=%s)", self.model_path, str(mae_abs)
+            )
         except Exception:
             logger.exception("Failed saving model")
             return
