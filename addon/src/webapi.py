@@ -559,7 +559,7 @@ def get_full_model_full_delta_meta():
     Return everything in payload['meta'] (if present) plus derived model info and file diagnostics.
     This endpoint converts numpy / non-serializable types to built-in Python types.
     """
-    MODEL_PATH = "/config/models/full_model_delta.joblib"
+    MODEL_PATH = "/config/models/delta_model.joblib"
     if not os.path.exists(MODEL_PATH):
         logger.info("Model file not found at %s", MODEL_PATH)
         raise HTTPException(status_code=404, detail="Model file not found")
