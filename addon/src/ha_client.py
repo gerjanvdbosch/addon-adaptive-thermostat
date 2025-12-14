@@ -70,6 +70,9 @@ class HAClient:
             raise RuntimeError("Failed to read HVAC mode")
         return current_setpoint, current_temp, hvac_mode
 
+    def get_shadow_setpoint(self):
+        return safe_float(self.get_state(self.opts.get("shadow_setpoint")))
+
     def set_setpoint(self, value):
         try:
             setpoint = safe_round(round_half(float(value)))

@@ -37,7 +37,7 @@ class InferencerDelta:
 
     def _init_state(self):
         """Initialiseer de state zodat we niet meteen crashen of false positives krijgen."""
-        sp, _, _ = self.ha.get_setpoint()
+        sp = self.ha.get_shadow_setpoint()
         if sp is not None:
             self.last_known_setpoint = safe_round(sp)
         logger.info(
@@ -81,6 +81,7 @@ class InferencerDelta:
 
         # Cooldown ophalen uit config (default 1 uur)
         cooldown_seconds = float(self.opts.get("cooldown_seconds", 3600))
+        threshold = float(self.opts.get("min_change_threshold", 0.25))
 
         if self.last_run_ts and (ts - self.last_run_ts).total_seconds() < 5:
             logger.info("Cycle ran too recently, skipping.")
@@ -90,6 +91,7 @@ class InferencerDelta:
         # 1. Lees ruwe data
         try:
             raw_data = self.collector.read_sensors()
+            raw_data["current_setpoint"] = self.ha.get_shadow_setpoint()
         except Exception:
             logger.exception("Sensor read failed")
             return
@@ -164,8 +166,11 @@ class InferencerDelta:
         # We maken features met de HUIDIGE setpoint
         features = self.collector.features_from_raw(raw_data, timestamp=ts)
 
+        # is_stable_temp = (curr_temp is not None and curr_sp is not None and curr_temp >= curr_sp)
         is_stable_temp = (
-            curr_temp is not None and curr_sp is not None and curr_temp >= curr_sp
+            curr_temp is not None
+            and curr_sp is not None
+            and abs(curr_temp - curr_sp) <= threshold
         )
 
         if is_stable_temp:
@@ -227,9 +232,6 @@ class InferencerDelta:
             min_sp = float(self.opts.get("min_setpoint", 15.0))
             max_sp = float(self.opts.get("max_setpoint", 25.0))
             new_target = max(min(new_target, max_sp), min_sp)
-            shadow_mode = self.opts.get("shadow_mode")
-
-            threshold = float(self.opts.get("min_change_threshold", 0.5))
 
             if abs(new_target - curr_sp) >= threshold:
                 logger.info(
@@ -238,16 +240,10 @@ class InferencerDelta:
 
                 # Uitvoeren
                 self.ha.set_setpoint(new_target)
-
                 # State updaten voor volgende run (zodat we het niet als user override zien)
-                if shadow_mode:
-                    self.last_ai_prediction = curr_sp_rounded
-                    self.last_known_setpoint = curr_sp_rounded
-                else:
-                    self.last_ai_prediction = safe_round(new_target)
-                    self.last_known_setpoint = safe_round(new_target)
-                    self.stability_start_ts = None
-
+                self.last_ai_prediction = safe_round(new_target)
+                self.last_known_setpoint = safe_round(new_target)
+                self.stability_start_ts = None
                 self.last_ai_action_ts = ts  # Timestamp updaten
             else:
                 logger.info(
