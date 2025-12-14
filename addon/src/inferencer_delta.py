@@ -170,7 +170,7 @@ class InferencerDelta:
         is_stable_temp = (
             curr_temp is not None
             and curr_sp is not None
-            and abs(curr_temp - curr_sp) <= threshold
+            and abs(curr_temp - curr_sp) < threshold
         )
 
         if is_stable_temp:
