@@ -4,7 +4,7 @@ import time
 
 from utils import (
     safe_float,
-    round_half,
+    safe_round,
     cyclical_hour,
     cyclical_day,
     encode_wind,
@@ -126,12 +126,8 @@ class Collector:
             "max_temp_today": safe_float(sensor_dict.get("max_temp_today")),
             "min_temp_tomorrow": safe_float(sensor_dict.get("min_temp_tomorrow")),
             "max_temp_tomorrow": safe_float(sensor_dict.get("max_temp_tomorrow")),
-            "solar_kwh_today": round(
-                round_half(safe_float(sensor_dict.get("solar_kwh_today"))), 1
-            ),
-            "solar_kwh_tomorrow": round(
-                round_half(safe_float(sensor_dict.get("solar_kwh_tomorrow"))), 1
-            ),
+            "solar_kwh_today": safe_round(sensor_dict.get("solar_kwh_today")),
+            "solar_kwh_tomorrow": safe_round(sensor_dict.get("solar_kwh_tomorrow")),
             "solar_chance_today": safe_float(sensor_dict.get("solar_chance_today")),
             "solar_chance_tomorrow": safe_float(
                 sensor_dict.get("solar_chance_tomorrow")
