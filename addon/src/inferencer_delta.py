@@ -219,7 +219,7 @@ class InferencerDelta:
                 # of we returnen gewoon stilzwijgend.
                 wait_hours = time_since_last / 3600
                 logger.info(
-                    f"Cooldown active ({wait_hours:.2f}h < {cooldown_hours:.2f}h), skipping AI action."
+                    f"Cooldown active ({wait_hours:.1f}h < {cooldown_hours:.1f}h), skipping AI action."
                 )
                 return
 
