@@ -170,9 +170,7 @@ class InferencerDelta:
         features = self.collector.features_from_raw(raw_data, timestamp=ts)
 
         is_stable_temp = (
-            curr_temp is not None
-            and curr_sp is not None
-            and curr_temp >= curr_sp
+            curr_temp is not None and curr_sp is not None and curr_temp >= curr_sp
         )
 
         if is_stable_temp:
