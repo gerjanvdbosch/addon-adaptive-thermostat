@@ -308,8 +308,9 @@ class SolarController:
             pass
 
     def tick(self):
-        """Main loop: wordt aangeroepen obv inferencer_interval_seconds."""
-        now = datetime.now()
+        """Main loop."""
+        # We pakken de systeemtijd (naïef)
+        now_system = datetime.now()
 
         try:
             pv_state = self.ha.get_state(self.entity_pv)
@@ -328,7 +329,7 @@ class SolarController:
         except Exception:
             pv_kw, p1_kw = 0, 0
 
-        finished_block = self.aggregator.add_sample(now, pv_kw, p1_kw)
+        finished_block = self.aggregator.add_sample(now_system, pv_kw, p1_kw)
         if finished_block:
             upsert_solar_record(
                 finished_block["timestamp"],
@@ -352,19 +353,29 @@ class SolarController:
             status = "ACTIVE_NOW"
             msg = f"Zon stabiel ({stats['safe_pv']:.1f} kW)"
         elif best_moment is not None:
+            # FIX: Tijdzone conflict oplossen
             start = best_moment["timestamp"].to_pydatetime()
+
+            # Bepaal 'now' in de juiste tijdzone voor vergelijking
+            if start.tzinfo is not None:
+                # Als Solcast data tijdzone heeft, pas 'now' daarop aan
+                now_compare = datetime.now(start.tzinfo)
+            else:
+                # Anders gebruiken we systeem tijd
+                now_compare = now_system
+
             start_time = start
             end = start + timedelta(hours=1.0)
 
-            if start <= now < end:
+            if start <= now_compare < end:
                 if stats["median_pv"] > (best_moment["rolling_power"] * 0.4):
                     status = "ACTIVE_PLANNED"
                     msg = f"Gepland ({start.strftime('%H:%M')})"
                 else:
                     status = "WAIT_CLOUD"
                     msg = "Planning actief, maar bewolkt"
-            elif now < start:
-                wait_min = int((start - now).total_seconds() / 60)
+            elif now_compare < start:
+                wait_min = int((start - now_compare).total_seconds() / 60)
                 msg = f"Wacht {wait_min} min ({start.strftime('%H:%M')})"
 
         #         self.send_status_to_ha(status, msg, start_time)
