@@ -20,6 +20,7 @@ fi
 export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
 export SHADOW_SETPOINT="$(bashio::config 'shadow_setpoint')"
 export INFERENCER_INTERVAL_SECONDS="$(bashio::config 'inferencer_interval_seconds')"
+export SOLAR_INTERVAL_SECONDS="$(bashio::config 'solar_interval_seconds')"
 export SAMPLE_INTERVAL_SECONDS="$(bashio::config 'sample_interval_seconds')"
 export COOLDOWN_HOURS="$(bashio::config 'cooldown_hours')"
 export STABILITY_HOURS="$(bashio::config 'stability_hours')"

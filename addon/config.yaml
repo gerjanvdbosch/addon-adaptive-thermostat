@@ -15,6 +15,7 @@ options:
   shadow_setpoint: input_number.adaptive_thermostat_setpoint
   climate_entity: climate.danfoss_icon_woonkamer
   inferencer_interval_seconds: 60
+  solar_interval_seconds: 15
   sample_interval_seconds: 600
   cooldown_hours: 1.0
   stability_hours: 6.0
@@ -44,6 +45,7 @@ schema:
   shadow_setpoint: "str?"
   climate_entity: "str?"
   inferencer_interval_seconds: "int?"
+  solar_interval_seconds: "int?"
   sample_interval_seconds: "int?"
   cooldown_hours: "float?"
   stability_hours: "float?"

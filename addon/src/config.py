@@ -15,6 +15,7 @@ def load_options():
         "inferencer_interval_seconds": int(
             os.getenv("INFERENCER_INTERVAL_SECONDS", 60)
         ),
+        "solar_interval_seconds": int(os.getenv("SOLAR_INTERVAL_SECONDS", 15)),
         "sample_interval_seconds": int(os.getenv("SAMPLE_INTERVAL_SECONDS", 300)),
         "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 1)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),

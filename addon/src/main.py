@@ -9,6 +9,7 @@ from collector import Collector
 from trainer import Trainer
 from trainer_delta import TrainerDelta
 
+from solar import SolarController
 from inferencer import Inferencer
 from inferencer_delta import InferencerDelta
 from ha_client import HAClient
@@ -32,6 +33,17 @@ def main():
     trainer_delta = TrainerDelta(ha, opts)
     inferencer = Inferencer(ha, collector, opts)
     inferencer_delta = InferencerDelta(ha, collector, opts)
+
+    # --- SOLAR CONTROLLER INITIALISEREN ---
+    logger.info("Initializing Solar Brain...")
+    solar_ctrl = SolarController(ha, opts)
+
+    # Probeer direct data op te halen (voorkomt wachten op eerste tick)
+    try:
+        solar_ctrl.update_solcast()
+    except Exception as e:
+        logger.warning(f"Initial Solar update failed: {e}")
+    # --------------------------------------
 
     api_thread = threading.Thread(
         target=start_api, args=(opts["webapi_host"], opts["webapi_port"]), daemon=True
@@ -66,6 +78,18 @@ def main():
         "interval",
         seconds=opts["inferencer_interval_seconds"],
         id="inference_delta",
+    )
+
+    solar_interval = opts.get("solar_interval_seconds", 15)
+
+    # 1. Main Tick: Gebruikt nu dezelfde interval als de inferencer
+    scheduler.add_job(
+        solar_ctrl.tick, "interval", seconds=solar_interval, id="solar_tick"
+    )
+
+    # 2. Retrain: Dagelijks
+    scheduler.add_job(
+        solar_ctrl.train_model, "cron", hour=hh, minute=mm, id="solar_retrain"
     )
 
     scheduler.start()

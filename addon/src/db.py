@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta
+import pandas as pd
 
 from sqlalchemy import (
     create_engine,
@@ -9,6 +10,8 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     JSON,
+    text,
+    select,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session as SASession
 
@@ -47,7 +50,106 @@ class Setpoint(Base):
     data = Column(JSON)
 
 
+class SolarRecord(Base):
+    __tablename__ = "solar_history"
+
+    # Timestamp is de Primary Key (uniek en geïndexeerd)
+    timestamp = Column(DateTime, primary_key=True)
+
+    # Forecast Data
+    solcast_est = Column(Float, default=0.0)
+    solcast_10 = Column(Float, default=0.0)
+    solcast_90 = Column(Float, default=0.0)
+
+    # Actuals (Gemiddelden over 30 min)
+    actual_pv_yield = Column(Float, nullable=True)
+    actual_consumption = Column(Float, nullable=True)
+
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 Base.metadata.create_all(engine)
+
+
+def upsert_solar_record(timestamp, **kwargs):
+    """
+    Maakt een record aan of update het als het bestaat.
+    Gebruikt ORM sessie management.
+    """
+    s: SASession = Session()
+    try:
+        record = s.get(SolarRecord, timestamp)
+        if not record:
+            record = SolarRecord(timestamp=timestamp)
+            s.add(record)
+
+        for key, value in kwargs.items():
+            if hasattr(record, key):
+                setattr(record, key, value)
+
+        record.updated_at = datetime.utcnow()
+        s.commit()
+    except Exception as e:
+        print(f"DB Error upsert_solar_record: {e}")
+        s.rollback()
+    finally:
+        s.close()
+
+
+def fetch_solar_training_data_orm(days: int = 365):
+    """
+    Haalt trainingsdata op via ORM, maar geoptimaliseerd voor Pandas.
+    Geeft een DataFrame terug.
+    """
+    cutoff = datetime.now() - timedelta(days=days)
+
+    # We selecteren alleen de kolommen die we nodig hebben voor training
+    # Dit is veel sneller dan het laden van volledige Python objecten
+    stmt = (
+        select(
+            SolarRecord.timestamp,
+            SolarRecord.solcast_est,
+            SolarRecord.solcast_10,
+            SolarRecord.solcast_90,
+            SolarRecord.actual_pv_yield,
+        )
+        .where(SolarRecord.timestamp >= cutoff)
+        .where(SolarRecord.actual_pv_yield.isnot(None))
+    )
+
+    # Pandas kan direct lezen van een SQLAlchemy connectie/statement
+    with engine.connect() as conn:
+        df = pd.read_sql(stmt, conn)
+
+    # Zorg dat timestamp correcte types heeft
+    if not df.empty:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    return df
+
+
+def cleanup_old_data(days: int = 730):
+    """Onderhoud: Verwijder data ouder dan X dagen."""
+    s: SASession = Session()
+    try:
+        cutoff = datetime.now() - timedelta(days=days)
+
+        # Bulk delete via ORM
+        s.query(SolarRecord).filter(SolarRecord.timestamp < cutoff).delete(
+            synchronize_session=False
+        )
+        s.query(Sample).filter(Sample.timestamp < cutoff).delete(
+            synchronize_session=False
+        )
+
+        s.commit()
+
+        # SQLite Vacuum om schijfruimte vrij te geven
+        s.execute(text("VACUUM"))
+    except Exception as e:
+        print(f"Cleanup Error: {e}")
+    finally:
+        s.close()
 
 
 def insert_setpoint(
