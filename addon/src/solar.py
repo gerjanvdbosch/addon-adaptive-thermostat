@@ -11,7 +11,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
-from database import fetch_solar_training_data_orm, upsert_solar_record
+from db import fetch_solar_training_data_orm, upsert_solar_record
 
 logger = logging.getLogger(__name__)
 
