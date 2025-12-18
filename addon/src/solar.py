@@ -182,10 +182,10 @@ class SolarModel:
         # 6. De 95% Regel (Slimste startmoment kiezen)
         max_score = future["score"].max()
 
-        # [FIX] Als de max score < 100W is, is er geen zon meer (nacht).
+        # [FIX] Als de max score < 10W is, is er geen zon meer (nacht).
         # Return None zodat status op "WAIT" blijft en niet "WAIT_CLOUD".
-        if max_score < 0.1:
-            return None, "Geen zon verwacht (< 100W)"
+        if max_score < 0.01:
+            return None, "Geen zon verwacht (< 10W)"
 
         candidates = future[future["score"] >= (max_score * 0.95)]
 
