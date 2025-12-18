@@ -413,7 +413,7 @@ class SolarController:
                     msg = f"Wacht {wait_min} min ({start_time_naive.strftime('%H:%M')})"
 
         # Loggen
-        if status.startswith("ACTIVE") or "WAIT_CLOUD" in status:
-            logger.info(f"Solar: {status} - {msg}")
+        #         if status.startswith("ACTIVE") or "WAIT_CLOUD" in status:
+        logger.info(f"Solar: {status} - {msg}")
 
         # Optioneel: Stuur self.send_status_to_ha(...) hier
