@@ -26,7 +26,7 @@ SYSTEM_MAX_KW = 2.0
 # 1. AI MODEL
 # ==============================================================================
 class SolarModel:
-    def __init__(self, model_path="solar_model.pkl"):
+    def __init__(self, model_path="/config/models/solar_model.pkl"):
         self.model_path = model_path
         self.model = None
         self.is_fitted = False
