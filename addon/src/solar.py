@@ -14,6 +14,12 @@ from db import fetch_solar_training_data_orm, upsert_solar_record
 
 logger = logging.getLogger(__name__)
 
+# ==============================================================================
+# CONFIGURATIE
+# ==============================================================================
+# Systeem limiet: 6x320Wp = ~1.92kW. We ronden af op 2.0kW als veilige max.
+SYSTEM_MAX_KW = 2.0
+
 
 # ==============================================================================
 # 1. AI MODEL
@@ -125,7 +131,10 @@ class SolarModel:
         if self.is_fitted:
             X_pred = self._create_features(df)
             df["ai_power_raw"] = self.model.predict(X_pred)
-            df["ai_power_raw"] = df["ai_power_raw"].clip(lower=0)
+
+            # [NIEUW] Fysieke limieten toepassen (0 tot 2.0 kW)
+            # Dit voorkomt onmogelijke voorspellingen
+            df["ai_power_raw"] = df["ai_power_raw"].clip(lower=0, upper=SYSTEM_MAX_KW)
         else:
             df["ai_power_raw"] = df["solcast_est"]
 
@@ -156,7 +165,9 @@ class SolarModel:
                 # Pas de factor toe op de hele dataset (of alleen toekomst)
                 df["ai_power"] = df["ai_power_raw"] * bias_factor
 
-                # Debug info in log (optioneel)
+                # Ook na bias correctie mag het niet boven de fysieke limiet komen
+                df["ai_power"] = df["ai_power"].clip(upper=SYSTEM_MAX_KW)
+
                 logger.info(
                     f"Bias correctie: Verwacht={expected_now:.2f}, Echt={current_pv_kw:.2f}, Factor={bias_factor:.2f}"
                 )
@@ -188,8 +199,9 @@ class SolarModel:
         # 6. De 95% Regel (Slimste startmoment kiezen)
         max_score = future["score"].max()
 
+        # [FIX] Als de max score < 100W is, is er geen zon meer. Return None.
         if max_score < 0.1:
-            return future.iloc[0], future
+            return None, "Geen zon verwacht (< 100W)"
 
         candidates = future[future["score"] >= (max_score * 0.95)]
 
@@ -286,9 +298,6 @@ class SolarController:
         self.entity_solcast_poll = opts.get(
             "sensor_solcast_poll", "sensor.solcast_pv_forecast_api_last_polled"
         )
-
-        self.entity_output_status = "sensor.solar_brain_status"
-        self.entity_output_start = "sensor.solar_brain_next_start"
 
         self.model = SolarModel()
         self.aggregator = SolarAggregator(interval_seconds=self.interval)
@@ -432,4 +441,4 @@ class SolarController:
 
         # Alleen loggen bij verandering of error voorkomt log spam, hier beknopt:
         #         if status.startswith("ACTIVE") or "WAIT_CLOUD" in status:
-        logger.info(f"Solar: {status} - {msg} - {start_time_naive}")
+        logger.info(f"Solar: {status} - {msg}")
