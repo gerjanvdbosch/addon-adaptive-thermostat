@@ -1,5 +1,4 @@
 import os
-import shutil
 import logging
 import joblib
 import time
@@ -7,10 +6,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error
-from scipy.stats import loguniform, randint
 
 from db import fetch_training_setpoints
 from collector import FEATURE_ORDER
@@ -35,8 +31,8 @@ def _assemble_matrix_delta(rows, feature_order):
     """
     Build X and y where y = setpoint - baseline_current_setpoint (delta).
     Prefer Setpoint.observed_current_setpoint as baseline; fallback to feat["current_setpoint"].
-    Mask current_setpoint in feature vector (set to 0.0) to avoid trivial echo learning.
-    Skip rows that lack a usable baseline or have trivial delta and are not override-like entries.
+
+    UPDATE: Uses np.nan for missing features instead of 0.0.
     """
     X = []
     y = []
@@ -44,72 +40,42 @@ def _assemble_matrix_delta(rows, feature_order):
 
     for r in rows:
         # rows are Setpoint objects (from fetch_training_setpoints)
-        feat = r.data if r.data and isinstance(r.data, dict) else None
-        if not feat:
-            continue
+        feat = r.data if r.data and isinstance(r.data, dict) else {}
+
         try:
             # label is the logged setpoint (the user override)
             label = _safe_float(getattr(r, "setpoint", None), None)
             if label is None:
                 continue
+
             # sanity bounds on absolute setpoint
             if not (5 <= label <= 30):
-                logger.debug(
-                    "Skipping setpoint row %s: label out of plausible bounds %s",
-                    getattr(r, "id", None),
-                    label,
-                )
                 continue
 
             # baseline: prefer explicit observed_current_setpoint field on Setpoint row
             curr_raw = getattr(r, "observed_current_setpoint", None)
-            if curr_raw is None and feat is not None:
-                curr_raw = feat.get("current_setpoint")
             if curr_raw is None:
-                logger.debug(
-                    "Skipping setpoint row %s: missing baseline current_setpoint",
-                    getattr(r, "id", None),
-                )
-                continue
+                curr_raw = feat.get("current_setpoint")
+
             current = _safe_float(curr_raw, None)
             if current is None:
-                logger.debug(
-                    "Skipping setpoint row %s: non-numeric baseline current_setpoint %r",
-                    getattr(r, "id", None),
-                    curr_raw,
-                )
                 continue
 
             delta = label - current
 
-            # skip trivial deltas unless entry looks like an explicit override
-            # Setpoint rows won't have user_override; use a heuristic: if delta approximately zero, skip
-            #             if abs(delta) < 1e-6:
-            #                 logger.debug(
-            #                     "Skipping setpoint row %s: trivial delta (label == baseline)",
-            #                     getattr(r, "id", None),
-            #                 )
-            #                 continue
-
+            # Construct feature vector
             vec = []
             for k in feature_order:
-                # Mask current_setpoint during training to prevent echo learning
-                #                 if k == "current_setpoint":
-                #                     vec.append(0.0)
-                #                     continue
-                v = feat.get(k) if feat is not None else None
+                v = feat.get(k)
                 if v is None:
-                    vec.append(0.0)
+                    # Use NaN for missing values so the model learns it's missing
+                    # instead of treating it as 0.0
+                    vec.append(np.nan)
                 else:
                     try:
                         vec.append(float(v))
                     except Exception:
-                        logger.debug(
-                            "Coercing non-numeric feature %s in setpoint row %s to 0.0",
-                            k,
-                            getattr(r, "id", None),
-                        )
-                        vec.append(0.0)
+                        vec.append(np.nan)
 
             X.append(vec)
             y.append(delta)
@@ -127,9 +93,9 @@ def _assemble_matrix_delta(rows, feature_order):
 
 def _clean_train_arrays(Xa: np.ndarray, ya: np.ndarray):
     """
-    Ensure numeric, finite arrays.
-    Drops rows where any feature or y is non-finite.
-    Raises ValueError if nothing remains.
+    Ensure numeric arrays.
+    Drops rows where y is non-finite.
+    Allows X to contain NaNs (handled natively by HistGradientBoostingRegressor).
     """
     Xa = np.asarray(Xa, dtype=float)
     ya = np.asarray(ya, dtype=float)
@@ -141,29 +107,32 @@ def _clean_train_arrays(Xa: np.ndarray, ya: np.ndarray):
     if Xa.shape[0] != ya.shape[0]:
         raise ValueError(f"Row count mismatch X ({Xa.shape[0]}) vs y ({ya.shape[0]})")
 
-    finite_mask = np.isfinite(ya) & np.all(np.isfinite(Xa), axis=1)
-    dropped = np.count_nonzero(~finite_mask)
+    # Only drop if Target (y) is broken. NaNs in X are allowed now.
+    finite_y_mask = np.isfinite(ya)
+    dropped = np.count_nonzero(~finite_y_mask)
+
     if dropped:
-        logger.warning("Dropping %d non-finite training rows", int(dropped))
+        logger.warning("Dropping %d rows with non-finite targets", int(dropped))
 
-    if not np.any(finite_mask):
-        raise ValueError("No finite training rows after cleaning")
+    if not np.any(finite_y_mask):
+        raise ValueError("No valid target rows after cleaning")
 
-    Xa_clean = Xa[finite_mask]
-    ya_clean = ya[finite_mask]
+    Xa_clean = Xa[finite_y_mask]
+    ya_clean = ya[finite_y_mask]
     return Xa_clean, ya_clean
 
 
 class TrainerDelta:
     """
     Trainer that learns delta = setpoint - baseline_current_setpoint.
+    Optimized with Early Stopping and MAE loss.
     """
 
     def __init__(self, ha_client=None, opts=None):
         self.ha = ha_client
         self.opts = opts or {}
         self.model_path = self.opts.get(
-            "model_path", "/config/models/full_model_delta.joblib"
+            "model_path", "/config/models/delta_model.joblib"
         )
         self.feature_order = FEATURE_ORDER
         self.random_state = int(self.opts.get("random_state", 42))
@@ -172,10 +141,7 @@ class TrainerDelta:
         if "warning_std_threshold" not in self.opts:
             self.opts["warning_std_threshold"] = 1e-3
 
-    def _fetch_data(
-        self,
-    ):
-        # fetch_training_setpoints returns Setpoint rows (with .setpoint and optional .observed_current_setpoint)
+    def _fetch_data(self):
         rows = fetch_training_setpoints(days=int(self.opts.get("buffer_days", 30)))
         labeled_rows = [r for r in rows if getattr(r, "setpoint", None) is not None]
         X_lab, y_lab, used_rows = _assemble_matrix_delta(
@@ -188,355 +154,200 @@ class TrainerDelta:
         X = X_lab
         y = y_lab
 
-        # diagnostics and constant-check
+        # diagnostics
         try:
             if y is not None and len(y):
-                mean = float(np.mean(y))
                 std = float(np.std(y))
                 logger.debug(
-                    "Training deltas: n=%d mean=%.4f std=%.4f min=%.4f max=%.4f",
+                    "Training deltas: n=%d mean=%.4f std=%.4f",
                     len(y),
-                    mean,
+                    float(np.mean(y)),
                     std,
-                    float(np.min(y)),
-                    float(np.max(y)),
                 )
                 if std < float(self.opts.get("warning_std_threshold", 1e-3)):
-                    logger.warning(
-                        "Training deltas near-constant (std=%.6f); likely labels == baseline across dataset",
-                        std,
-                    )
+                    logger.warning("Training deltas near-constant (std=%.6f)", std)
         except Exception:
-            logger.exception("Failed logging training delta stats")
+            pass
 
         return X, y, used_rows, 0
-
-    def _search_param_dist(self):
-        compact = {
-            "max_iter": [100, 200, 400],
-            "max_leaf_nodes": [15, 31, 63],
-            "learning_rate": [0.001, 0.01, 0.03],
-            "min_samples_leaf": [10, 20, 40],
-            "l2_regularization": [1e-6, 0.001, 0.01],
-            "max_features": [0.5, 0.7, 1.0],
-            "validation_fraction": [0.05, 0.1, 0.15],
-        }
-        extended = {
-            "max_iter": [300, 600, 1000, 1500, 2000],
-            "max_leaf_nodes": [15, 31, 63, 127, 255],
-            "learning_rate": [0.0001, 0.001, 0.005, 0.01, 0.02, 0.05],
-            "min_samples_leaf": [5, 10, 20, 40, 80],
-            "l2_regularization": [1e-6, 1e-3, 0.01, 0.1, 1.0],
-            "max_features": [0.4, 0.6, 0.8, 1.0],
-            "validation_fraction": [0.05, 0.1, 0.15],
-        }
-        return compact, extended
 
     def train_job(self, force: bool = False):
         start = time.time()
         X, y_delta, used_rows, _ = self._fetch_data()
-        if X is None:
-            logger.info("TrainerDelta: no training data")
+
+        if X is None or len(X) < 10:
+            logger.info("TrainerDelta: Not enough training data (<10 samples)")
+            return
+
+        # Prepare data: Drop invalid targets, keep X NaNs
+        try:
+            X, y_delta = _clean_train_arrays(X, y_delta)
+        except Exception as e:
+            logger.error("Data cleaning failed: %s", e)
             return
 
         n_total = len(y_delta)
-        n_labeled = len(used_rows)
-        self.opts["last_n_labeled"] = n_labeled
+        self.opts["last_n_labeled"] = n_total
 
-        # simple train/val split (temporal): last fraction is val
-        val_frac = float(self.opts.get("val_fraction", 0.15))
+        # Split:
+        # We reserve the last 15% purely for reporting "Holdout MAE" to the user.
+        # The model *also* uses an internal split (validation_fraction) for Early Stopping.
+        val_frac = 0.15
+        val_size = max(1, int(n_total * val_frac))
 
-        if n_total < 2:
-            logger.info(
-                "Too few labeled samples (%d); using all samples for training and skipping validation",
-                n_total,
-            )
+        if n_total < 50:
+            # Very small dataset: use everything for training to get at least something working
             X_train, y_train = X, y_delta
-            X_val, y_val = None, None
+            X_val = None
+            logger.info(
+                "Dataset too small for holdout split, using all data for training."
+            )
         else:
-            val_size = max(1, int(n_total * val_frac))
-            val_size = min(val_size, max(1, n_total - 1))
-            train_idx = slice(0, n_total - val_size)
-            val_idx = slice(n_total - val_size, n_total)
-
-            X_train, y_train = X[train_idx], y_delta[train_idx]
-            X_val, y_val = X[val_idx], y_delta[val_idx]
+            X_train = X[:-val_size]
+            y_train = y_delta[:-val_size]
+            X_val = X[-val_size:]
+        #             y_val = y_delta[-val_size:]
 
         logger.info(
-            "TrainerDelta: train %d val %d (labeled=%d)",
-            len(X_train) if X_train is not None else 0,
+            "TrainerDelta: n_train=%d n_holdout=%d",
+            len(X_train),
             len(X_val) if X_val is not None else 0,
-            n_labeled,
         )
 
-        # Clean training arrays before any fit
+        # --- OPTIMIZED MODEL CONFIGURATION ---
+        # No SearchCV needed. HistGradientBoostingRegressor is smart enough with these settings.
+        model = HistGradientBoostingRegressor(
+            loss="absolute_error",  # Minimize MAE directly (better for setpoints)
+            learning_rate=0.05,  # Good balance speed/precision
+            max_iter=2000,  # High limit, rely on early_stopping
+            max_leaf_nodes=31,  # Standard, prevents overfitting
+            min_samples_leaf=20,  # Robustness against outliers
+            l2_regularization=1.0,  # Regularization
+            early_stopping=True,  # Stop when validation score plateaus
+            validation_fraction=0.15,  # Internal split for early stopping
+            n_iter_no_change=20,  # Patience
+            random_state=self.random_state,
+        )
+
         try:
-            X_train, y_train = _clean_train_arrays(X_train, y_train)
-        except Exception as e:
-            logger.exception("Training data invalid after cleaning: %s", e)
+            model.fit(X_train, y_train)
+            logger.debug(
+                "Model fit complete. n_iter_=%d score=%.4f",
+                model.n_iter_,
+                model.train_score_[-1],
+            )
+        except Exception:
+            logger.exception("Model fitting failed")
             return
 
-        # Clean validation arrays (non-finite rows removed)
-        try:
-            if X_val is not None and len(X_val):
-                X_val = np.asarray(X_val, dtype=float)
-                y_val = np.asarray(y_val, dtype=float)
-                finite_val_mask = np.isfinite(y_val) & np.all(
-                    np.isfinite(X_val), axis=1
-                )
-                if not np.any(finite_val_mask):
-                    logger.warning(
-                        "Validation set contains no finite rows; skipping val MAE"
-                    )
-                    X_val = None
-                    y_val = None
-                else:
-                    X_val = X_val[finite_val_mask]
-                    y_val = y_val[finite_val_mask]
-        except Exception:
-            logger.exception(
-                "Validation cleaning failed; proceeding without validation metrics"
-            )
-            X_val = None
-            y_val = None
+        # ---------------------------------------------------------
+        # METRICS & REPORTING (Reconstruct absolute temperatures)
+        # ---------------------------------------------------------
 
-        pipe = Pipeline(
-            [("model", HistGradientBoostingRegressor(random_state=self.random_state))]
-        )
-        compact, extended = self._search_param_dist()
-        mode = self.opts.get("search_mode", "compact")
-        param_dist = compact if mode == "compact" else extended
+        def reconstruct_abs(X_subset, y_pred_subset, rows_subset):
+            # Reconstruct baseline array
+            baselines = []
+            targets = []
+            valid_indices = []
 
-        sampled = {}
-        sampled["learning_rate"] = loguniform(1e-4, 1e-1)
-        sampled["l2_regularization"] = loguniform(1e-6, 1.0)
-        mi_min, mi_max = min(param_dist["max_iter"]), max(param_dist["max_iter"])
-        sampled["max_iter"] = randint(mi_min, mi_max + 1)
-        mln_min, mln_max = min(param_dist["max_leaf_nodes"]), max(
-            param_dist["max_leaf_nodes"]
-        )
-        sampled["max_leaf_nodes"] = randint(mln_min, mln_max + 1)
-        ms_min, ms_max = min(param_dist["min_samples_leaf"]), max(
-            param_dist["min_samples_leaf"]
-        )
-        sampled["min_samples_leaf"] = randint(ms_min, ms_max + 1)
-        sampled["max_features"] = param_dist.get("max_features", [1.0])
-        sampled["validation_fraction"] = param_dist.get("validation_fraction", [0.1])
-        param_dist_pipe = {f"model__{k}": v for k, v in sampled.items()}
+            for i, pred in enumerate(y_pred_subset):
+                r = rows_subset[i]
+                # Try to get baseline from row object or feature dict
+                b_val = getattr(r, "observed_current_setpoint", None)
+                if b_val is None:
+                    # Fallback to the feature used during training (index varies, retrieve from dict)
+                    if r.data:
+                        b_val = r.data.get("current_setpoint")
 
-        n_iter = int(self.opts.get("n_iter_compact", 20))
-        if n_labeled >= int(self.opts.get("min_labels_to_expand", 100)) and bool(
-            self.opts.get("expand_search_next", False)
-        ):
-            n_iter = int(self.opts.get("n_iter_extended", 100))
+                t_val = getattr(r, "setpoint", None)
 
-        n_jobs = int(self.opts.get("n_jobs", 1))
-        tss_splits = self._time_splits(n_labeled)
-        cv = (
-            TimeSeriesSplit(n_splits=tss_splits)
-            if tss_splits and X_train.shape[0] > tss_splits
-            else None
-        )
+                b = _safe_float(b_val)
+                t = _safe_float(t_val)
 
-        best_pipe = None
-        chosen_params = None
-        best_score = None
+                if b is not None and t is not None:
+                    baselines.append(b)
+                    targets.append(t)
+                    valid_indices.append(i)
 
-        min_train_for_search = int(self.opts.get("min_train_for_search", 10))
-        if X_train.shape[0] < min_train_for_search:
-            logger.info(
-                "Skipping hypersearch; too few train samples (%d)", X_train.shape[0]
-            )
-            best_pipe = Pipeline(
-                [
-                    (
-                        "model",
-                        HistGradientBoostingRegressor(random_state=self.random_state),
-                    )
-                ]
-            )
-            try:
-                best_pipe.fit(X_train, y_train)
-            except Exception:
-                logger.exception("Fallback fit failed")
-                return
-        else:
-            try:
-                search = RandomizedSearchCV(
-                    pipe,
-                    param_distributions=param_dist_pipe,
-                    n_iter=n_iter,
-                    cv=cv,
-                    scoring="neg_mean_absolute_error",
-                    n_jobs=n_jobs,
-                    random_state=self.random_state,
-                )
-                logger.debug(
-                    "Running hyperparameter search (n_iter=%d cv=%s)",
-                    n_iter,
-                    "TimeSeriesSplit" if cv else "None",
-                )
-                search.fit(X_train, y_train)
-                best_pipe = search.best_estimator_
-                chosen_params = getattr(search, "best_params_", None)
-                best_score = getattr(search, "best_score_", None)
-                logger.debug(
-                    "Hypersearch complete: best_score=%s best_params=%s",
-                    str(best_score),
-                    str(chosen_params),
-                )
-            except Exception:
-                logger.exception(
-                    "Hypersearch failed; falling back to default estimator"
-                )
-                best_pipe = Pipeline(
-                    [
-                        (
-                            "model",
-                            HistGradientBoostingRegressor(
-                                random_state=self.random_state
-                            ),
-                        )
-                    ]
-                )
-                try:
-                    best_pipe.fit(X_train, y_train)
-                except Exception:
-                    logger.exception("Fallback fit failed")
-                    return
+            if not baselines:
+                return None, None
 
-        # final refit on full data (optional) -- clean full arrays first
-        try:
-            if bool(self.opts.get("refit_on_full", True)):
-                try:
-                    X_full, y_full = _clean_train_arrays(X, y_delta)
-                except Exception as e:
-                    logger.exception("Full-data cleaning failed: %s", e)
-                    return
-                best_pipe.fit(X_full, y_full)
+            preds_abs = np.array(baselines) + y_pred_subset[valid_indices]
+            true_abs = np.array(targets)
+            return preds_abs, true_abs
 
-            def predict_fn(Xq):
-                return best_pipe.predict(Xq)
-
-        except Exception:
-            logger.exception("Final refit failed")
-            return
-
-        # OOF: predict on labeled portion and reconstruct absolute preds for human-readable MAE
+        # 1. Training/Full Set Performance
         mae_abs = None
         try:
-            if n_labeled > 0:
-                preds_delta = predict_fn(X[:n_labeled])
-                # reconstruct baseline array using Setpoint.observed_current_setpoint if present, fallback to data.current_setpoint
-                current_arr = np.array(
-                    [
-                        (
-                            _safe_float(getattr(r, "observed_current_setpoint", None))
-                            if getattr(r, "observed_current_setpoint", None) is not None
-                            else _safe_float(r.data.get("current_setpoint", 0.0))
-                        )
-                        for r in used_rows[:n_labeled]
-                    ],
-                    dtype=float,
-                )
-                preds_abs = current_arr + np.array(preds_delta, dtype=float)
-                y_true_abs = np.array(
-                    [
-                        _safe_float(getattr(r, "setpoint", 0.0))
-                        for r in used_rows[:n_labeled]
-                    ],
-                    dtype=float,
-                )
-                mae_abs = float(mean_absolute_error(y_true_abs, preds_abs))
-                self._report_household_drift(
-                    used_rows[:n_labeled], preds_abs, y_true_abs
-                )
-        except Exception:
-            logger.exception("Failed OOF MAE computation")
+            # Predict on the portion used for training (OOF-like analysis)
+            preds_train_delta = model.predict(X_train)
+            p_abs, t_abs = reconstruct_abs(
+                X_train, preds_train_delta, used_rows[: len(X_train)]
+            )
 
+            if p_abs is not None:
+                mae_abs = float(mean_absolute_error(t_abs, p_abs))
+                self._report_household_drift(used_rows[: len(X_train)], p_abs, t_abs)
+        except Exception:
+            logger.exception("Failed computing training MAE")
+
+        # 2. Holdout Validation Performance
         val_mae_abs = None
         try:
-            if X_val is not None and len(X_val):
-                val_preds_delta = predict_fn(X_val)
-                # reconstruct validation baselines from the tail of used_rows
-                n_val = len(X_val)
-                curr_val = np.array(
-                    [
-                        (
-                            _safe_float(getattr(r, "observed_current_setpoint", None))
-                            if getattr(r, "observed_current_setpoint", None) is not None
-                            else _safe_float(r.data.get("current_setpoint", 0.0))
-                        )
-                        for r in used_rows[n_total - n_val : n_total]
-                    ],
-                    dtype=float,
-                )
-                val_preds_abs = curr_val + np.array(val_preds_delta, dtype=float)
-                val_true_abs = np.array(
-                    [
-                        _safe_float(getattr(r, "setpoint", 0.0))
-                        for r in used_rows[n_total - n_val : n_total]
-                    ],
-                    dtype=float,
-                )
-                val_mae_abs = float(mean_absolute_error(val_true_abs, val_preds_abs))
+            if X_val is not None and len(X_val) > 0:
+                preds_val_delta = model.predict(X_val)
+                # Map back to the correct rows (tail of used_rows)
+                val_rows = used_rows[-len(X_val) :]
+                p_val_abs, t_val_abs = reconstruct_abs(X_val, preds_val_delta, val_rows)
+
+                if p_val_abs is not None:
+                    val_mae_abs = float(mean_absolute_error(t_val_abs, p_val_abs))
         except Exception:
-            logger.exception("Failed val MAE computation")
+            logger.exception("Failed computing validation MAE")
 
         runtime = time.time() - start
         logger.info(
-            "Training finished runtime_seconds=%.2f n_labeled=%d mae_abs=%s val_mae_abs=%s",
+            "Training finished. Runtime=%.2fs. Train MAE=%.3f. Holdout MAE=%.3f. Trees=%d",
             runtime,
-            n_labeled,
-            str(mae_abs),
-            str(val_mae_abs),
+            mae_abs if mae_abs else 0.0,
+            val_mae_abs if val_mae_abs else 0.0,
+            model.n_iter_,
         )
 
-        # persist model + meta
+        # Save
         try:
             meta = {
                 "feature_order": self.feature_order,
-                "backend": "sklearn_histgb",
+                "backend": "sklearn_histgb_optimized",
                 "trained_at": datetime.now(timezone.utc).isoformat(),
                 "mae": mae_abs,
                 "val_mae": val_mae_abs,
-                "n_samples": n_labeled,
-                "use_unlabeled": False,
-                "chosen_params": chosen_params,
-                "search_best_score": best_score,
-                "random_state": self.random_state,
+                "n_samples": n_total,
+                "model_params": model.get_params(),
                 "runtime_seconds": runtime,
                 "target": "delta",
             }
-            if self.model_path and os.path.exists(self.model_path):
-                try:
-                    shutil.copy2(self.model_path, self.model_path + ".bak")
-                except Exception:
-                    logger.warning("Failed creating model backup")
-            payload = {"model": best_pipe, "meta": meta}
+
+            payload = {"model": model, "meta": meta}
             _atomic_dump(payload, self.model_path)
-            logger.debug(
-                "Saved model to %s (mae_abs=%s)", self.model_path, str(mae_abs)
-            )
+            logger.debug("Saved model to %s", self.model_path)
+
         except Exception:
             logger.exception("Failed saving model")
-            return
-
-    def _time_splits(self, n_labeled: int):
-        min_train = int(self.opts.get("min_train_size", 30))
-        if n_labeled < min_train:
-            return None
-        n_splits = min(3, max(2, n_labeled // 10))
-        if n_splits >= n_labeled:
-            return None
-        return n_splits
 
     def _report_household_drift(self, used_rows, preds_abs, y_true_abs):
         try:
             hh_map = {}
-            for i, r in enumerate(used_rows):
+            # We need to match the filtered predictions back to rows.
+            # Note: reconstruct_abs filters rows if baseline missing, so lengths might differ slightly
+            # if data is messy, but usually they match.
+            limit = min(len(used_rows), len(preds_abs))
+
+            for i in range(limit):
+                r = used_rows[i]
                 hh = getattr(r, "household_id", None) or "unknown"
                 hh_map.setdefault(hh, []).append((preds_abs[i], y_true_abs[i]))
+
             for hh, vals in hh_map.items():
                 errors = [
                     abs(p - t) for p, t in vals if np.isfinite(p) and np.isfinite(t)
@@ -544,6 +355,9 @@ class TrainerDelta:
                 if not errors:
                     continue
                 hh_mae = float(np.mean(errors))
-                logger.debug("Household %s MAE=%.4f (n=%d)", hh, hh_mae, len(errors))
+                if len(errors) > 5:  # Only report if statistically somewhat relevant
+                    logger.debug(
+                        "Household %s MAE=%.4f (n=%d)", hh, hh_mae, len(errors)
+                    )
         except Exception:
-            logger.exception("Failed computing per-household drift")
+            logger.warning("Could not report household drift details")

@@ -1,12 +1,13 @@
 import os
 import logging
 import joblib
+import numpy as np  # <--- TOEGEVOEGD
 
 from datetime import datetime
 from db import (
     insert_setpoint,
 )
-from collector import Collector
+from collector import Collector, FEATURE_ORDER  # <--- FEATURE_ORDER TOEGEVOEGD
 from ha_client import HAClient
 from utils import safe_round, safe_float
 from trainer_delta import TrainerDelta
@@ -27,18 +28,16 @@ class InferencerDelta:
         self.model = None
 
         # State Tracking
-        self.last_known_setpoint = None  # De 'waarheid' volgens ons geheugen
-        self.last_ai_prediction = None  # Wat wij de vorige keer hebben ingesteld
-        self.last_ai_action_ts = None  # Timestamp van laatste AI actie
-        self.stability_start_ts = None  # Timer voor stabiliteit
+        self.last_known_setpoint = None
+        self.last_ai_prediction = None
+        self.last_ai_action_ts = None
+        self.stability_start_ts = None
         self.last_run_ts = None
 
         self._load_model()
         self._init_state()
 
     def _init_state(self):
-        """Initialiseer de state zodat we niet meteen crashen of false positives krijgen."""
-        # Let op: Zorg dat get_shadow_setpoint de actuele waarde teruggeeft
         sp = self.ha.get_shadow_setpoint()
         if sp is not None:
             self.last_known_setpoint = safe_round(sp)
@@ -58,23 +57,8 @@ class InferencerDelta:
             logger.exception("Failed loading model")
 
     def run_cycle(self):
-        """
-        Draait elke X minuten.
-        Flow:
-        1. Lees sensoren.
-        2. Is Setpoint anders dan in geheugen?
-           JA -> Was het de AI?
-                 JA -> Update geheugen, klaar.
-                 NEE -> User Override! Sla sample op & Start Cooldown.
-           NEE -> Check Stabiliteit.
-                 Is het al lang stabiel? -> Sla sample op (Delta 0).
-                 Zo niet -> Draai AI predictie -> Pas aan indien nodig.
-        """
         ts = datetime.now()
-
-        # Cooldown ophalen uit config (default 1 uur)
         cooldown_hours = float(self.opts.get("cooldown_hours", 1))
-        # Omrekenen naar seconden voor de technische vergelijking
         cooldown_seconds = cooldown_hours * 3600
         threshold = float(self.opts.get("min_change_threshold", 0.25))
 
@@ -105,15 +89,11 @@ class InferencerDelta:
             self.last_known_setpoint is not None
             and curr_sp_rounded != self.last_known_setpoint
         ):
-
-            # Check 1: Klopt de waarde met wat de AI wilde?
             value_match = (
                 self.last_ai_prediction is not None
                 and self.last_ai_prediction == curr_sp_rounded
             )
 
-            # Check 2: Was de AI actie recent genoeg?
-            # We gebruiken cooldown_seconds als 'geldigheidsduur' van het eigenaarschap.
             is_recent = False
             if self.last_ai_action_ts is not None:
                 delta_t = (ts - self.last_ai_action_ts).total_seconds()
@@ -129,13 +109,10 @@ class InferencerDelta:
                 prev_sp = self.last_known_setpoint
                 logger.info(f"User Override Detected: {prev_sp} -> {curr_sp_rounded}")
 
-                # We genereren features met de OUDE setpoint.
-                # Want de gebruiker voelde zich oncomfortabel bij de OUDE situatie.
                 features = self.collector.features_from_raw(
                     raw_data, timestamp=ts, override_setpoint=prev_sp
                 )
 
-                # Opslaan: Input=Features(met prev_sp), Target=curr_sp
                 try:
                     insert_setpoint(
                         features, setpoint=curr_sp_rounded, observed_current=prev_sp
@@ -144,29 +121,19 @@ class InferencerDelta:
                 except Exception:
                     logger.exception("DB Save failed")
 
-                # Hierdoor slaat de AI de komende cyclus(sen) over en vecht hij niet terug.
                 self.last_ai_action_ts = ts
-
                 self.trainer.train_job(force=True)
                 logger.info("Retraining complete.")
-
                 self._load_model()
 
-            # Update state en reset stability timer
             self.last_known_setpoint = curr_sp_rounded
             self.stability_start_ts = None
-
-            # Geen nieuwe predictie direct na een verandering
             return
 
-        # Init case voor als script net start
         if self.last_known_setpoint is None:
             self.last_known_setpoint = curr_sp_rounded
 
         # --- FASE 3: STABILITEIT CHECK ---
-        # Als we hier zijn, is setpoint == last_known_setpoint (niets veranderd)
-
-        # We maken features met de HUIDIGE setpoint
         features = self.collector.features_from_raw(raw_data, timestamp=ts)
 
         is_stable_temp = (
@@ -186,13 +153,11 @@ class InferencerDelta:
                         f"Stability detected ({duration/3600:.1f}h). User implies satisfaction."
                     )
                     try:
-                        # Opslaan als delta=0 (Target == Current)
                         insert_setpoint(
                             features,
                             setpoint=curr_sp_rounded,
                             observed_current=curr_sp_rounded,
                         )
-                        # Timer resetten om spam te voorkomen (e.g. pas over nog eens 8 uur weer loggen)
                         self.stability_start_ts = ts
                     except Exception:
                         logger.exception("Stability log failed")
@@ -201,7 +166,6 @@ class InferencerDelta:
                         f"Stable temp detected, but duration {duration/3600:.1f}h < {hours_required:.1f}h required."
                     )
         else:
-            # Als temperatuur afwijkt, resetten we de timer (systeem is nog bezig)
             self.stability_start_ts = None
             logger.info("Temperature not stable, resetting stability timer.")
 
@@ -222,8 +186,22 @@ class InferencerDelta:
                 return
 
         try:
-            # Feature vector maken
-            X = self.collector.features_to_vector(features)
+            # --- BELANGRIJKE AANPASSING HIERONDER ---
+            # We bouwen de feature vector handmatig om consistentie met de Trainer te garanderen.
+            # De trainer gebruikt np.nan, de collector doet misschien 0.0 of None.
+            vec = []
+            for k in FEATURE_ORDER:
+                v = features.get(k)
+                if v is None:
+                    vec.append(np.nan)  # Gebruik NaN net als in de trainer
+                else:
+                    try:
+                        vec.append(float(v))
+                    except Exception:
+                        vec.append(np.nan)
+
+            # Maak er een 2D array van (1 rij, N kolommen) voor scikit-learn
+            X = np.array([vec], dtype=float)
 
             # Predictie (Delta)
             pred_delta = float(self.model.predict(X)[0])
@@ -238,14 +216,11 @@ class InferencerDelta:
                 logger.info(
                     f"AI suggests change: {curr_sp} -> {new_target:.2f} (Delta {pred_delta:.2f})"
                 )
-
-                # Uitvoeren
                 self.ha.set_setpoint(new_target)
-                # State updaten voor volgende run (zodat we het niet als user override zien)
                 self.last_ai_prediction = safe_round(new_target)
                 self.last_known_setpoint = safe_round(new_target)
                 self.stability_start_ts = None
-                self.last_ai_action_ts = ts  # Timestamp updaten
+                self.last_ai_action_ts = ts
             else:
                 logger.info(
                     f"AI change {new_target:.2f} within threshold {threshold}, no action taken."
