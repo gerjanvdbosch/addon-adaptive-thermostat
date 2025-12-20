@@ -111,7 +111,10 @@ class ClimateCoordinator:
         )
 
         # Andere AI's updaten
+        logger.debug("Coordinator: Running ThermalAI.")
         self.thermal_ai.run_cycle(features, hvac_mode)
+
+        logger.debug("Coordinator: Running PresenceAI.")
         self.presence_ai.log_current_state(features)
 
         if override_detected:
@@ -127,6 +130,8 @@ class ClimateCoordinator:
             self._handle_away_logic(current_sp, features)
 
     def _manage_home_comfort(self, features, current_sp, current_action):
+        logger.debug("Coordinator: Home detected, managing comfort.")
+
         if self.is_preheating:
             logger.info(
                 "Coordinator: User arrived. Pre-heating finished -> Handover to AI."
@@ -140,6 +145,8 @@ class ClimateCoordinator:
             self._set_setpoint_safe(target_sp, current_action)
 
     def _handle_away_logic(self, current_sp, features):
+        logger.debug("Coordinator: Away detected, managing energy saving.")
+
         minutes_needed = (
             self.thermal_ai.predict_heating_time(self.home_temp, features) or 180
         )
