@@ -78,8 +78,8 @@ class Collector:
 
         hvac_mode = {
             "Uit": 0,
-            "SWW": 1,
-            "Verwarmen": 2,
+            "Verwarmen": 1,
+            "SWW": 2,
             "Koelen": 3,
             "Legionellapreventie": 4,
             "Vorstbescherming": 5,

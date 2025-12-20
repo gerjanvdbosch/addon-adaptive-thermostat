@@ -59,7 +59,7 @@ class Setpoint(Base):
 class SolarRecord(Base):
     """Zonne-energie historie voor SolarAI."""
 
-    __tablename__ = "solar_predictions"
+    __tablename__ = "solar_history"
     timestamp = Column(DateTime, primary_key=True)
     solcast_est = Column(Float)
     solcast_10 = Column(Float)
@@ -83,7 +83,7 @@ class HeatingCycle(Base):
 class PresenceRecord(Base):
     """Aanwezigheidspatronen voor PresenceAI."""
 
-    __tablename__ = "presences"
+    __tablename__ = "presence_history"
     timestamp = Column(DateTime, primary_key=True)
     is_home = Column(Boolean, index=True)
 
