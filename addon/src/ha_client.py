@@ -30,6 +30,25 @@ class HAClient:
             logger.exception("Error getting state %s: %s", entity_id, e)
             return None
 
+    def set_state(self, entity_id, state, attributes=None):
+        if attributes is None:
+            attributes = {}
+
+        url = f"{self.url}/states/{entity_id}"
+
+        payload = {"state": state, "attributes": attributes}
+
+        try:
+            r = requests.post(url, json=payload, headers=self.headers)
+            r.raise_for_status()
+            logger.debug(
+                f"State set for {entity_id}: {state} (attrs: {len(attributes)})"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set state for {entity_id}: {e}")
+            return False
+
     def _call_service(self, domain, service, data):
         try:
             r = requests.post(
@@ -48,16 +67,12 @@ class HAClient:
         return safe_float(self.get_state(self.opts.get("thermostat_entity")))
 
     def set_setpoint(self, value):
-        try:
-            setpoint = safe_round(float(value))
-        except Exception:
-            logger.exception("Invalid setpoint value provided: %s", value)
-            return None
-        try:
-            entity = self.opts.get("thermostat_entity")
-            service_data = {"entity_id": entity, "value": safe_round(float(value))}
-            self._call_service("input_number", "set_value", service_data)
-        except Exception:
-            logger.exception("Failed to update setpoint: %s", entity)
-            return None
-        logger.info("Applied setpoint: %.1f", setpoint)
+        setpoint = safe_round(float(value))
+        entity = self.opts.get("thermostat_entity")
+        service_data = {"entity_id": entity, "value": safe_round(float(value))}
+        self._call_service("input_number", "set_value", service_data)
+        logger.debug("Applied setpoint: %.1f", setpoint)
+
+    def set_solar_prediction(self, value, attrs):
+        self.set_state(self.opts.get("solar_entity"), value, attributes=attrs)
+        logger.debug(f"Solar prediction updated: {value}")

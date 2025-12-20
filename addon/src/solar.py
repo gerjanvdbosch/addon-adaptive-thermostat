@@ -210,9 +210,7 @@ class SolarAI:
                     )
 
                 self.last_solcast_poll_ts = current_poll_ts
-                logger.info(
-                    f"SolarAI: Solcast cache vernieuwd (Poll: {current_poll_ts})"
-                )
+                logger.info("SolarAI: Solcast cache vernieuwd")
 
         except Exception:
             logger.exception("SolarAI: Error tijdens Solcast update.")
@@ -407,9 +405,7 @@ class SolarAI:
             f"SolarAI: [{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}"
         )
 
-        # Optioneel: Update een sensor in HA voor visualisatie
-        self.ha.set_state(
-            "sensor.solar_ai_recommendation",
+        self.ha.set_solar(
             res,
             {
                 "reason": reason,
