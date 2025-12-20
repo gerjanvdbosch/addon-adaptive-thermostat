@@ -4,7 +4,6 @@ from datetime import datetime
 
 from utils import (
     safe_float,
-    safe_round,
     cyclical_hour,
     cyclical_day,
     cyclical_doy,
@@ -109,5 +108,5 @@ class Collector:
             "wind_speed": safe_float(sensor_dict.get("wind_speed")),
             "wind_dir_sin": wtd_sin,
             "wind_dir_cos": wtd_cos,
-            "solar_kwh": safe_round(sensor_dict.get("solar_kwh")),
+            "solar_kwh": safe_float(sensor_dict.get("solar_kwh")),
         }
