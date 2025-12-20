@@ -102,6 +102,7 @@ class ClimateCoordinator:
             return
 
         if current_sp is None:
+            logger.error("Coordinator: Current setpoint is None, aborting tick.")
             return
 
         # 2. AI Agents Updaten & Checken op User Override
@@ -114,6 +115,7 @@ class ClimateCoordinator:
         self.presence_ai.log_current_state(features)
 
         if override_detected:
+            logger.info("Coordinator: User override detected, skipping AI adjustment.")
             return
 
         # 3. Beslis-logica: Ben ik thuis of niet?
