@@ -47,7 +47,6 @@ class Setpoint(Base):
     heat_demand = Column(Integer)
     current_temp = Column(Float)
     temp_change = Column(Float)
-    current_setpoint = Column(Float)  # Baseline
     outside_temp = Column(Float)
     min_temp = Column(Float)
     max_temp = Column(Float)

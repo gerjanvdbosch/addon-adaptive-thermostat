@@ -38,9 +38,7 @@ class ThermostatAI:
                 "thermostat_model_path", "/config/models/thermostat_model.joblib"
             )
         )
-        self.random_state = int(self.opts.get("random_state", 42))
         self.feature_columns = FEATURE_ORDER
-
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Runtime State
@@ -52,7 +50,7 @@ class ThermostatAI:
 
         # Initialisatie
         self._load_model()
-        sp = self.ha.get_shadow_setpoint()
+        sp = self.ha.get_setpoint()
         if sp is not None:
             self.last_known_setpoint = safe_round(sp)
 
@@ -163,7 +161,7 @@ class ThermostatAI:
             early_stopping=True,
             validation_fraction=0.15,
             n_iter_no_change=20,
-            random_state=self.random_state,
+            random_state=42,
         )
 
         try:

@@ -9,3 +9,6 @@
 * Added PresenceAI
 * Added ThermalAI
 * Added ClimateCoordinator
+* Added WebApi
+* Added HaClient
+* Added Collector

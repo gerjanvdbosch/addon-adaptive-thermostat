@@ -34,9 +34,9 @@ class ClimateCoordinator:
         self.thermal_ai = ThermalAI(self.ha, opts)
 
         # Settings
-        self.comfort_temp = float(self.opts.get("comfort_temp", 20.5))
-        self.eco_temp = float(self.opts.get("eco_temp", 17.0))
-        self.min_change_threshold = float(self.opts.get("min_change_threshold", 0.25))
+        self.comfort_temp = float(self.opts.get("comfort_temp", 20.0))
+        self.eco_temp = float(self.opts.get("eco_temp", 19.0))
+        self.min_change_threshold = float(self.opts.get("min_change_threshold", 0.5))
 
         # Compressor Protection
         self.min_run_minutes = int(self.opts.get("min_run_minutes", 60))
@@ -105,7 +105,7 @@ class ClimateCoordinator:
         try:
             # Check of we verse data nodig hebben
             raw_data = self.collector.read_sensors()
-            current_sp = safe_float(self.ha.get_shadow_setpoint())
+            current_sp = safe_float(self.ha.get_setpoint())
         except Exception as e:
             logger.error(f"Coordinator: Sensor read failed: {e}")
             return
@@ -137,7 +137,7 @@ class ClimateCoordinator:
         state = self.ha.get_state("zone.home")
         if not state:
             return False
-        val = state.get("state")
+        val = state
         if str(val).isdigit():
             return int(val) > 0
         return str(val).lower() in ["home", "on", "occupied"]
@@ -176,7 +176,7 @@ class ClimateCoordinator:
         self._set_setpoint_safe(target)
 
     def _set_setpoint_safe(self, target_sp):
-        current_sp = safe_float(self.ha.get_shadow_setpoint())
+        current_sp = safe_float(self.ha.get_setpoint())
         if current_sp is None or abs(target_sp - current_sp) < 0.1:
             return
 
@@ -192,7 +192,7 @@ class ClimateCoordinator:
     def _get_hvac_action(self):
         entity = self.opts.get("sensor_hvac_action", "sensor.thermostat_hvac_action")
         state = self.ha.get_state(entity)
-        return state.get("state") if state else "idle"
+        return state if state else "idle"
 
     def _is_change_safe(self, target_setpoint, current_setpoint):
         now = datetime.now(timezone.utc)

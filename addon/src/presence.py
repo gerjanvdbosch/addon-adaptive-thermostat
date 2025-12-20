@@ -85,9 +85,6 @@ class PresenceAI:
         df["day_sin"] = np.sin(2 * np.pi * local_dt.dayofweek / 7)
         df["day_cos"] = np.cos(2 * np.pi * local_dt.dayofweek / 7)
 
-        # 3. Weekend vlag
-        df["is_weekend"] = (local_dt.dayofweek >= 5).astype(int)
-
         # 4. Seizoens-invloed (Mensen zijn in de winter vaker thuis dan zomer)
         df["doy_sin"] = np.sin(2 * np.pi * local_dt.dayofyear / 365)
         df["doy_cos"] = np.cos(2 * np.pi * local_dt.dayofyear / 365)
@@ -98,7 +95,6 @@ class PresenceAI:
                 "hour_cos",
                 "day_sin",
                 "day_cos",
-                "is_weekend",
                 "doy_sin",
                 "doy_cos",
             ]
@@ -116,7 +112,7 @@ class PresenceAI:
         if not state_obj:
             return
 
-        val = str(state_obj.get("state")).lower()
+        val = str(state_obj).lower()
 
         # HA Zone/Presence logica
         is_home = False

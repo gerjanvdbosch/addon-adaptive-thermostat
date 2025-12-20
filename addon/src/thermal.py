@@ -89,10 +89,10 @@ class ThermalAI:
 
         try:
             state_obj = self.ha.get_state(self.entity_hvac_action)
-            current_action = state_obj.get("state") if state_obj else "unknown"
+            current_action = state_obj if state_obj else "unknown"
 
-            temp = safe_float(self.ha.get_state(self.entity_temp).get("state"))
-            outside = safe_float(self.ha.get_state(self.entity_outside).get("state"))
+            temp = safe_float(self.ha.get_state(self.entity_temp))
+            outside = safe_float(self.ha.get_state(self.entity_outside))
         except Exception:
             return
 
@@ -184,10 +184,8 @@ class ThermalAI:
             return None
 
         try:
-            current_temp = safe_float(self.ha.get_state(self.entity_temp).get("state"))
-            outside_temp = safe_float(
-                self.ha.get_state(self.entity_outside).get("state")
-            )
+            current_temp = safe_float(self.ha.get_state(self.entity_temp))
+            outside_temp = safe_float(self.ha.get_state(self.entity_outside))
         except Exception:
             return None
 

@@ -32,7 +32,7 @@ options:
     max_temp: sensor.temperatuur_1d
     solar_kwh: sensor.solcast_pv_forecast_forecast_today
     wind_speed: sensor.windkracht_1d
-    wind_direction: sensor.windrichting_azimut_1d
+    wind_dir: sensor.windrichting_azimut_1d
     outside_temp: sensor.temperatuur
     home_presence: input_boolean.thuis_aanwezig
     hvac_mode: sensor.ecodan_heatpump_ca09ec_status_bedrijf
@@ -59,7 +59,7 @@ schema:
     max_temp: "str?"
     solar_kwh: "str?"
     wind_speed: "str?"
-    wind_direction: "str?"
+    wind_dir: "str?"
     outside_temp: "str?"
     home_presence: "str?"
     hvac_mode: "str?"

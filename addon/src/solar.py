@@ -183,10 +183,10 @@ class SolarAI:
         """Haalt nieuwe voorspellingen op uit HA en slaat ze op in de DB."""
         try:
             poll_state = self.ha.get_state(self.entity_solcast_poll)
-            if not poll_state or poll_state.get("state") in ["unknown", "unavailable"]:
+            if not poll_state or poll_state in ["unknown", "unavailable"]:
                 return
 
-            current_poll_ts = poll_state.get("state")
+            current_poll_ts = poll_state
             if current_poll_ts == self.last_solcast_poll_ts:
                 return
 
