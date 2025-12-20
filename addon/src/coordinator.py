@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 # Project imports
 from utils import safe_float, safe_bool
@@ -44,19 +44,9 @@ class ClimateCoordinator:
         self.min_off_minutes = int(self.opts.get("min_off_minutes", 30))
 
         # Runtime State
-        self.last_hvac_mode = "idle"
-        self.last_action_change_ts = datetime.now(timezone.utc) - timedelta(hours=1)
+        self.last_hvac_mode = "off"
+        self.last_action_change_ts = datetime.now() - timedelta(hours=1)
         self.is_preheating = False
-
-        # Initialiseren van de status
-        self._init_hvac_state()
-
-    def _init_hvac_state(self):
-        """Haal initiële status op bij start."""
-        try:
-            self.last_hvac_mode = self._get_hvac_mode()
-        except Exception:
-            pass
 
     # ==============================================================================
     # PUBLIC METHODS (Voor de Scheduler)
@@ -105,7 +95,7 @@ class ClimateCoordinator:
             raw_data = self.collector.read_sensors()
             features = self.collector.features_from_raw(raw_data)
             current_sp = features.get("current_setpoint")
-            hvac_mode = self._get_hvac_mode()
+            hvac_mode = self._get_hvac_mode(raw_data)
         except Exception as e:
             logger.error(f"Coordinator: Sensor read failed: {e}")
             return
