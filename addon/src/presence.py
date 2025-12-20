@@ -1,4 +1,3 @@
-import os
 import logging
 import joblib
 import numpy as np
@@ -15,6 +14,7 @@ from ha_client import HAClient
 
 logger = logging.getLogger(__name__)
 
+
 class PresenceAI:
     """
     PresenceAI: Voorspelt aanwezigheid op basis van historische patronen.
@@ -26,7 +26,9 @@ class PresenceAI:
         self.opts = opts or {}
 
         # Config
-        self.model_path = Path(self.opts.get("model_path_presence", "/config/models/presence_model.joblib"))
+        self.model_path = Path(
+            self.opts.get("presence_model_path", "/config/models/presence_model.joblib")
+        )
         self.presence_sensor = self.opts.get("sensor_presence", "zone.home")
 
         # Voor vloerverwarming: kijk 180-240 min vooruit
@@ -45,14 +47,17 @@ class PresenceAI:
         if self.model_path.exists():
             try:
                 payload = joblib.load(self.model_path)
-                self.model = payload.get("model") if isinstance(payload, dict) else payload
+                self.model = (
+                    payload.get("model") if isinstance(payload, dict) else payload
+                )
                 self.is_fitted = True
                 logger.info("PresenceAI: Model geladen.")
             except Exception:
                 logger.warning("PresenceAI: Kon model niet laden.")
 
     def _atomic_save(self, meta=None):
-        if not self.model: return
+        if not self.model:
+            return
         tmp = self.model_path.with_suffix(".tmp")
         try:
             joblib.dump({"model": self.model, "meta": meta}, tmp)
@@ -67,7 +72,9 @@ class PresenceAI:
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
         # Gebruik lokale tijd voor ritme-detectie
-        local_dt = df["timestamp"].dt.tz_convert("Europe/Amsterdam").dt # Pas aan naar jouw TZ
+        local_dt = (
+            df["timestamp"].dt.tz_convert("Europe/Amsterdam").dt
+        )  # Pas aan naar jouw TZ
 
         # 1. Cyclische uren (0-23)
         hour_float = local_dt.hour + local_dt.minute / 60.0
@@ -85,7 +92,17 @@ class PresenceAI:
         df["doy_sin"] = np.sin(2 * np.pi * local_dt.dayofyear / 365)
         df["doy_cos"] = np.cos(2 * np.pi * local_dt.dayofyear / 365)
 
-        return df[["hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend", "doy_sin", "doy_cos"]]
+        return df[
+            [
+                "hour_sin",
+                "hour_cos",
+                "day_sin",
+                "day_cos",
+                "is_weekend",
+                "doy_sin",
+                "doy_cos",
+            ]
+        ]
 
     def log_current_state(self):
         """Verzamelt aanwezigheidsdata van Home Assistant."""
@@ -96,7 +113,8 @@ class PresenceAI:
             return
 
         state_obj = self.ha.get_state(self.presence_sensor)
-        if not state_obj: return
+        if not state_obj:
+            return
 
         val = str(state_obj.get("state")).lower()
 
@@ -130,7 +148,7 @@ class PresenceAI:
             early_stopping=True,
             validation_fraction=0.15,
             random_state=42,
-            class_weight='balanced' # Belangrijk voor onregelmatige patronen
+            class_weight="balanced",  # Belangrijk voor onregelmatige patronen
         )
 
         try:
@@ -153,7 +171,11 @@ class PresenceAI:
             return False, 0.0
 
         # Gebruik de dynamische waarde, of val terug op de standaard uit de config
-        lookahead = int(dynamic_minutes) if dynamic_minutes is not None else self.preheat_minutes
+        lookahead = (
+            int(dynamic_minutes)
+            if dynamic_minutes is not None
+            else self.preheat_minutes
+        )
 
         # Begrens de lookahead (bijv. minimaal 30 min, maximaal 8 uur voor WP)
         lookahead = max(30, min(lookahead, 480))
@@ -177,6 +199,8 @@ class PresenceAI:
         triggered = max_prob >= self.confidence_threshold
 
         if triggered:
-            logger.info(f"PresenceAI: Dynamische Pre-heat trigger! Window: {lookahead} min. Kans: {max_prob:.2f}")
+            logger.info(
+                f"PresenceAI: Dynamische Pre-heat trigger! Window: {lookahead} min. Kans: {max_prob:.2f}"
+            )
 
         return triggered, max_prob

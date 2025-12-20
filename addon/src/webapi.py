@@ -45,7 +45,7 @@ class SetpointOut(BaseModel):
     timestamp: datetime
     data: Optional[dict]
     setpoint: Optional[float]
-    observed_current_setpoint: Optional[float]
+    current_setpoint: Optional[float]
 
 
 class SampleOut(BaseModel):
@@ -177,9 +177,7 @@ def list_setpoints(
                     timestamp=r.timestamp,
                     data=getattr(r, "data", None) or {},
                     setpoint=getattr(r, "setpoint", None),
-                    observed_current_setpoint=getattr(
-                        r, "observed_current_setpoint", None
-                    ),
+                    current_setpoint=getattr(r, "current_setpoint", None),
                 )
             )
         return out
@@ -191,7 +189,7 @@ class SetpointPatch(BaseModel):
     setpoint: Optional[float] = Field(
         None, description="New setpoint value or null to clear"
     )
-    observed_current_setpoint: Optional[float] = Field(
+    current_setpoint: Optional[float] = Field(
         None, description="Observed baseline to store"
     )
 
@@ -218,13 +216,13 @@ def patch_setpoint_minimal(
             )
 
     obs_val = None
-    if payload.observed_current_setpoint is not None:
+    if payload.current_setpoint is not None:
         try:
-            obs_val = float(payload.observed_current_setpoint)
+            obs_val = float(payload.current_setpoint)
         except Exception:
             raise HTTPException(
                 status_code=400,
-                detail="observed_current_setpoint must be numeric or null",
+                detail="current_setpoint must be numeric or null",
             )
 
     # Apply update
@@ -243,9 +241,7 @@ def patch_setpoint_minimal(
             "id": row.id,
             "timestamp": row.timestamp if isinstance(row.timestamp, datetime) else None,
             "setpoint": getattr(row, "setpoint", None),
-            "observed_current_setpoint": getattr(
-                row, "observed_current_setpoint", None
-            ),
+            "current_setpoint": getattr(row, "current_setpoint", None),
         }
     finally:
         s.close()

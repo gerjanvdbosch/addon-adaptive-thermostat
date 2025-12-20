@@ -7,10 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class HAClient:
-    def __init__(self, opts, url=None, token=None):
+    def __init__(self, opts):
         self.opts = opts or {}
-        self.url = url or os.environ.get("SUPERVISOR_API", "http://supervisor/core/api")
-        self.token = token or os.environ.get("SUPERVISOR_TOKEN")
+        self.url = os.environ.get("SUPERVISOR_API", "http://supervisor/core/api")
+        self.token = os.environ.get("SUPERVISOR_TOKEN")
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
@@ -42,15 +42,6 @@ class HAClient:
         except Exception as e:
             logger.exception("Error calling service %s.%s: %s", domain, service, e)
             return None
-
-    def list_states(self):
-        try:
-            r = requests.get(f"{self.url}/states", headers=self.headers, timeout=10)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            logger.exception("Error listing states: %s", e)
-            return []
 
     def get_setpoint(self):
         current_setpoint = None

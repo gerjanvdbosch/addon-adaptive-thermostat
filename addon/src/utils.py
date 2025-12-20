@@ -1,7 +1,5 @@
 import math
 
-from datetime import datetime
-
 
 def round_half(x):
     return round(x * 2) / 2
@@ -33,29 +31,11 @@ def cyclical_day(ts):
     return math.sin(2 * math.pi * d / 7.0), math.cos(2 * math.pi * d / 7.0)
 
 
-def cyclical_month(ts):
-    m = ts.month - 1  # 0..11
-    return math.sin(2 * math.pi * m / 12.0), math.cos(2 * math.pi * m / 12.0)
-
-
-def day_or_night(ts=None):
-    if ts is None:
-        ts = datetime.now()
-    h = ts.hour
-    if 7 <= h < 22:
-        return 0  # day
-    return 1  # night
-
-
-def month_to_season(ts):
-    m = ts.month
-    if m in (12, 1, 2):
-        return 0  # Dec-Feb=winter
-    if m in (3, 4, 5):
-        return 1  # Mar-May=spring
-    if m in (6, 7, 8):
-        return 2  # Jun-Aug=summer
-    return 3  # Sep-Nov=autumn
+def cyclical_doy(ts):
+    doy = ts.timetuple().tm_yday
+    doy_sin = math.sin(2 * math.pi * doy / 366.0)
+    doy_cos = math.cos(2 * math.pi * doy / 366.0)
+    return doy_sin, doy_cos
 
 
 def encode_wind(degrees):

@@ -3,7 +3,7 @@ import joblib
 import time
 import numpy as np
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 # Machine Learning
@@ -17,6 +17,7 @@ from ha_client import HAClient
 from utils import safe_round, safe_float
 
 logger = logging.getLogger(__name__)
+
 
 class ThermostatAI:
     """
@@ -32,7 +33,11 @@ class ThermostatAI:
         self.opts = opts or {}
 
         # Config
-        self.model_path = Path(self.opts.get("model_path", "/config/models/delta_model.joblib"))
+        self.model_path = Path(
+            self.opts.get(
+                "thermostat_model_path", "/config/models/thermostat_model.joblib"
+            )
+        )
         self.random_state = int(self.opts.get("random_state", 42))
         self.feature_columns = FEATURE_ORDER
 
@@ -43,7 +48,7 @@ class ThermostatAI:
         self.is_fitted = False
         self.last_known_setpoint = None
         self.stability_start_ts = None
-        self.last_ai_action_ts = None  # <--- TERUGGEZET: Tijdstip laatste AI wijziging
+        self.last_ai_action_ts = None
 
         # Initialisatie
         self._load_model()
@@ -71,6 +76,53 @@ class ThermostatAI:
         except Exception:
             logger.exception("ThermostatAI: Opslaan mislukt.")
 
+    # ==============================================================================
+    # NIEUW: Feature Engineering Methodes
+    # ==============================================================================
+
+    def _add_time_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Voegt cyclische tijd-features toe aan de DataFrame op basis van de 'timestamp' kolom.
+        Wordt gebruikt tijdens TRAINING.
+        """
+        if "timestamp" not in df.columns:
+            return df
+
+        # Zorg dat timestamp datetime is
+        dt = pd.to_datetime(df["timestamp"])
+
+        # Uur van de dag (0-23)
+        df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
+        df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
+
+        # Dag van de week (0-6)
+        df["day_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
+        df["day_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
+
+        # Dag van het jaar (1-366)
+        df["doy_sin"] = np.sin(2 * np.pi * dt.dt.dayofyear / 366.0)
+        df["doy_cos"] = np.cos(2 * np.pi * dt.dt.dayofyear / 366.0)
+
+        return df
+
+    def _get_current_time_features(self, ts: datetime) -> dict:
+        """
+        Berekent cyclische features voor één tijdstip.
+        Wordt gebruikt tijdens INFERENCE (voorspelling).
+        """
+        return {
+            "hour_sin": np.sin(2 * np.pi * ts.hour / 24.0),
+            "hour_cos": np.cos(2 * np.pi * ts.hour / 24.0),
+            "day_sin": np.sin(2 * np.pi * ts.weekday() / 7.0),
+            "day_cos": np.cos(2 * np.pi * ts.weekday() / 7.0),
+            "doy_sin": np.sin(2 * np.pi * ts.timetuple().tm_yday / 366.0),
+            "doy_cos": np.cos(2 * np.pi * ts.timetuple().tm_yday / 366.0),
+        }
+
+    # ==============================================================================
+    # TRAINING LOGICA
+    # ==============================================================================
+
     def train(self, force=False):
         """Traint het AI model op basis van de database data."""
         logger.info("ThermostatAI: Start training...")
@@ -82,37 +134,52 @@ class ThermostatAI:
             logger.warning("ThermostatAI: Te weinig data voor training.")
             return
 
-        df["delta"] = df["setpoint"] - df["observed_current_setpoint"]
+        # 1. Bereken de Delta
+        df["delta"] = df["setpoint"] - df["current_setpoint"]
         df = df[df["delta"].abs() < 10].dropna(subset=["delta"])
 
+        # 2. NIEUW: Voeg tijd-features toe op basis van timestamp
+        df = self._add_time_features(df)
+
+        # 3. Vul ontbrekende kolommen met NaN en converteer naar numeric
         for col in self.feature_columns:
             if col not in df.columns:
                 df[col] = np.nan
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
         X = df[self.feature_columns]
         y = df["delta"]
 
-        if len(X) < 20: return
+        if len(X) < 20:
+            return
 
         new_model = HistGradientBoostingRegressor(
-            loss="absolute_error", learning_rate=0.05, max_iter=2000,
-            max_leaf_nodes=31, min_samples_leaf=20, l2_regularization=1.0,
-            early_stopping=True, validation_fraction=0.15,
-            n_iter_no_change=20, random_state=self.random_state
+            loss="absolute_error",
+            learning_rate=0.05,
+            max_iter=2000,
+            max_leaf_nodes=31,
+            min_samples_leaf=20,
+            l2_regularization=1.0,
+            early_stopping=True,
+            validation_fraction=0.15,
+            n_iter_no_change=20,
+            random_state=self.random_state,
         )
 
         try:
             new_model.fit(X, y)
             mae = mean_absolute_error(y, new_model.predict(X))
             meta = {
-                "trained_at": datetime.now(timezone.utc).isoformat(),
-                "mae": float(mae), "samples": len(X)
+                "trained_at": datetime.now().isoformat(),
+                "mae": float(mae),
+                "samples": len(X),
             }
             self.model = new_model
             self.is_fitted = True
             self._atomic_save(new_model, meta)
-            logger.info(f"ThermostatAI: Training gereed in {time.time()-start_time:.2f}s. MAE={mae:.3f}")
+            logger.info(
+                f"ThermostatAI: Training gereed in {time.time()-start_time:.2f}s. MAE={mae:.3f}"
+            )
         except Exception:
             logger.exception("ThermostatAI: Training gecrasht.")
 
@@ -126,7 +193,7 @@ class ThermostatAI:
         """
         self.last_known_setpoint = safe_round(new_setpoint)
         self.stability_start_ts = None
-        self.last_ai_action_ts = datetime.now() # <--- UPDATE: Timer resetten
+        self.last_ai_action_ts = datetime.now()
 
     def update_learning_state(self, raw_data, current_sp):
         """
@@ -144,16 +211,26 @@ class ThermostatAI:
         # 1. DETECTEER HANDMATIGE AANPASSING (USER OVERRIDE)
         if curr_sp_rounded != self.last_known_setpoint:
             # Check of dit niet stiekem onze eigen actie was (race condition protection)
-            cooldown_seconds = float(self.opts.get("cooldown_hours", 1)) * 3600
-            is_recent_ai = self.last_ai_action_ts and (ts - self.last_ai_action_ts).total_seconds() < 60
+            is_recent_ai = (
+                self.last_ai_action_ts
+                and (ts - self.last_ai_action_ts).total_seconds() < 60
+            )
 
             # Als het > 60 sec na onze eigen actie is, en het setpoint is anders -> User action
             if not is_recent_ai:
                 prev_sp = self.last_known_setpoint
-                logger.info(f"User Override Gedetecteerd: {prev_sp} -> {curr_sp_rounded}. Retraining...")
+                logger.info(
+                    f"User Override Gedetecteerd: {prev_sp} -> {curr_sp_rounded}. Retraining..."
+                )
 
-                feats = self.collector.features_from_raw(raw_data, timestamp=ts, override_setpoint=prev_sp)
-                insert_setpoint(feature_dict=feats, setpoint=curr_sp_rounded, observed_current=prev_sp)
+                feats = self.collector.features_from_raw(
+                    raw_data, timestamp=ts, override_setpoint=prev_sp
+                )
+                insert_setpoint(
+                    feature_dict=feats,
+                    setpoint=curr_sp_rounded,
+                    observed_current=prev_sp,
+                )
 
                 self.train(force=True)
                 did_train = True
@@ -174,7 +251,11 @@ class ThermostatAI:
                     if stable_hours > float(self.opts.get("stability_hours", 8.0)):
                         logger.info("Stabiliteit bereikt: Datapunt opslaan.")
                         feats = self.collector.features_from_raw(raw_data, timestamp=ts)
-                        insert_setpoint(feature_dict=feats, setpoint=curr_sp_rounded, observed_current=curr_sp_rounded)
+                        insert_setpoint(
+                            feature_dict=feats,
+                            setpoint=curr_sp_rounded,
+                            observed_current=curr_sp_rounded,
+                        )
                         self.stability_start_ts = ts
             else:
                 self.stability_start_ts = None

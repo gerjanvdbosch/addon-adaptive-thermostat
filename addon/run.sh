@@ -10,17 +10,17 @@ mkdir -p "${MODEL_DIR}"
 mkdir -p "${DB_DIR}"
 
 export DB_PATH="${DB_DIR}/database.sqlite"
-export MODEL_PATH="${MODEL_DIR}/delta_model.joblib"
+export THERMOSTAT_MODEL_PATH="${MODEL_DIR}/thermostat_model.joblib"
+export SOLAR_MODEL_PATH="${MODEL_DIR}/solar_model.joblib"
+export PRESENCE_MODEL_PATH="${MODEL_DIR}/presence_model.joblib"
+export THERMAL_MODEL_PATH="${MODEL_DIR}/thermal_model.joblib"
 
-if bashio::config.true 'shadow_mode'; then
-  export SHADOW_MODE=1
-fi
-
-export CLIMATE_ENTITY="$(bashio::config 'climate_entity')"
-export SHADOW_SETPOINT="$(bashio::config 'shadow_setpoint')"
-export INFERENCER_INTERVAL_SECONDS="$(bashio::config 'inferencer_interval_seconds')"
+export THERMOSTAT_ENTITY="$(bashio::config 'thermostat_entity')"
+export SOLAR_ENTITY="$(bashio::config 'solar_entity')"
+export PRESENCE_ENTITY="$(bashio::config 'presence_entity')"
+export THERMAL_ENTITY="$(bashio::config 'thermal_entity')"
+export THERMOSTAT_INTERVAL_SECONDS="$(bashio::config 'thermostat_interval_seconds')"
 export SOLAR_INTERVAL_SECONDS="$(bashio::config 'solar_interval_seconds')"
-export SAMPLE_INTERVAL_SECONDS="$(bashio::config 'sample_interval_seconds')"
 export COOLDOWN_HOURS="$(bashio::config 'cooldown_hours')"
 export STABILITY_HOURS="$(bashio::config 'stability_hours')"
 export FULL_RETRAIN_TIME="$(bashio::config 'full_retrain_time')"

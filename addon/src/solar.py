@@ -1,15 +1,13 @@
-import os
 import logging
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from collections import deque
 
 # Machine Learning
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
 
 # Project Imports
 # Let op: Zorg dat deze functies in je db.py en ha_client.py staan
@@ -25,6 +23,7 @@ SYSTEM_MAX_KW = 2.0  # Max vermogen van je omvormer
 SWW_DURATION_HOURS = 1.0  # Hoe lang duurt een run voor warm water?
 AGGREGATION_MINUTES = 30  # Hoe vaak slaan we een record op in de DB?
 
+
 class SolarAI:
     """
     SolarAI: Voorspelt het ideale moment voor energie-intensieve taken (zoals SWW).
@@ -36,13 +35,21 @@ class SolarAI:
         self.opts = opts or {}
 
         # --- Config ---
-        self.model_path = Path(self.opts.get("model_path_solar", "/config/models/solar_model.joblib"))
+        self.model_path = Path(
+            self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
+        )
         self.interval = int(self.opts.get("solar_interval_seconds", 60))
 
         # Sensoren
-        self.entity_pv = self.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")
-        self.entity_solcast = self.opts.get("sensor_solcast", "sensor.solcast_pv_forecast_forecast_today")
-        self.entity_solcast_poll = self.opts.get("sensor_solcast_poll", "sensor.solcast_pv_forecast_api_last_polled")
+        self.entity_pv = self.opts.get(
+            "sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual"
+        )
+        self.entity_solcast = self.opts.get(
+            "sensor_solcast", "sensor.solcast_pv_forecast_forecast_today"
+        )
+        self.entity_solcast_poll = self.opts.get(
+            "sensor_solcast_poll", "sensor.solcast_pv_forecast_api_last_polled"
+        )
 
         # Zorg dat de map bestaat
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +104,7 @@ class SolarAI:
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
         if df["timestamp"].dt.tz is not None:
-             df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
+            df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
 
         # Cyclische Tijd Features
         hours = df["timestamp"].dt.hour + df["timestamp"].dt.minute / 60.0
@@ -112,8 +119,14 @@ class SolarAI:
         df["uncertainty"] = df["solcast_90"] - df["solcast_10"]
 
         features = [
-            "solcast_est", "solcast_10", "solcast_90", "uncertainty",
-            "hour_sin", "hour_cos", "doy_sin", "doy_cos"
+            "solcast_est",
+            "solcast_10",
+            "solcast_90",
+            "uncertainty",
+            "hour_sin",
+            "hour_cos",
+            "doy_sin",
+            "doy_cos",
         ]
         return df[features]
 
@@ -128,7 +141,9 @@ class SolarAI:
         df = fetch_solar_training_data_orm(days=180)
 
         if len(df) < 100:
-            logger.warning(f"SolarAI: Te weinig data ({len(df)} samples). Training overgeslagen.")
+            logger.warning(
+                f"SolarAI: Te weinig data ({len(df)} samples). Training overgeslagen."
+            )
             return
 
         X = self._create_features(df)
@@ -140,16 +155,16 @@ class SolarAI:
 
         # Histogram Gradient Boosting (Robuust en snel)
         self.model = HistGradientBoostingRegressor(
-            loss="absolute_error",     # TOP: Erg robuust tegen uitschieters
-            learning_rate=0.05,        # TOP: Rustig leerproces
-            max_iter=2000,             # Goed: Early stopping doet de rest
-            max_leaf_nodes=31,         # Goed: Voorkomt te complexe bomen
-            min_samples_leaf=20,       # Goed: Voorkomt regels op basis van te weinig data
-            l2_regularization=1.0,     # TOP: Houdt de gewichten bescheiden
-            early_stopping=True,       # Noodzakelijk bij 2000 iteraties
+            loss="absolute_error",  # TOP: Erg robuust tegen uitschieters
+            learning_rate=0.05,  # TOP: Rustig leerproces
+            max_iter=2000,  # Goed: Early stopping doet de rest
+            max_leaf_nodes=31,  # Goed: Voorkomt te complexe bomen
+            min_samples_leaf=20,  # Goed: Voorkomt regels op basis van te weinig data
+            l2_regularization=1.0,  # TOP: Houdt de gewichten bescheiden
+            early_stopping=True,  # Noodzakelijk bij 2000 iteraties
             validation_fraction=0.15,  # Laat Scikit-Learn ZELF 15% apart houden
-            n_iter_no_change=20,       # Geduld voordat hij stopt
-            random_state=42            # Zorgt voor reproduceerbare resultaten
+            n_iter_no_change=20,  # Geduld voordat hij stopt
+            random_state=42,  # Zorgt voor reproduceerbare resultaten
         )
 
         try:
@@ -176,7 +191,11 @@ class SolarAI:
                 return
 
             state = self.ha.get_state(self.entity_solcast)
-            if state and "attributes" in state and "detailedForecast" in state["attributes"]:
+            if (
+                state
+                and "attributes" in state
+                and "detailedForecast" in state["attributes"]
+            ):
                 raw_data = state["attributes"]["detailedForecast"]
                 self.cached_solcast_data = raw_data
 
@@ -187,11 +206,13 @@ class SolarAI:
                         ts,
                         solcast_est=item["pv_estimate"],
                         solcast_10=item["pv_estimate10"],
-                        solcast_90=item["pv_estimate90"]
+                        solcast_90=item["pv_estimate90"],
                     )
 
                 self.last_solcast_poll_ts = current_poll_ts
-                logger.info(f"SolarAI: Solcast cache vernieuwd (Poll: {current_poll_ts})")
+                logger.info(
+                    f"SolarAI: Solcast cache vernieuwd (Poll: {current_poll_ts})"
+                )
 
         except Exception:
             logger.exception("SolarAI: Error tijdens Solcast update.")
@@ -243,7 +264,14 @@ class SolarAI:
         # 1. Prepareer DataFrame
         df = pd.DataFrame(self.cached_solcast_data)
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
-        df.rename(columns={"pv_estimate": "solcast_est", "pv_estimate10": "solcast_10", "pv_estimate90": "solcast_90"}, inplace=True)
+        df.rename(
+            columns={
+                "pv_estimate": "solcast_est",
+                "pv_estimate10": "solcast_10",
+                "pv_estimate90": "solcast_90",
+            },
+            inplace=True,
+        )
         df.sort_values("timestamp", inplace=True)
 
         # 2. AI Predictie
@@ -271,7 +299,9 @@ class SolarAI:
                 self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
                 self.smoothed_bias = np.clip(self.smoothed_bias, 0.4, 1.6)
 
-            df["ai_power"] = (df["ai_power_raw"] * self.smoothed_bias).clip(0, SYSTEM_MAX_KW)
+            df["ai_power"] = (df["ai_power_raw"] * self.smoothed_bias).clip(
+                0, SYSTEM_MAX_KW
+            )
         else:
             df["ai_power"] = df["ai_power_raw"]
 
@@ -296,26 +326,53 @@ class SolarAI:
         # 6. Besluitvorming
         # A. Is er genoeg zon?
         if best_power < 0.6:
-            return {"action": "WAIT", "reason": f"Te weinig zon verwacht ({best_power:.2f}kW)", "plan_start": start_time_local}
+            return {
+                "action": "WAIT",
+                "reason": f"Te weinig zon verwacht ({best_power:.2f}kW)",
+                "plan_start": start_time_local,
+            }
 
         # B. Zitten we in het ideale blok? (-15min marge)
-        if (best_row["timestamp"] - timedelta(minutes=15)) <= now_utc < (best_row["timestamp"] + timedelta(minutes=30)):
+        if (
+            (best_row["timestamp"] - timedelta(minutes=15))
+            <= now_utc
+            < (best_row["timestamp"] + timedelta(minutes=30))
+        ):
             if not is_stable and median_pv < 1.0:
-                return {"action": "WAIT_CLOUD", "reason": "Wachten op stabieler zonlicht", "plan_start": start_time_local}
+                return {
+                    "action": "WAIT_CLOUD",
+                    "reason": "Wachten op stabieler zonlicht",
+                    "plan_start": start_time_local,
+                }
 
-            return {"action": "START", "reason": f"Optimaal venster ({best_power:.2f}kW)", "plan_start": start_time_local}
+            return {
+                "action": "START",
+                "reason": f"Optimaal venster ({best_power:.2f}kW)",
+                "plan_start": start_time_local,
+            }
 
         # C. Te vroeg?
         if now_utc < best_row["timestamp"]:
             wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
-            return {"action": "WAIT", "reason": f"Piek over {wait_min} min", "plan_start": start_time_local}
+            return {
+                "action": "WAIT",
+                "reason": f"Piek over {wait_min} min",
+                "plan_start": start_time_local,
+            }
 
-        return {"action": "WAIT", "reason": "Piek reeds gepasseerd", "plan_start": start_time_local}
+        return {
+            "action": "WAIT",
+            "reason": "Piek reeds gepasseerd",
+            "plan_start": start_time_local,
+        }
 
     def run_cycle(self):
         """Wordt elke minuut aangeroepen vanuit de main loop."""
         now = datetime.now()
-        if self.last_run_ts and (now - self.last_run_ts).total_seconds() < self.interval:
+        if (
+            self.last_run_ts
+            and (now - self.last_run_ts).total_seconds() < self.interval
+        ):
             return
         self.last_run_ts = now
 
@@ -323,7 +380,11 @@ class SolarAI:
         try:
             pv_state = self.ha.get_state(self.entity_pv)
             pv_val = pv_state["state"] if pv_state else "0"
-            pv_kw = float(pv_val) / 1000.0 if pv_val not in ["unknown", "unavailable", None] else 0.0
+            pv_kw = (
+                float(pv_val) / 1000.0
+                if pv_val not in ["unknown", "unavailable", None]
+                else 0.0
+            )
         except Exception:
             pv_kw = 0.0
 
@@ -336,14 +397,24 @@ class SolarAI:
 
         res = advice["action"]
         reason = advice["reason"]
-        p_time = advice.get("plan_start").strftime("%H:%M") if advice.get("plan_start") else "--:--"
+        p_time = (
+            advice.get("plan_start").strftime("%H:%M")
+            if advice.get("plan_start")
+            else "--:--"
+        )
 
-        logger.info(f"SolarAI: [{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}")
+        logger.info(
+            f"SolarAI: [{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}"
+        )
 
         # Optioneel: Update een sensor in HA voor visualisatie
-        self.ha.set_state("sensor.solar_ai_recommendation", res, {
-            "reason": reason,
-            "planned_start": p_time,
-            "bias_factor": round(self.smoothed_bias, 2),
-            "last_update": now.isoformat()
-        })
+        self.ha.set_state(
+            "sensor.solar_ai_recommendation",
+            res,
+            {
+                "reason": reason,
+                "planned_start": p_time,
+                "bias_factor": round(self.smoothed_bias, 2),
+                "last_update": now.isoformat(),
+            },
+        )
