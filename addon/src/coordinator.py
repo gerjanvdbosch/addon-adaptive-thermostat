@@ -141,8 +141,12 @@ class ClimateCoordinator:
         target_sp = self.thermostat_ai.get_recommended_setpoint(features, current_sp)
 
         if abs(target_sp - current_sp) >= self.min_change_threshold:
-            logger.info(f"AI Advies: Aanpassen van {current_sp} naar {target_sp:.2f}")
+            logger.info(f"Coordinator: Aanpassen van {current_sp} naar {target_sp:.2f}")
             self._set_setpoint_safe(target_sp, current_action)
+        else:
+            logger.info(
+                f"Coordinator: Verandering van {current_sp} naar {target_sp:.2f} onder drempel."
+            )
 
     def _handle_away_logic(self, current_sp, features):
         logger.debug("Coordinator: Away detected, managing energy saving.")
