@@ -1,6 +1,8 @@
 import logging
-from datetime import datetime
 import time
+import math
+import numpy as np
+from datetime import datetime
 
 from utils import (
     safe_float,
@@ -8,8 +10,6 @@ from utils import (
     cyclical_hour,
     cyclical_day,
     encode_wind,
-    cyclical_month,
-    month_to_season,
     day_or_night,
 )
 from db import insert_sample
@@ -46,18 +46,45 @@ FEATURE_ORDER = [
     "hvac_mode",
 ]
 
+FEATURE_ORDER2 = [
+    # --- TIJD & RITME ---
+    "hour_sin",          # Ochtend/Avond
+    "hour_cos",
+    "day_sin",           # Werkdag/Weekend
+    "day_cos",
+    "doy_sin",           # Seizoen (Zomer/Winter)
+    "doy_cos",
+
+    # --- STATUS & CONTEXT ---
+    "home_occupied",     # <--- ESSENTIEEL: Ben je thuis?
+    "hvac_mode",         # Verwarmen/Koelen
+    "current_temp",      # Huidige binnen temp
+    "temp_change",       # Hoe snel warmt het op/koelt het af?
+
+    # --- BASISLIJN ---
+    "current_setpoint",  # Waar staat hij nu op? (Startpunt voor delta)
+
+    # --- WEER VANDAAG (Invloed op muren/ramen NU) ---
+    "outside_temp",      # Actuele buitentemperatuur (Cruciaal)
+    "min_temp",    # <--- BEHOUDEN: Hoe koud was de nacht? (Koude muren)
+    "max_temp",    # <--- BEHOUDEN: Hoe warm wordt de dag? (Algemeen beeld)
+    "wind_speed",  # Windchill op de gevel
+    "wind_dir_sin",
+    "wind_dir_cos",
+    "solar_kwh",   # Zonkracht op de ramen (gratis warmte)
+]
+
 
 class Collector:
-    def __init__(self, ha_client, opts: dict, impute_value: float = 0.0):
+    def __init__(self, ha_client, opts: dict):
         self.ha = ha_client
         self.opts = opts or {}
-        self.impute_value = impute_value
-        # Require explicit sensor mapping in options; fail fast if not provided
+        # Require explicit sensor mapping in options
         self.sensor_map = self.opts.get("sensors")
         if not isinstance(self.sensor_map, dict) or not self.sensor_map:
             raise RuntimeError(
                 "Sensor mapping missing in add-on config (opts['sensors']). "
-                "Please configure sensor entity IDs in the add-on options."
+                "Please configure sensor entity IDs."
             )
 
     def read_sensors(self):
@@ -83,16 +110,29 @@ class Collector:
             time.sleep(0.01)
         return data
 
+    def _calc_doy(self, ts):
+        """Bereken Day of Year cyclical features."""
+        try:
+            # timetuple().tm_yday geeft dagnummer (1-366)
+            doy = ts.timetuple().tm_yday
+            # 366 voor schrikkeljaren support, maakt voor model weinig uit
+            doy_sin = math.sin(2 * math.pi * doy / 366.0)
+            doy_cos = math.cos(2 * math.pi * doy / 366.0)
+            return doy_sin, doy_cos
+        except Exception:
+            return 0.0, 0.0
+
     def features_from_raw(self, sensor_dict, timestamp=None, override_setpoint=None):
         """
         Convert raw sensor dict into feature dictionary following FEATURE_ORDER keys.
         Defensive: uses safe_float and encoding helpers.
         """
         ts = timestamp or datetime.now()
+
+        # Tijd features
         hx, hy = cyclical_hour(ts)
-        dx, dy = cyclical_day(ts)
-        mx, my = cyclical_month(ts)
-        season_idx = month_to_season(ts)
+        dx, dy = cyclical_day(ts)  # Day of Week
+        doy_x, doy_y = self._calc_doy(ts)  # Day of Year (Seizoen)
 
         # these keys are optional in sensor_dict; keep names consistent with what you write into DB
         wind_dir_today = sensor_dict.get("wind_direction_today")
@@ -115,10 +155,9 @@ class Collector:
             "hour_cos": hy,
             "day_sin": dx,
             "day_cos": dy,
-            "month_sin": mx,
-            "month_cos": my,
-            "season": float(season_idx),
-            "day_or_night": float(day_or_night(ts)),
+            "doy_sin": doy_x,  # Jaarritme (Zomer vs Winter)
+            "doy_cos": doy_y,
+            "is_sun_up": is_sun_up,
             "current_setpoint": safe_float(raw_sp),
             "current_temp": safe_float(sensor_dict.get("current_temp")),
             "temp_change": safe_float(sensor_dict.get("temp_change")),
@@ -158,11 +197,19 @@ class Collector:
         """Converts feature dict to list in correct order for model."""
         vec = []
         for k in FEATURE_ORDER:
-            val = safe_float(features.get(k, 0.0))
+            # We halen de waarde op. Als de key niet bestaat, is het None.
+            val = features.get(k)
+
+            # Feature specifieke checks (optioneel), maar safe_float kan None returnen
             if val is None:
-                val = 0.0
-            vec.append(val)
-        return [vec]  # Return as 2D array [1, n_features]
+                vec.append(np.nan)
+            else:
+                try:
+                    vec.append(float(val))
+                except (ValueError, TypeError):
+                    vec.append(np.nan)
+
+        return np.array([vec], dtype=float)  # Return as 2D numpy array [1, n_features]
 
     def sample_and_store(self):
         ts = datetime.now()

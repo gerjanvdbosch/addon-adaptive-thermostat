@@ -11,9 +11,7 @@ arch:
 init: false
 homeassistant_api: true
 options:
-  shadow_mode: false
   shadow_setpoint: input_number.adaptive_thermostat_setpoint
-  climate_entity: climate.danfoss_icon_woonkamer
   inferencer_interval_seconds: 60
   solar_interval_seconds: 15
   sample_interval_seconds: 600
@@ -29,21 +27,16 @@ options:
     temp_change: sensor.woonkamer_temperatuur_verandering
     min_temp_today: sensor.minimale_temperatuur_1d
     max_temp_today: sensor.temperatuur_1d
-    min_temp_tomorrow: sensor.minimale_temperatuur_2d
-    max_temp_tomorrow: sensor.temperatuur_2d
     solar_kwh_today: sensor.solcast_pv_forecast_forecast_today
-    solar_kwh_tomorrow: sensor.solcast_pv_forecast_forecast_tomorrow
     solar_chance_today: sensor.zonkans_1d
     solar_chance_tomorrow: sensor.zonkans_2d
     wind_speed_today: sensor.windkracht_1d
-    wind_speed_tomorrow: sensor.windkracht_2d
     wind_direction_today: sensor.windrichting_azimut_1d
-    wind_direction_tomorrow: sensor.windrichting_azimut_2d
+    current_temp: sensor.danfoss_15_temperature
     outside_temp: sensor.temperatuur
+    home_occupied: input_boolean.thuis_aanwezig
 schema:
-  shadow_mode: "bool?"
   shadow_setpoint: "str?"
-  climate_entity: "str?"
   inferencer_interval_seconds: "int?"
   solar_interval_seconds: "int?"
   sample_interval_seconds: "int?"
