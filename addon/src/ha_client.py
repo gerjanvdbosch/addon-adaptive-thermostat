@@ -23,14 +23,14 @@ class HAClient:
             )
             r.raise_for_status()
             payload = r.json()
-            state = payload
+            state = payload.get("state")
             logger.debug("State %s fetched: %s", entity_id, state)
             return state
         except Exception as e:
             logger.exception("Error getting state %s: %s", entity_id, e)
             return None
 
-    def set_state(self, entity_id, state, attributes=None):
+    def _set_state(self, entity_id, state, attributes=None):
         if attributes is None:
             attributes = {}
 
