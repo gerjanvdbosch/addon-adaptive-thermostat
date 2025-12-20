@@ -74,5 +74,7 @@ class HAClient:
         logger.debug("Applied setpoint: %.1f", setpoint)
 
     def set_solar_prediction(self, value, attrs):
-        self.set_state(self.opts.get("solar_entity"), value, attributes=attrs)
-        logger.debug(f"Solar prediction updated: {value}")
+        entity = self.opts.get("solar_entity")
+        service_data = {"entity_id": entity, "value": value}
+        self._call_service("input_text", "set_value", service_data)
+        logger.debug(f"Solar prediction updated: {value} with attrs {attrs}")

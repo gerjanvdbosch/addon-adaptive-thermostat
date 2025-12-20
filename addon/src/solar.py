@@ -376,8 +376,7 @@ class SolarAI:
 
         # 1. Haal PV waarde op
         try:
-            pv_state = self.ha.get_state(self.entity_pv)
-            pv_val = pv_state["state"] if pv_state else "0"
+            pv_val = self.ha.get_state(self.entity_pv)
             pv_kw = (
                 float(pv_val) / 1000.0
                 if pv_val not in ["unknown", "unavailable", None]
@@ -406,7 +405,7 @@ class SolarAI:
         )
 
         self.ha.set_solar_prediction(
-            res,
+            f"SolarAI: [{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}",
             {
                 "reason": reason,
                 "planned_start": p_time,
