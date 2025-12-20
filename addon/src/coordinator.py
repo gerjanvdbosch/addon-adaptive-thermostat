@@ -34,8 +34,8 @@ class ClimateCoordinator:
         self.thermal_ai = ThermalAI(self.ha, opts)
 
         # Settings
-        self.comfort_temp = float(self.opts.get("comfort_temp", 20.0))
-        self.eco_temp = float(self.opts.get("eco_temp", 19.0))
+        self.home_temp = float(self.opts.get("home_temp", 20.0))
+        self.away_temp = float(self.opts.get("away_temp", 19.0))
         self.min_change_threshold = float(self.opts.get("min_change_threshold", 0.5))
 
         # Compressor Protection
@@ -156,12 +156,12 @@ class ClimateCoordinator:
             self._set_setpoint_safe(target_sp)
 
     def _handle_away_logic(self, current_sp):
-        minutes_needed = self.thermal_ai.predict_heating_time(self.comfort_temp) or 180
+        minutes_needed = self.thermal_ai.predict_heating_time(self.home_temp) or 180
         should_preheat, prob = self.presence_ai.should_preheat(
             dynamic_minutes=minutes_needed
         )
 
-        target = self.eco_temp
+        target = self.away_temp
 
         if should_preheat:
             if not self.is_preheating:
@@ -169,7 +169,7 @@ class ClimateCoordinator:
                     f"Coordinator: Dynamic Pre-heat trigger! Kans {prob:.2f} over {minutes_needed:.0f} min."
                 )
             self.is_preheating = True
-            target = self.comfort_temp
+            target = self.home_temp
         else:
             self.is_preheating = False
 

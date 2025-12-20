@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from config import load_options
 from ha_client import HAClient
 from collector import Collector
-from climate_coordinator import ClimateCoordinator
+from coordinator import ClimateCoordinator
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s: %(message)s")
