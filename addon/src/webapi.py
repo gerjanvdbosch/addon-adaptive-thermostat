@@ -1,8 +1,9 @@
 import logging
+import threading
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, desc
 
@@ -13,9 +14,24 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Adaptive Thermostat API")
 
+# ==============================================================================
+# GLOBAL STATE (Koppeling met Coordinator)
+# ==============================================================================
+GLOBAL_COORDINATOR = None
+
+
+def set_coordinator(coordinator_instance):
+    """
+    Wordt aangeroepen vanuit main.py om de actieve coordinator door te geven.
+    Hierdoor kan de API acties uitvoeren op de draaiende AI modellen.
+    """
+    global GLOBAL_COORDINATOR
+    GLOBAL_COORDINATOR = coordinator_instance
+    logger.info("API: Coordinator linked successfully.")
+
 
 # ==============================================================================
-# Pydantic Models (Output formatting)
+# Pydantic Models
 # ==============================================================================
 
 
@@ -71,14 +87,58 @@ class TrainResponse(BaseModel):
 
 
 # ==============================================================================
+# TRAINING & CONTROL ENDPOINTS
+# ==============================================================================
+
+
+@app.post("/train", response_model=TrainResponse)
+def trigger_training(
+    model: str = Query(
+        "all", description="Model to train: all, thermostat, solar, presence, thermal"
+    )
+):
+    """
+    Start handmatig een trainingssessie.
+    Draait in de achtergrond zodat de API direct antwoord geeft.
+    """
+
+    if GLOBAL_COORDINATOR is None:
+        raise HTTPException(
+            status_code=503, detail="Coordinator not linked. System starting up?"
+        )
+
+    def _train_task():
+        logger.info(f"API: Manual training triggered for '{model}'")
+        try:
+            if model == "all":
+                GLOBAL_COORDINATOR.perform_nightly_training()
+            elif model == "thermostat":
+                GLOBAL_COORDINATOR.thermostat_ai.train()
+            elif model == "solar":
+                GLOBAL_COORDINATOR.solar_ai.train()
+            elif model == "presence":
+                GLOBAL_COORDINATOR.presence_ai.train()
+            elif model == "thermal":
+                GLOBAL_COORDINATOR.thermal_ai.train()
+            else:
+                logger.warning(f"API: Unknown model type '{model}'")
+        except Exception as e:
+            logger.exception(f"API: Training failed for {model}: {e}")
+
+    # Start thread
+    t = threading.Thread(target=_train_task, daemon=True)
+    t.start()
+
+    return {"status": "started", "target": model, "background": True}
+
+
+# ==============================================================================
 # HISTORY ENDPOINTS (READ ONLY)
 # ==============================================================================
 
 
 @app.get("/history/thermostat", response_model=List[SetpointOut])
-def get_setpoint_history(
-    limit: int = 100, offset: int = 0, x_addon_token: Optional[str] = Header(None)
-):
+def get_setpoint_history(limit: int = 100, offset: int = 0):
     s = Session()
     try:
         stmt = (
@@ -94,9 +154,7 @@ def get_setpoint_history(
 
 
 @app.get("/history/solar", response_model=List[SolarOut])
-def get_solar_history(
-    limit: int = 100, offset: int = 0, x_addon_token: Optional[str] = Header(None)
-):
+def get_solar_history(limit: int = 100, offset: int = 0):
     s = Session()
     try:
         stmt = (
@@ -112,9 +170,7 @@ def get_solar_history(
 
 
 @app.get("/history/presence", response_model=List[PresenceOut])
-def get_presence_history(
-    limit: int = 100, offset: int = 0, x_addon_token: Optional[str] = Header(None)
-):
+def get_presence_history(limit: int = 100, offset: int = 0):
     s = Session()
     try:
         stmt = (
@@ -130,9 +186,7 @@ def get_presence_history(
 
 
 @app.get("/history/thermal", response_model=List[ThermalOut])
-def get_thermal_history(
-    limit: int = 100, offset: int = 0, x_addon_token: Optional[str] = Header(None)
-):
+def get_thermal_history(limit: int = 100, offset: int = 0):
     s = Session()
     try:
         stmt = (

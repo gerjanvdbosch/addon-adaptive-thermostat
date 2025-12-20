@@ -101,7 +101,7 @@ class ThermostatAI:
     # TRAINING LOGICA
     # ==============================================================================
 
-    def train(self, force=False):
+    def train(self):
         """Traint het AI model op basis van de database data."""
         logger.info("ThermostatAI: Start training...")
         start_time = time.time()
@@ -184,7 +184,7 @@ class ThermostatAI:
             self.last_known_setpoint = curr_sp_rounded
             return False
 
-        did_train = False
+        updated = False
 
         # 1. DETECTEER HANDMATIGE AANPASSING (USER OVERRIDE)
         if curr_sp_rounded != self.last_known_setpoint:
@@ -210,8 +210,8 @@ class ThermostatAI:
                     observed_current=prev_sp,
                 )
 
-                self.train(force=True)
-                did_train = True
+                #self.train()
+                updated = True
 
             self.last_known_setpoint = curr_sp_rounded
             self.stability_start_ts = None
@@ -238,7 +238,7 @@ class ThermostatAI:
             else:
                 self.stability_start_ts = None
 
-        return did_train
+        return updated
 
     def get_recommended_setpoint(self, features, current_sp):
         """

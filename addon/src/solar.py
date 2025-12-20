@@ -405,7 +405,7 @@ class SolarAI:
         )
 
         self.ha.set_solar_prediction(
-            f"SolarAI: [{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}",
+            f"[{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}",
             {
                 "reason": reason,
                 "planned_start": p_time,
