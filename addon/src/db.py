@@ -1,347 +1,184 @@
 import os
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    Float,
-    DateTime,
-    Boolean,
-    JSON,
-    text,
-    select,
+    create_engine, Column, Integer, Float, DateTime,
+    Boolean, JSON, text, select
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session as SASession
 
 Base = declarative_base()
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv("DB_PATH")
 if not DB_PATH:
-    raise RuntimeError(
-        "Environment variable DB_PATH is not set. Please export DB_PATH before starting the application."
-    )
+    raise RuntimeError("Environment variable DB_PATH is not set.")
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False}
 )
 Session = sessionmaker(bind=engine)
 
-
-class Sample(Base):
-    __tablename__ = "samples"
-    id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
-    data = Column(JSON)
-    label_setpoint = Column(Float, nullable=True)
-    user_override = Column(Boolean, default=False)
-    predicted_setpoint = Column(Float, nullable=True)
-    prediction_error = Column(Float, nullable=True)
-
+# ==============================================================================
+# TABELLEN
+# ==============================================================================
 
 class Setpoint(Base):
+    """Kern-tabel voor ThermostatAI: Slaat elk leermoment op in eigen kolommen."""
     __tablename__ = "setpoints"
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.now, index=True)
-    # setpoint and observed_current_setpoint == override
-    setpoint = Column(Float, nullable=True)
-    observed_current_setpoint = Column(Float, nullable=True)
-    data = Column(JSON)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
+    # --- TARGETS (Wat de AI moet leren) ---
+    setpoint = Column(Float, index=True) # De 'nieuwe' waarde (User override of AI resultaat)
+    observed_current_setpoint = Column(Float) # De waarde 'vóór' de wijziging
+
+    # --- TIJD FEATURES ---
+    hour_sin = Column(Float)
+    hour_cos = Column(Float)
+    day_sin = Column(Float)
+    day_cos = Column(Float)
+    doy_sin = Column(Float)
+    doy_cos = Column(Float)
+
+    # --- STATUS & CONTEXT ---
+    home_occupied = Column(Boolean)
+    hvac_mode = Column(Integer)
+    current_temp = Column(Float)
+    temp_change = Column(Float)
+    current_setpoint = Column(Float) # Baseline
+
+    # --- WEER ---
+    outside_temp = Column(Float)
+    min_temp = Column(Float)
+    max_temp = Column(Float)
+    wind_speed = Column(Float)
+    wind_dir_sin = Column(Float)
+    wind_dir_cos = Column(Float)
+    solar_kwh = Column(Float)
 
 class SolarRecord(Base):
+    """Zonne-energie historie voor SolarAI."""
     __tablename__ = "solar_history"
-
-    # Timestamp is de Primary Key (uniek en geïndexeerd)
     timestamp = Column(DateTime, primary_key=True)
-
-    # Forecast Data
-    solcast_est = Column(Float, default=0.0)
-    solcast_10 = Column(Float, default=0.0)
-    solcast_90 = Column(Float, default=0.0)
-
-    # Actuals (Gemiddelden over 30 min)
+    solcast_est = Column(Float)
+    solcast_10 = Column(Float)
+    solcast_90 = Column(Float)
     actual_pv_yield = Column(Float, nullable=True)
-    actual_consumption = Column(Float, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    updated_at = Column(DateTime, default=datetime.utcnow)
+class HeatingCycle(Base):
+    """Traagheid van het huis voor ThermalAI (Warmtepomp)."""
+    __tablename__ = "heating_cycles"
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, index=True)
+    start_temp = Column(Float)
+    end_temp = Column(Float)
+    outside_temp = Column(Float)
+    duration_minutes = Column(Float)
 
+class PresenceRecord(Base):
+    """Aanwezigheidspatronen voor PresenceAI."""
+    __tablename__ = "presence_history"
+    timestamp = Column(DateTime, primary_key=True)
+    is_home = Column(Boolean, index=True)
 
 Base.metadata.create_all(engine)
 
+# ==============================================================================
+# FUNCTIES
+# ==============================================================================
+
+def insert_setpoint(feature_dict: dict, setpoint: float, observed_current: float):
+    """Slaat een leermoment op. Mapt de dict automatisch naar de kolommen."""
+    s: SASession = Session()
+    try:
+        # Filter de dict zodat alleen keys die als kolom bestaan worden gebruikt
+        valid_data = {k: v for k, v in feature_dict.items() if hasattr(Setpoint, k)}
+        record = Setpoint(
+            setpoint=setpoint,
+            observed_current_setpoint=observed_current,
+            **valid_data
+        )
+        s.add(record)
+        s.commit()
+    except Exception:
+        logger.exception("DB: Fout bij opslaan setpoint")
+        s.rollback()
+    finally:
+        s.close()
+
+def fetch_training_setpoints_df(days: int = 60):
+    """Haalt data op voor ThermostatAI direct als Pandas DataFrame."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = select(Setpoint).where(
+        Setpoint.timestamp >= cutoff,
+        Setpoint.setpoint.isnot(None),
+        Setpoint.observed_current_setpoint.isnot(None)
+    )
+    with engine.connect() as conn:
+        return pd.read_sql(stmt, conn)
 
 def upsert_solar_record(timestamp, **kwargs):
-    """
-    Maakt een record aan of update het als het bestaat.
-    Gebruikt ORM sessie management.
-    """
     s: SASession = Session()
     try:
         record = s.get(SolarRecord, timestamp)
         if not record:
             record = SolarRecord(timestamp=timestamp)
             s.add(record)
-
-        for key, value in kwargs.items():
-            if hasattr(record, key):
-                setattr(record, key, value)
-
-        record.updated_at = datetime.utcnow()
+        for k, v in kwargs.items():
+            if hasattr(record, k): setattr(record, k, v)
         s.commit()
-    except Exception as e:
-        print(f"DB Error upsert_solar_record: {e}")
-        s.rollback()
-    finally:
-        s.close()
+    finally: s.close()
 
-
-def fetch_solar_training_data_orm(days: int = 365):
-    """
-    Haalt trainingsdata op via ORM, maar geoptimaliseerd voor Pandas.
-    Geeft een DataFrame terug.
-    """
-    cutoff = datetime.now() - timedelta(days=days)
-
-    # We selecteren alleen de kolommen die we nodig hebben voor training
-    # Dit is veel sneller dan het laden van volledige Python objecten
-    stmt = (
-        select(
-            SolarRecord.timestamp,
-            SolarRecord.solcast_est,
-            SolarRecord.solcast_10,
-            SolarRecord.solcast_90,
-            SolarRecord.actual_pv_yield,
-        )
-        .where(SolarRecord.timestamp >= cutoff)
-        .where(SolarRecord.actual_pv_yield.isnot(None))
-    )
-
-    # Pandas kan direct lezen van een SQLAlchemy connectie/statement
+def fetch_solar_training_data_orm(days: int = 180):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = select(SolarRecord).where(SolarRecord.timestamp >= cutoff, SolarRecord.actual_pv_yield.isnot(None))
     with engine.connect() as conn:
-        df = pd.read_sql(stmt, conn)
+        return pd.read_sql(stmt, conn)
 
-    # Zorg dat timestamp correcte types heeft
-    if not df.empty:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-    return df
-
-
-def cleanup_old_data(days: int = 730):
-    """Onderhoud: Verwijder data ouder dan X dagen."""
+def upsert_heating_cycle(timestamp, start_temp, end_temp, outside_temp, duration_minutes):
     s: SASession = Session()
     try:
-        cutoff = datetime.now() - timedelta(days=days)
-
-        # Bulk delete via ORM
-        s.query(SolarRecord).filter(SolarRecord.timestamp < cutoff).delete(
-            synchronize_session=False
-        )
-        s.query(Sample).filter(Sample.timestamp < cutoff).delete(
-            synchronize_session=False
-        )
-
+        s.add(HeatingCycle(timestamp=timestamp, start_temp=start_temp, end_temp=end_temp,
+                           outside_temp=outside_temp, duration_minutes=duration_minutes))
         s.commit()
+    finally: s.close()
 
-        # SQLite Vacuum om schijfruimte vrij te geven
+def fetch_heating_cycles(days: int = 90):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = select(HeatingCycle).where(HeatingCycle.timestamp >= cutoff)
+    with engine.connect() as conn:
+        return pd.read_sql(stmt, conn)
+
+def upsert_presence_record(timestamp, is_home):
+    s: SASession = Session()
+    try:
+        ts_rounded = timestamp.replace(second=0, microsecond=0) # Voorkom dubbelingen
+        record = s.get(PresenceRecord, ts_rounded)
+        if not record:
+            s.add(PresenceRecord(timestamp=ts_rounded, is_home=is_home))
+        else:
+            record.is_home = is_home
+        s.commit()
+    finally: s.close()
+
+def fetch_presence_history(days: int = 60):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = select(PresenceRecord).where(PresenceRecord.timestamp >= cutoff)
+    with engine.connect() as conn:
+        return pd.read_sql(stmt, conn)
+
+def cleanup_old_data(days: int = 365):
+    s: SASession = Session()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        s.query(Setpoint).filter(Setpoint.timestamp < cutoff).delete()
+        s.query(SolarRecord).filter(SolarRecord.timestamp < cutoff).delete()
+        s.query(HeatingCycle).filter(HeatingCycle.timestamp < cutoff).delete()
+        s.query(PresenceRecord).filter(PresenceRecord.timestamp < cutoff).delete()
+        s.commit()
         s.execute(text("VACUUM"))
-    except Exception as e:
-        print(f"Cleanup Error: {e}")
-    finally:
-        s.close()
-
-
-def insert_setpoint(
-    data: dict,
-    setpoint=None,
-    observed_current=None,
-) -> int:
-    s: SASession = Session()
-    try:
-        sample = Setpoint(
-            data=data, setpoint=setpoint, observed_current_setpoint=observed_current
-        )
-        s.add(sample)
-        s.commit()
-        s.refresh(sample)
-        return sample.id
-    finally:
-        s.close()
-
-
-def update_setpoint(setpoint_id: int, setpoint: float, observed_current=None) -> None:
-    s: SASession = Session()
-    try:
-        row = s.get(Setpoint, setpoint_id)
-        if row is not None:
-            row.setpoint = setpoint
-        if observed_current is not None:
-            row.observed_current_setpoint = observed_current
-        s.commit()
-    finally:
-        s.close()
-
-
-def fetch_setpoints(limit: int = 1):
-    s: SASession = Session()
-    try:
-        rows = s.query(Setpoint).order_by(Setpoint.timestamp.desc()).limit(limit).all()
-        return rows
-    finally:
-        s.close()
-
-
-def fetch_unlabeled_setpoints(limit: int = 1):
-    s: SASession = Session()
-    try:
-        rows = (
-            s.query(Setpoint)
-            .filter(Setpoint.observed_current_setpoint.is_(None))
-            .filter(Setpoint.setpoint.is_(None))
-            .order_by(Setpoint.timestamp.desc())
-            .limit(limit)
-            .all()
-        )
-        return rows
-    finally:
-        s.close()
-
-
-def fetch_training_setpoints(days: int = 30):
-    s: SASession = Session()
-    try:
-        cutoff = datetime.now() - timedelta(days=days)
-        rows = (
-            s.query(Setpoint)
-            .filter(Setpoint.timestamp >= cutoff)
-            .filter(Setpoint.setpoint.isnot(None))
-            .filter(Setpoint.observed_current_setpoint.isnot(None))
-            .all()
-        )
-        return rows
-    finally:
-        s.close()
-
-
-def insert_sample(data: dict, label_setpoint=None, user_override: bool = False) -> int:
-    s: SASession = Session()
-    try:
-        sample = Sample(
-            data=data, label_setpoint=label_setpoint, user_override=user_override
-        )
-        s.add(sample)
-        s.commit()
-        s.refresh(sample)
-        return sample.id
-    finally:
-        s.close()
-
-
-def fetch_training_data(days: int = 30):
-    s: SASession = Session()
-    try:
-        cutoff = datetime.now() - timedelta(days=days)
-        rows = (
-            s.query(Sample)
-            .filter(Sample.timestamp >= cutoff)
-            .filter(Sample.label_setpoint.isnot(None))
-            .all()
-        )
-        return rows
-    finally:
-        s.close()
-
-
-def fetch_unlabeled(limit: int = 1):
-    s: SASession = Session()
-    try:
-        rows = (
-            s.query(Sample)
-            .filter(Sample.label_setpoint.is_(None))
-            .order_by(Sample.timestamp.desc())
-            .limit(limit)
-            .all()
-        )
-        return rows
-    finally:
-        s.close()
-
-
-def fetch(limit: int = 1):
-    s: SASession = Session()
-    try:
-        rows = s.query(Sample).order_by(Sample.timestamp.desc()).limit(limit).all()
-        return rows
-    finally:
-        s.close()
-
-
-def update_label(sample_id: int, label_setpoint: float, user_override: bool = False):
-    s: SASession = Session()
-    try:
-        row = s.get(Sample, sample_id)
-        if row is not None:
-            row.label_setpoint = label_setpoint
-            row.user_override = user_override
-            if getattr(row, "predicted_setpoint", None) is not None:
-                try:
-                    row.prediction_error = abs(
-                        float(row.predicted_setpoint) - float(label_setpoint)
-                    )
-                except Exception:
-                    row.prediction_error = None
-            s.commit()
-    finally:
-        s.close()
-
-
-def update_sample_prediction(
-    sample_id: int,
-    predicted_setpoint=None,
-    prediction_error=None,
-):
-    s: SASession = Session()
-    try:
-        row = s.get(Sample, sample_id)
-        if row is not None:
-            if predicted_setpoint is not None:
-                try:
-                    row.predicted_setpoint = float(predicted_setpoint)
-                except Exception:
-                    row.predicted_setpoint = None
-            if prediction_error is not None:
-                try:
-                    row.prediction_error = float(prediction_error)
-                except Exception:
-                    row.prediction_error = None
-            s.commit()
-    finally:
-        s.close()
-
-
-def remove_unlabeled_samples(days: int = 30):
-    s: SASession = Session()
-    try:
-        cutoff = datetime.now() - timedelta(days=days)
-        s.query(Sample).filter(
-            Sample.timestamp < cutoff,
-            Sample.label_setpoint.is_(None),
-        ).delete()
-        s.commit()
-    finally:
-        s.close()
-
-
-def remove_unlabeled_setpoints(days: int = 30):
-    s: SASession = Session()
-    try:
-        cutoff = datetime.now() - timedelta(days=days)
-        s.query(Setpoint).filter(
-            Setpoint.timestamp < cutoff,
-            Setpoint.observed_current_setpoint.is_(None),
-            Setpoint.setpoint.is_(None),
-        ).delete()
-        s.commit()
-    finally:
-        s.close()
+    finally: s.close()

@@ -17,37 +17,6 @@ from db import insert_sample
 logger = logging.getLogger(__name__)
 
 FEATURE_ORDER = [
-    "hour_sin",
-    "hour_cos",
-    "day_sin",
-    "day_cos",
-    "month_sin",
-    "month_cos",
-    "season",
-    "day_or_night",
-    "current_setpoint",
-    "current_temp",
-    "temp_change",
-    "min_temp_today",
-    "max_temp_today",
-    "min_temp_tomorrow",
-    "max_temp_tomorrow",
-    "solar_kwh_today",
-    "solar_kwh_tomorrow",
-    "solar_chance_today",
-    "solar_chance_tomorrow",
-    "wind_speed_today",
-    "wind_speed_tomorrow",
-    "wind_dir_today_sin",
-    "wind_dir_today_cos",
-    "wind_dir_tomorrow_sin",
-    "wind_dir_tomorrow_cos",
-    "outside_temp",
-    "hvac_mode",
-]
-
-FEATURE_ORDER2 = [
-    # --- TIJD & RITME ---
     "hour_sin",          # Ochtend/Avond
     "hour_cos",
     "day_sin",           # Werkdag/Weekend

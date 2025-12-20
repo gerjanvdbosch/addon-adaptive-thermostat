@@ -1,15 +1,11 @@
 import logging
 import time
-from datetime import datetime, timedelta
-import pandas as pd # Nodig voor de presence fix
-
-# Importeer al je AI experts
-from thermostat import ThermostatAI
-from solar import SolarAI
+from datetime import datetime, timedelta, timezone
 from presence import PresenceAI
 from thermal import ThermalAI
+from solar import SolarAI
+from thermostat import ThermostatAI
 from ha_client import HAClient
-# Zorg dat Collector geimporteerd is
 from collector import Collector
 from utils import safe_float
 
@@ -20,134 +16,133 @@ class ClimateCoordinator:
         self.opts = opts or {}
         self.ha = HAClient(url=opts.get("supervisor_url"), token=opts.get("supervisor_token"))
 
-        logger.info("Coordinator: Initializing AI Agents...")
-
-        # 1. Correcte Initialisatie
+        # --- AI Agents ---
         self.collector = Collector(self.ha, opts)
         self.thermostat_ai = ThermostatAI(self.ha, self.collector, opts)
         self.solar_ai = SolarAI(self.ha, opts)
         self.presence_ai = PresenceAI(self.ha, opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
 
-        # 2. Instellingen
-        self.comfort_temp = float(self.opts.get("comfort_temp", 20.0))
-        self.eco_temp = float(self.opts.get("eco_temp", 15.0))
-        self.preheat_threshold = float(self.opts.get("presence_threshold", 0.75))
+        # --- Compressor Health Config ---
+        # Voor vloerverwarming + WP zijn lange runs cruciaal
+        self.min_run_minutes = int(self.opts.get("min_run_minutes", 60))  # Moet minimaal 1 uur draaien
+        self.min_off_minutes = int(self.opts.get("min_off_minutes", 30))  # Moet minimaal 30 min rusten
 
-        # State
+        # --- State ---
+        self.last_hvac_action = "idle"
+        self.last_action_change_ts = datetime.now(timezone.utc) - timedelta(hours=1)
         self.is_preheating = False
-        self.last_training_date = None # Voor robuustere scheduling
+        self.last_training_date = None
+
+    def _get_hvac_action(self):
+        """Haalt de huidige fysieke status van de warmtepomp op."""
+        state = self.ha.get_state(self.opts.get("sensor_hvac_action", "sensor.thermostat_hvac_action"))
+        return state.get("state") if state else "idle"
+
+    def _is_change_safe(self, target_setpoint, current_setpoint):
+        """
+        Checkt of een wijziging van het setpoint veilig is voor de compressor.
+        """
+        now = datetime.now(timezone.utc)
+        current_action = self._get_hvac_action()
+        duration_since_change = (now - self.last_action_change_ts).total_seconds() / 60
+
+        # Update status verandering tijdstip
+        if current_action != self.last_hvac_action:
+            logger.info(f"Coordinator: Compressor status gewijzigd: {self.last_hvac_action} -> {current_action}")
+            self.last_hvac_action = current_action
+            self.last_action_change_ts = now
+            duration_since_change = 0
+
+        # CASE 1: Warmtepomp draait ("heating") en AI wil stoppen (setpoint omlaag)
+        if current_action == "heating" and target_setpoint < current_setpoint:
+            if duration_since_change < self.min_run_minutes:
+                wait_time = self.min_run_minutes - duration_since_change
+                logger.warning(f"Compressor Safety: Stoppen geblokkeerd. Draait pas {duration_since_change:.0f} min (Min: {self.min_run_minutes}, wacht nog {wait_time:.0f} min)")
+                return False
+
+        # CASE 2: Warmtepomp rust ("idle"/"off") en AI wil starten (setpoint omhoog)
+        if current_action != "heating" and target_setpoint > current_setpoint:
+            if duration_since_change < self.min_off_minutes:
+                wait_time = self.min_off_minutes - duration_since_change
+                logger.warning(f"Compressor Safety: Starten geblokkeerd. Rust pas {duration_since_change:.0f} min (Min: {self.min_off_minutes}, wacht nog {wait_time:.0f} min)")
+                return False
+
+        return True
 
     def run_forever(self):
-        logger.info("Coordinator: System started. Taking control.")
+        logger.info("Coordinator: Systeem gestart met Compressor Protection.")
         while True:
             try:
                 self._tick()
             except Exception:
-                logger.exception("Coordinator: Critical error in main loop")
+                logger.exception("Coordinator: Error")
             time.sleep(60)
 
     def _tick(self):
-        now = datetime.now()
-
-        # --- A. Updates ---
+        # ... (Andere AI run_cycles blijven gelijk) ...
         self.solar_ai.run_cycle()
-        self.thermal_ai.track_cycles()
+        self.thermal_ai.run_cycle()
         self.presence_ai.log_current_state()
 
-        # --- B. Nightly Training (Robuust) ---
-        # Draai als het na 4u is, en we vandaag nog niet getraind hebben
-        if now.hour >= 4 and self.last_training_date != now.date():
-            self._perform_nightly_training()
-            self.last_training_date = now.date()
+        # --- Beslis Logica ---
+        # In plaats van direct self.ha.set_setpoint() aan te roepen,
+        # leiden we nu alle beslissingen door een centrale 'veiligheids-check'.
 
-        # --- C. Situatie ---
-        is_physically_home = False
-        state = self.ha.get_state("zone.home")
-        if state and state.get("state") == "home":
-             is_physically_home = True
+        is_home = self._check_is_home()
+        current_sp = safe_float(self.ha.get_shadow_setpoint())
 
-        # Soms is zone.home een getal (aantal personen)
-        if state and str(state.get("state")).isdigit() and int(state.get("state")) > 0:
-             is_physically_home = True
-
-        # --- D. Beslissing ---
-        if is_physically_home:
-            if self.is_preheating:
-                logger.info("Coordinator: User arrived! Pre-heating finished.")
-                self.is_preheating = False
-
-            # ThermostaatAI regelt het nu (comfort stabilisatie)
-            self.thermostat_ai.run_cycle()
-
+        if is_home:
+            # ThermostatAI berekent het ideale setpoint
+            # We passen de ThermostatAI aan zodat deze alleen setpoints 'voorstelt'
+            # Maar we sturen ze pas door na de veiligheidscheck.
+            self._manage_home_comfort(current_sp)
         else:
-            self._handle_away_logic()
+            self._handle_away_logic(current_sp)
 
-    def _handle_away_logic(self):
+    def _set_setpoint_safe(self, target_sp):
+        """Hulpfunctie die alleen het setpoint zet als het veilig is."""
+        current_sp = safe_float(self.ha.get_shadow_setpoint())
+
+        if abs(target_sp - current_sp) < 0.1:
+            return # Geen wijziging nodig
+
+        if self._is_change_safe(target_sp, current_sp):
+            logger.info(f"Coordinator: Veiligheidscheck OK. Setpoint naar {target_sp}")
+            self.ha.set_setpoint(target_sp)
+            self.thermostat_ai.last_known_setpoint = target_sp
+        else:
+            # We doen niets, de veiligheidscheck heeft al gelogd waarom
+            pass
+
+    def _handle_away_logic(self, current_sp):
         # 1. Hoe lang duurt opwarmen?
-        minutes_needed = self.thermal_ai.predict_heating_time(target_temp=self.comfort_temp)
-        if minutes_needed is None:
-            minutes_needed = 60
+        comfort_temp = float(self.opts.get("comfort_temp", 20.5))
+        eco_temp = float(self.opts.get("eco_temp", 17.0))
 
-        minutes_needed += 15 # Buffer
+        minutes_needed = self.thermal_ai.predict_heating_time(comfort_temp) or 180
+        should_preheat, prob = self.presence_ai.should_preheat(dynamic_minutes=minutes_needed)
 
-        # 2. Toekomst check
-        future_arrival_prob = self._get_presence_probability(minutes_offset=minutes_needed)
-
-        current_setpoint = safe_float(self.ha.get_shadow_setpoint()) or self.eco_temp
-
-        # 3. Logica
-        if future_arrival_prob >= self.preheat_threshold:
-            # START PRE-HEAT
-            if not self.is_preheating and current_setpoint < (self.comfort_temp - 0.5):
-                logger.info(f"Coordinator: PRE-HEAT START (Exp arrival in {minutes_needed:.0f}m, Prob {future_arrival_prob:.2f})")
-                self.ha.set_setpoint(self.comfort_temp)
-                self.is_preheating = True
-
-                # Voorkom dat ThermostatAI dit leert als user-actie
-                self.thermostat_ai.last_known_setpoint = self.comfort_temp
-
+        if should_preheat:
+            self.is_preheating = True
+            self._set_setpoint_safe(comfort_temp)
         else:
-            # STOP PRE-HEAT / ECO MODE
-            if self.is_preheating:
-                # Hysterese: stop alleen als kans flink zakt (bv onder 55% als threshold 75% is)
-                if future_arrival_prob < (self.preheat_threshold - 0.2):
-                    logger.info("Coordinator: Pre-heat aborted (Prob dropped). Back to ECO.")
-                    self.ha.set_setpoint(self.eco_temp)
-                    self.is_preheating = False
-                    self.thermostat_ai.last_known_setpoint = self.eco_temp
+            self.is_preheating = False
+            self._set_setpoint_safe(eco_temp)
 
-            elif current_setpoint > (self.eco_temp + 0.5):
-                logger.info(f"Coordinator: House empty. Setting ECO ({self.eco_temp}).")
-                self.ha.set_setpoint(self.eco_temp)
-                self.is_preheating = False
-                self.thermostat_ai.last_known_setpoint = self.eco_temp
+    def _manage_home_comfort(self, current_sp):
+        """
+        Intervenieer in de ThermostatAI run_cycle om veiligheid te garanderen.
+        """
+        # We laten ThermostatAI zijn werk doen, maar vangen de set_setpoint op.
+        # Hiervoor moeten we ThermostatAI een klein beetje aanpassen
+        # zodat hij niet zelf HA aanstuurt, of we overschrijven de methode.
 
-    def _get_presence_probability(self, minutes_offset):
-        """Geeft kans (0.0-1.0) dat iemand thuis is over X minuten."""
-        if not self.presence_ai.is_fitted or not self.presence_ai.model:
-            return 0.0
+        # Voor deze uitleg: we gebruiken de aanbeveling van ThermostatAI
+        feats = self.collector.features_from_raw(self.collector.read_sensors())
+        delta = self.thermostat_ai._predict_delta(feats)
+        target = current_sp + delta
 
-        # FIX: Gebruik de parameter minutes_offset
-        future_ts = datetime.now() + timedelta(minutes=minutes_offset)
-
-        try:
-            # We moeten features maken.
-            # Optie A: Roep interne methode aan (snelst, vereist dat _create_features bestaat)
-            df_future = pd.DataFrame([{"timestamp": future_ts}])
-            X_future = self.presence_ai._create_features(df_future)
-
-            # predict_proba geeft [[kans_0, kans_1], ...]
-            probs = self.presence_ai.model.predict_proba(X_future)[0]
-            return probs[1] # Kans op WEL thuis
-        except Exception as e:
-            logger.error(f"Coordinator: Error predicting presence: {e}")
-            return 0.0
-
-    def _perform_nightly_training(self):
-        logger.info("Coordinator: Nightly Training...")
-        self.presence_ai.train()
-        self.thermal_ai.train()
-        self.solar_ai.train()
-        self.thermostat_ai.train(force=True)
-        logger.info("Coordinator: Training Done.")
+        # Alleen wijzigen bij voldoende verschil
+        if abs(target - current_sp) >= 0.25:
+            self._set_setpoint_safe(target)
