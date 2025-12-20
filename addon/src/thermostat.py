@@ -210,7 +210,7 @@ class ThermostatAI:
                     observed_current=prev_sp,
                 )
 
-                #self.train()
+                # self.train()
                 updated = True
 
             self.last_known_setpoint = curr_sp_rounded
