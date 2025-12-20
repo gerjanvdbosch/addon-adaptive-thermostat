@@ -9,9 +9,8 @@ export DB_DIR="/config/db"
 mkdir -p "${MODEL_DIR}"
 mkdir -p "${DB_DIR}"
 
-export DB_PATH="${DB_DIR}/setpoints.sqlite"
+export DB_PATH="${DB_DIR}/database.sqlite"
 export MODEL_PATH="${MODEL_DIR}/delta_model.joblib"
-export MODEL_PATH_FULL="${MODEL_DIR}/full_model.joblib"
 
 if bashio::config.true 'shadow_mode'; then
   export SHADOW_MODE=1
