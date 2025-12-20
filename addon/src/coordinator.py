@@ -94,7 +94,7 @@ class ClimateCoordinator:
             # Check of we verse data nodig hebben
             raw_data = self.collector.read_sensors()
             features = self.collector.features_from_raw(raw_data)
-            current_sp = self.ha.get_setpoint()
+            current_sp = features.get("current_setpoint")
             hvac_mode = self._get_hvac_mode(raw_data)
             logger.debug(f"Coordinator: Features: {features}")
         except Exception as e:

@@ -87,7 +87,7 @@ class Collector:
         if override_setpoint is not None:
             raw_sp = override_setpoint
         else:
-            raw_sp = sensor_dict.get("current_setpoint")
+            raw_sp = self.ha.get_setpoint()
 
         return {
             "hour_sin": hx,
