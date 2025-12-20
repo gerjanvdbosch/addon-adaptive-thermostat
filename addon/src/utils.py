@@ -21,6 +21,36 @@ def safe_round(v, digits=1):
         return None
 
 
+def safe_bool(val):
+    if val is None:
+        return False
+    if isinstance(val, bool):
+        return val
+    try:
+        f = float(val)
+        return f != 0.0
+    except Exception:
+        s = str(val).strip().lower()
+        if s in ("true", "1", "yes", "y", "on", "aan"):
+            return True
+    return False
+
+
+def safe_bool_to_float(val):
+    if val is None:
+        return 0.0
+    if isinstance(val, bool):
+        return 1.0 if val else 0.0
+    try:
+        f = float(val)
+        return 1.0 if f != 0.0 else 0.0
+    except Exception:
+        s = str(val).strip().lower()
+        if s in ("true", "1", "yes", "y", "on", "aan"):
+            return 1.0
+    return 0.0
+
+
 def cyclical_hour(ts):
     h = ts.hour + ts.minute / 60.0
     return math.sin(2 * math.pi * h / 24.0), math.cos(2 * math.pi * h / 24.0)
@@ -46,20 +76,3 @@ def encode_wind(degrees):
         return math.sin(rad), math.cos(rad)
     except Exception:
         return 0.0, 0.0
-
-
-def encode_binary_onoff(val):
-    if val is None:
-        return 0.0
-    if isinstance(val, bool):
-        return 1.0 if val else 0.0
-    try:
-        f = float(val)
-        return 1.0 if f != 0.0 else 0.0
-    except Exception:
-        s = str(val).strip().lower()
-        if s in ("on", "aan", "true", "1", "yes", "y"):
-            return 1.0
-        if s in ("off", "uit", "false", "0", "no", "n"):
-            return 0.0
-    return 0.0

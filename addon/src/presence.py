@@ -2,15 +2,15 @@ import logging
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
+from utils import safe_bool
 
 # Machine Learning
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 # Project Imports
 from db import fetch_presence_history, upsert_presence_record
-from ha_client import HAClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +21,13 @@ class PresenceAI:
     Geoptimaliseerd voor vloerverwarming (lange voorlooptijden).
     """
 
-    def __init__(self, ha_client: HAClient, opts: dict):
-        self.ha = ha_client
+    def __init__(self, opts: dict):
         self.opts = opts or {}
 
         # Config
         self.model_path = Path(
             self.opts.get("presence_model_path", "/config/models/presence_model.joblib")
         )
-        self.presence_sensor = self.opts.get("sensor_presence", "zone.home")
 
         # Voor vloerverwarming: kijk 180-240 min vooruit
         self.preheat_minutes = int(self.opts.get("preheat_minutes", 180))
@@ -75,19 +73,13 @@ class PresenceAI:
         local_dt = (
             df["timestamp"].dt.tz_convert("Europe/Amsterdam").dt
         )  # Pas aan naar jouw TZ
-
-        # 1. Cyclische uren (0-23)
         hour_float = local_dt.hour + local_dt.minute / 60.0
         df["hour_sin"] = np.sin(2 * np.pi * hour_float / 24)
         df["hour_cos"] = np.cos(2 * np.pi * hour_float / 24)
-
-        # 2. Cyclische weekdag (0-6)
         df["day_sin"] = np.sin(2 * np.pi * local_dt.dayofweek / 7)
         df["day_cos"] = np.cos(2 * np.pi * local_dt.dayofweek / 7)
-
-        # 4. Seizoens-invloed (Mensen zijn in de winter vaker thuis dan zomer)
-        df["doy_sin"] = np.sin(2 * np.pi * local_dt.dayofyear / 365)
-        df["doy_cos"] = np.cos(2 * np.pi * local_dt.dayofyear / 365)
+        df["doy_sin"] = np.sin(2 * np.pi * local_dt.dayofyear / 366.0)
+        df["doy_cos"] = np.cos(2 * np.pi * local_dt.dayofyear / 366.0)
 
         return df[
             [
@@ -100,26 +92,15 @@ class PresenceAI:
             ]
         ]
 
-    def log_current_state(self):
+    def log_current_state(self, features):
         """Verzamelt aanwezigheidsdata van Home Assistant."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
 
         # Log elke 15 minuten (voldoende voor patronen)
         if self.last_log_ts and (now - self.last_log_ts).total_seconds() < 900:
             return
 
-        state_obj = self.ha.get_state(self.presence_sensor)
-        if not state_obj:
-            return
-
-        val = str(state_obj).lower()
-
-        # HA Zone/Presence logica
-        is_home = False
-        if val.isdigit():
-            is_home = int(val) > 0
-        else:
-            is_home = val in ["home", "on", "true", "occupied"]
+        is_home = safe_bool(features.get("home_presence", 0.0))
 
         upsert_presence_record(now, is_home=is_home)
         self.last_log_ts = now
@@ -176,7 +157,7 @@ class PresenceAI:
         # Begrens de lookahead (bijv. minimaal 30 min, maximaal 8 uur voor WP)
         lookahead = max(30, min(lookahead, 480))
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now()
 
         # Scan het venster (bijv. elke 30 minuten een check doen in de toekomst)
         check_steps = [now + timedelta(minutes=m) for m in range(30, lookahead + 1, 30)]

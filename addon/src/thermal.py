@@ -29,15 +29,6 @@ class ThermalAI:
         self.model_path = Path(
             self.opts.get("thermal_model_path", "/config/models/thermal_model.joblib")
         )
-        self.entity_temp = self.opts.get(
-            "sensor_temp", "sensor.thermostat_current_temperature"
-        )
-        self.entity_outside = self.opts.get(
-            "sensor_outside", "sensor.outside_temperature"
-        )
-        self.entity_hvac_action = self.opts.get(
-            "sensor_hvac_action", "sensor.thermostat_hvac_action"
-        )
 
         # State tracking
         self.cycle_start_ts = None
@@ -78,7 +69,7 @@ class ThermalAI:
         except Exception:
             logger.exception("ThermalAI: Opslaan mislukt.")
 
-    def run_cycle(self):
+    def run_cycle(self, features, current_action):
         """Detecteert lange verwarmingscycli van de warmtepomp."""
         now = datetime.now(timezone.utc)
 
@@ -87,14 +78,8 @@ class ThermalAI:
             return
         self.last_run_ts = now
 
-        try:
-            state_obj = self.ha.get_state(self.entity_hvac_action)
-            current_action = state_obj if state_obj else "unknown"
-
-            temp = safe_float(self.ha.get_state(self.entity_temp))
-            outside = safe_float(self.ha.get_state(self.entity_outside))
-        except Exception:
-            return
+        temp = safe_float(features.get("current_temp"))
+        outside = safe_float(features.get("outside_temp"))
 
         if temp is None:
             return
@@ -176,18 +161,15 @@ class ThermalAI:
         except Exception:
             logger.exception("ThermalAI: Training gefaald.")
 
-    def predict_heating_time(self, target_temp):
+    def predict_heating_time(self, target_temp, features):
         """
         Voorspelt opwarmtijd inclusief de trage start van een warmtepomp.
         """
         if not self.is_fitted or not self.model:
             return None
 
-        try:
-            current_temp = safe_float(self.ha.get_state(self.entity_temp))
-            outside_temp = safe_float(self.ha.get_state(self.entity_outside))
-        except Exception:
-            return None
+        current_temp = safe_float(features.get("current_temp"))
+        outside_temp = safe_float(features.get("outside_temp"))
 
         if current_temp is None or outside_temp is None:
             return None

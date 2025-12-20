@@ -9,7 +9,7 @@ from utils import (
     cyclical_day,
     cyclical_doy,
     encode_wind,
-    encode_binary_onoff,
+    safe_bool_to_float,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,9 +97,9 @@ class Collector:
             "day_cos": dy,
             "doy_sin": doy_x,  # Jaarritme (Zomer vs Winter)
             "doy_cos": doy_y,
-            "home_presence": encode_binary_onoff(sensor_dict.get("home_presence")),
+            "home_presence": safe_bool_to_float(sensor_dict.get("home_presence")),
             "hvac_mode": safe_float(hvac_mode),
-            "heat_demand": encode_binary_onoff(sensor_dict.get("heat_demand")),
+            "heat_demand": safe_bool_to_float(sensor_dict.get("heat_demand")),
             "current_temp": safe_float(sensor_dict.get("current_temp")),
             "current_setpoint": safe_float(raw_sp),
             "temp_change": safe_float(sensor_dict.get("temp_change")),

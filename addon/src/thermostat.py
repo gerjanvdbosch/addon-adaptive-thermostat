@@ -88,34 +88,14 @@ class ThermostatAI:
 
         # Zorg dat timestamp datetime is
         dt = pd.to_datetime(df["timestamp"])
-
-        # Uur van de dag (0-23)
         df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
         df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
-
-        # Dag van de week (0-6)
         df["day_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
         df["day_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
-
-        # Dag van het jaar (1-366)
         df["doy_sin"] = np.sin(2 * np.pi * dt.dt.dayofyear / 366.0)
         df["doy_cos"] = np.cos(2 * np.pi * dt.dt.dayofyear / 366.0)
 
         return df
-
-    def _get_current_time_features(self, ts: datetime) -> dict:
-        """
-        Berekent cyclische features voor één tijdstip.
-        Wordt gebruikt tijdens INFERENCE (voorspelling).
-        """
-        return {
-            "hour_sin": np.sin(2 * np.pi * ts.hour / 24.0),
-            "hour_cos": np.cos(2 * np.pi * ts.hour / 24.0),
-            "day_sin": np.sin(2 * np.pi * ts.weekday() / 7.0),
-            "day_cos": np.cos(2 * np.pi * ts.weekday() / 7.0),
-            "doy_sin": np.sin(2 * np.pi * ts.timetuple().tm_yday / 366.0),
-            "doy_cos": np.cos(2 * np.pi * ts.timetuple().tm_yday / 366.0),
-        }
 
     # ==============================================================================
     # TRAINING LOGICA
@@ -260,7 +240,7 @@ class ThermostatAI:
 
         return did_train
 
-    def get_recommended_setpoint(self, raw_data, current_sp):
+    def get_recommended_setpoint(self, features, current_sp):
         """
         Geeft de aanbevolen setpoint terug.
         Houdt nu ook rekening met de COOLDOWN.
@@ -277,8 +257,7 @@ class ThermostatAI:
         if not self.is_fitted or self.model is None:
             return current_sp
 
-        feats = self.collector.features_from_raw(raw_data, timestamp=datetime.now())
-        df_input = pd.DataFrame([feats])
+        df_input = pd.DataFrame([features])
 
         for col in self.feature_columns:
             if col not in df_input.columns:

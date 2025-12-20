@@ -2,13 +2,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 # Project imports
-from utils import safe_float
+from utils import safe_float, safe_bool
 
 # AI Modules (zorg dat deze imports kloppen met je bestandsstructuur)
 from thermostat import ThermostatAI
 from solar import SolarAI
 from presence import PresenceAI
 from thermal import ThermalAI
+from collector import Collector
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ class ClimateCoordinator:
     Aangepast om aangeroepen te worden door een externe scheduler.
     """
 
-    def __init__(self, ha_client, collector, opts: dict):
+    def __init__(self, ha_client, collector: Collector, opts: dict):
         self.opts = opts or {}
         # Dependency Injection: Gebruik de reeds bestaande connecties
         self.ha = ha_client
@@ -30,7 +31,7 @@ class ClimateCoordinator:
         # AI Agents initialiseren
         self.thermostat_ai = ThermostatAI(self.ha, self.collector, opts)
         self.solar_ai = SolarAI(self.ha, opts)
-        self.presence_ai = PresenceAI(self.ha, opts)
+        self.presence_ai = PresenceAI(opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
 
         # Settings
@@ -43,7 +44,7 @@ class ClimateCoordinator:
         self.min_off_minutes = int(self.opts.get("min_off_minutes", 30))
 
         # Runtime State
-        self.last_hvac_action = "idle"
+        self.last_hvac_mode = "idle"
         self.last_action_change_ts = datetime.now(timezone.utc) - timedelta(hours=1)
         self.is_preheating = False
 
@@ -53,7 +54,7 @@ class ClimateCoordinator:
     def _init_hvac_state(self):
         """Haal initiële status op bij start."""
         try:
-            self.last_hvac_action = self._get_hvac_action()
+            self.last_hvac_mode = self._get_hvac_mode()
         except Exception:
             pass
 
@@ -99,13 +100,12 @@ class ClimateCoordinator:
 
     def _run_logic(self):
         # 1. Data ophalen (CENTRAAL)
-        # We halen de data niet hier op, maar gaan ervan uit dat de collector
-        # via zijn eigen job recent data heeft opgehaald, of we roepen het hier aan.
-        # Gezien de structuur roepen we het hier aan, maar de collector cachet het wellicht.
         try:
             # Check of we verse data nodig hebben
             raw_data = self.collector.read_sensors()
-            current_sp = safe_float(self.ha.get_setpoint())
+            features = self.collector.features_from_raw(raw_data)
+            current_sp = features.get("current_setpoint")
+            hvac_mode = self._get_hvac_mode()
         except Exception as e:
             logger.error(f"Coordinator: Sensor read failed: {e}")
             return
@@ -119,44 +119,37 @@ class ClimateCoordinator:
         )
 
         # Andere AI's updaten
-        self.thermal_ai.run_cycle()
-        self.presence_ai.log_current_state()
+        self.thermal_ai.run_cycle(features, hvac_mode)
+        self.presence_ai.log_current_state(features)
 
         if override_detected:
             return
 
         # 3. Beslis-logica: Ben ik thuis of niet?
-        is_home = self._check_is_home()
+        is_home = safe_bool(features.get("home_presence", 0.0))
 
         if is_home:
-            self._manage_home_comfort(raw_data, current_sp)
+            self._manage_home_comfort(features, current_sp, hvac_mode)
         else:
-            self._handle_away_logic(current_sp)
+            self._handle_away_logic(current_sp, features)
 
-    def _check_is_home(self):
-        state = self.ha.get_state("zone.home")
-        if not state:
-            return False
-        val = state
-        if str(val).isdigit():
-            return int(val) > 0
-        return str(val).lower() in ["home", "on", "occupied"]
-
-    def _manage_home_comfort(self, raw_data, current_sp):
+    def _manage_home_comfort(self, features, current_sp, current_action):
         if self.is_preheating:
             logger.info(
                 "Coordinator: User arrived. Pre-heating finished -> Handover to AI."
             )
             self.is_preheating = False
 
-        target_sp = self.thermostat_ai.get_recommended_setpoint(raw_data, current_sp)
+        target_sp = self.thermostat_ai.get_recommended_setpoint(features, current_sp)
 
         if abs(target_sp - current_sp) >= self.min_change_threshold:
             logger.info(f"AI Advies: Aanpassen van {current_sp} naar {target_sp:.2f}")
-            self._set_setpoint_safe(target_sp)
+            self._set_setpoint_safe(target_sp, current_action)
 
-    def _handle_away_logic(self, current_sp):
-        minutes_needed = self.thermal_ai.predict_heating_time(self.home_temp) or 180
+    def _handle_away_logic(self, current_sp, features):
+        minutes_needed = (
+            self.thermal_ai.predict_heating_time(self.home_temp, features) or 180
+        )
         should_preheat, prob = self.presence_ai.should_preheat(
             dynamic_minutes=minutes_needed
         )
@@ -175,12 +168,12 @@ class ClimateCoordinator:
 
         self._set_setpoint_safe(target)
 
-    def _set_setpoint_safe(self, target_sp):
+    def _set_setpoint_safe(self, target_sp, current_action):
         current_sp = safe_float(self.ha.get_setpoint())
         if current_sp is None or abs(target_sp - current_sp) < 0.1:
             return
 
-        if self._is_change_safe(target_sp, current_sp):
+        if self._is_change_safe(target_sp, current_sp, current_action):
             logger.info(
                 f"Coordinator: Veiligheidscheck OK. Setpoint naar {target_sp:.2f}"
             )
@@ -189,17 +182,22 @@ class ClimateCoordinator:
         else:
             logger.debug("Coordinator: Wijziging uitgesteld door compressor protectie.")
 
-    def _get_hvac_action(self):
-        entity = self.opts.get("sensor_hvac_action", "sensor.thermostat_hvac_action")
-        state = self.ha.get_state(entity)
-        return state if state else "idle"
+    def _get_hvac_mode(self, raw_data):
+        hvac_mode = {
+            "Uit": "off",
+            "Verwarmen": "heating",
+            "SWW": "hot_water",
+            "Koelen": "cooling",
+            "Legionellapreventie": "legionella_run",
+            "Vorstbescherming": "frost_protection",
+        }.get(raw_data.get("hvac_mode"), "off")
+        return hvac_mode
 
-    def _is_change_safe(self, target_setpoint, current_setpoint):
-        now = datetime.now(timezone.utc)
-        current_action = self._get_hvac_action()
+    def _is_change_safe(self, target_setpoint, current_setpoint, current_action):
+        now = datetime.now()
 
-        if current_action != self.last_hvac_action:
-            self.last_hvac_action = current_action
+        if current_action != self.last_hvac_mode:
+            self.last_hvac_mode = current_action
             self.last_action_change_ts = now
 
         duration_mins = (now - self.last_action_change_ts).total_seconds() / 60.0
