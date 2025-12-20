@@ -40,11 +40,17 @@ class SetpointOut(BaseModel):
     timestamp: datetime
     setpoint: Optional[float]
     current_setpoint: Optional[float]
-    home_presence: Optional[bool]
     hvac_mode: Optional[int]
     heat_demand: Optional[int]
     current_temp: Optional[float]
+    temp_change: Optional[float]
+    home_presence: Optional[bool]
     outside_temp: Optional[float]
+    min_temp: Optional[float]
+    max_temp: Optional[float]
+    wind_speed: Optional[float]
+    wind_dir_sin: Optional[float]
+    wind_dir_cos: Optional[float]
     solar_kwh: Optional[float]
 
     class Config:
@@ -54,6 +60,8 @@ class SetpointOut(BaseModel):
 class SolarOut(BaseModel):
     timestamp: datetime
     solcast_est: Optional[float]
+    solcast_10: Optional[float]
+    solcast_90: Optional[float]
     actual_pv_yield: Optional[float]
 
     class Config:
@@ -137,7 +145,7 @@ def trigger_training(
 # ==============================================================================
 
 
-@app.get("/history/thermostat", response_model=List[SetpointOut])
+@app.get("/history/setpoint", response_model=List[SetpointOut])
 def get_setpoint_history(limit: int = 100, offset: int = 0):
     s = Session()
     try:

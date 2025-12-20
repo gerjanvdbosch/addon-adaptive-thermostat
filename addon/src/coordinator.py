@@ -96,6 +96,7 @@ class ClimateCoordinator:
             features = self.collector.features_from_raw(raw_data)
             current_sp = features.get("current_setpoint")
             hvac_mode = self._get_hvac_mode(raw_data)
+            logger.debug(f"Coordinator: Features: {features}")
         except Exception as e:
             logger.error(f"Coordinator: Sensor read failed: {e}")
             return

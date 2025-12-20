@@ -8,6 +8,7 @@ from collections import deque
 
 # Machine Learning
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error
 
 # Project Imports
 # Let op: Zorg dat deze functies in je db.py en ha_client.py staan
@@ -171,7 +172,8 @@ class SolarAI:
             self.model.fit(X, y)
             self.is_fitted = True
             self._atomic_save(self.model)
-            logger.info("SolarAI: Training voltooid.")
+            mae = mean_absolute_error(y, self.model.predict(X))
+            logger.info(f"SolarAI: Training voltooid MAE={mae:.3f}")
         except Exception:
             logger.exception("SolarAI: Training gefaald.")
 
