@@ -9,9 +9,9 @@ from collections import deque
 # Machine Learning
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error
+from pandas.api.types import is_datetime64_any_dtype
 
 # Project Imports
-# Let op: Zorg dat deze functies in je db.py en ha_client.py staan
 from db import fetch_solar_training_data_orm, upsert_solar_record
 from ha_client import HAClient
 
@@ -100,7 +100,7 @@ class SolarAI:
         """Maakt features voor training en voorspelling."""
         df = df.copy()
 
-        if not np.issubdtype(df["timestamp"], np.datetime64):
+        if not is_datetime64_any_dtype(df["timestamp"]):
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
         if df["timestamp"].dt.tz is not None:
@@ -211,9 +211,9 @@ class SolarAI:
                     )
                     upsert_solar_record(
                         ts,
-                        pv_estimate=item["pv_estimate"],
-                        pv_estimate10=item["pv_estimate10"],
-                        pv_estimate90=item["pv_estimate90"],
+                        pv_estimate=item.get("pv_estimate", 0.0),
+                        pv_estimate10=item.get("pv_estimate10", 0.0),
+                        pv_estimate90=item.get("pv_estimate90", 0.0),
                     )
 
                 self.last_solcast_poll_ts = current_poll_ts
@@ -282,12 +282,13 @@ class SolarAI:
         df.sort_values("timestamp", inplace=True)
 
         # 2. AI Predictie
-        if self.is_fitted:
+        if self.is_fitted and self.model:
             X_pred = self._create_features(df)
             df["ai_power_raw"] = self.model.predict(X_pred)
             df["ai_power_raw"] = df["ai_power_raw"].clip(0, SYSTEM_MAX_KW)
         else:
-            df["ai_power_raw"] = df["pv_estimate"]
+            # Fallback als model nog niet getraind is
+            df["ai_power_raw"] = df.get("pv_estimate", 0.0)
 
         # 3. Smoothed Bias Correction
         now_utc = pd.Timestamp.now(tz="UTC")

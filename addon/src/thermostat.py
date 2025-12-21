@@ -239,7 +239,7 @@ class ThermostatAI:
                         )
                         self.stability_start_ts = ts
                     else:
-                        logger.debug(
+                        logger.info(
                             f"ThermostatAI: Stabiliteit nog niet bereikt ({stable_hours:.2f}h)."
                         )
             else:
@@ -260,7 +260,7 @@ class ThermostatAI:
             if elapsed < cooldown_seconds:
                 # We zitten in de cooldown periode, dus we adviseren: "Doe niets (huidige setpoint)"
                 logger.info(
-                    f"ThermostatAI: Cooldown actief (nog {int(cooldown_seconds - elapsed / 60)} min)"
+                    f"ThermostatAI: Cooldown actief (nog {int(cooldown_seconds - elapsed / 3600)} uur)"
                 )
                 return current_sp
 

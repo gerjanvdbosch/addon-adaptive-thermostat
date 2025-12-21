@@ -67,12 +67,10 @@ class PresenceAI:
         """Maakt features voor menselijke ritmes."""
         df = df.copy()
         if not np.issubdtype(df["timestamp"], np.datetime64):
-            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
 
         # Gebruik lokale tijd voor ritme-detectie
-        local_dt = (
-            df["timestamp"].dt.tz_convert("Europe/Amsterdam").dt
-        )  # Pas aan naar jouw TZ
+        local_dt = df["timestamp"].dt
         hour_float = local_dt.hour + local_dt.minute / 60.0
         df["hour_sin"] = np.sin(2 * np.pi * hour_float / 24)
         df["hour_cos"] = np.cos(2 * np.pi * hour_float / 24)
