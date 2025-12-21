@@ -100,4 +100,5 @@ class Collector:
             "max_temp": safe_float(sensor_dict.get("max_temp")),
             "solar_kwh": safe_float(sensor_dict.get("solar_kwh")),
             "pv_power": safe_float(sensor_dict.get("pv_power")),
+            "supply_temp": safe_float(sensor_dict.get("supply_temp")),
         }
