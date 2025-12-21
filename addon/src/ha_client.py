@@ -17,15 +17,17 @@ class HAClient:
         }
 
     def get_state(self, entity_id):
+        return self.get_payload(entity_id).get("state")
+
+    def get_payload(self, entity_id):
         try:
             r = requests.get(
                 f"{self.url}/states/{entity_id}", headers=self.headers, timeout=10
             )
             r.raise_for_status()
             payload = r.json()
-            state = payload.get("state")
-            logger.debug("State %s fetched: %s", entity_id, state)
-            return state
+            logger.debug("Payload %s fetched", entity_id)
+            return payload
         except Exception as e:
             logger.exception("Error getting state %s: %s", entity_id, e)
             return None

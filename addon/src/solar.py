@@ -116,12 +116,12 @@ class SolarAI:
         df["doy_cos"] = np.cos(2 * np.pi * doy / 366)
 
         # Onzekerheid (Verschil tussen Solcast P10 en P90)
-        df["uncertainty"] = df["solcast_90"] - df["solcast_10"]
+        df["uncertainty"] = df["pv_estimate90"] - df["pv_estimate10"]
 
         features = [
-            "solcast_est",
-            "solcast_10",
-            "solcast_90",
+            "pv_estimate",
+            "pv_estimate10",
+            "pv_estimate90",
             "uncertainty",
             "hour_sin",
             "hour_cos",
@@ -193,13 +193,13 @@ class SolarAI:
                 logger.debug("SolarAI: Solcast data is up-to-date.")
                 return
 
-            state = self.ha.get_state(self.entity_solcast)
+            payload = self.ha.get_attributes(self.entity_solcast)
             if (
-                state
-                and "attributes" in state
-                and "detailedForecast" in state["attributes"]
+                payload
+                and "attributes" in payload
+                and "detailedForecast" in payload["attributes"]
             ):
-                raw_data = state["attributes"]["detailedForecast"]
+                raw_data = payload["attributes"]["detailedForecast"]
                 self.cached_solcast_data = raw_data
 
                 # Opslaan in DB voor toekomstige training
@@ -211,9 +211,9 @@ class SolarAI:
                     )
                     upsert_solar_record(
                         ts,
-                        solcast_est=item["pv_estimate"],
-                        solcast_10=item["pv_estimate10"],
-                        solcast_90=item["pv_estimate90"],
+                        pv_estimate=item["pv_estimate"],
+                        pv_estimate10=item["pv_estimate10"],
+                        pv_estimate90=item["pv_estimate90"],
                     )
 
                 self.last_solcast_poll_ts = current_poll_ts
@@ -273,9 +273,9 @@ class SolarAI:
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
         df.rename(
             columns={
-                "pv_estimate": "solcast_est",
-                "pv_estimate10": "solcast_10",
-                "pv_estimate90": "solcast_90",
+                "pv_estimate": "pv_estimate",
+                "pv_estimate10": "pv_estimate10",
+                "pv_estimate90": "pv_estimate90",
             },
             inplace=True,
         )
@@ -287,7 +287,7 @@ class SolarAI:
             df["ai_power_raw"] = self.model.predict(X_pred)
             df["ai_power_raw"] = df["ai_power_raw"].clip(0, SYSTEM_MAX_KW)
         else:
-            df["ai_power_raw"] = df["solcast_est"]
+            df["ai_power_raw"] = df["pv_estimate"]
 
         # 3. Smoothed Bias Correction
         now_utc = pd.Timestamp.now(tz="UTC")

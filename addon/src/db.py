@@ -61,9 +61,9 @@ class SolarRecord(Base):
 
     __tablename__ = "solar_history"
     timestamp = Column(DateTime, primary_key=True)
-    solcast_est = Column(Float)
-    solcast_10 = Column(Float)
-    solcast_90 = Column(Float)
+    pv_estimate = Column(Float)
+    pv_estimate10 = Column(Float)
+    pv_estimate90 = Column(Float)
     actual_pv_yield = Column(Float, nullable=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

@@ -59,9 +59,9 @@ class SetpointOut(BaseModel):
 
 class SolarOut(BaseModel):
     timestamp: datetime
-    solcast_est: Optional[float]
-    solcast_10: Optional[float]
-    solcast_90: Optional[float]
+    pv_estimate: Optional[float]
+    pv_estimate10: Optional[float]
+    pv_estimate90: Optional[float]
     actual_pv_yield: Optional[float]
 
     class Config:
