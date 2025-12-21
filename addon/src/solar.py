@@ -243,16 +243,39 @@ class SolarAI:
         self.slot_samples.append(pv_kw)
 
     def _get_stability_stats(self):
-        """Bepaalt de stabiliteit van het weer."""
+        """
+        Bepaalt de stabiliteit van het weer.
+        Schaalt dynamisch mee met SYSTEM_MAX_KW.
+        """
         if len(self.pv_buffer) < 5:
             return 0.0, True
 
         arr = np.array(self.pv_buffer)
         median = float(np.median(arr))
+
+        # IQR = Interkwartielafstand (verschil tussen 75% en 25% punt)
+        # Dit geeft aan hoe hard de waarden heen en weer springen
         iqr = np.percentile(arr, 75) - np.percentile(arr, 25)
 
-        # Als IQR > 0.4 kW bij helder weer, is het wisselend bewolkt
-        threshold = 0.4 if median > 0.8 else 0.2
+        # 1. Bepaal of we momenteel op "hoog vermogen" draaien
+        # Grens: 40% van wat je systeem kan (bij 2.0kW is dit 0.8kW)
+        high_power_limit = SYSTEM_MAX_KW * 0.4
+
+        # 2. Bepaal de drempel voor instabiliteit
+        if median > high_power_limit:
+            # Bij hoog vermogen (felle zon) zijn de klappen van wolken groter.
+            # We tolereren fluctuaties tot 20% van de systeemcapaciteit.
+            # (Bij 2.0kW = 0.4kW fluctuatie toegestaan)
+            threshold = SYSTEM_MAX_KW * 0.20
+        else:
+            # Bij laag vermogen (ochtend/avond/winter) is de basislijn lager.
+            # We tolereren dan minder absolute schommeling (10% capaciteit).
+            # (Bij 2.0kW = 0.2kW fluctuatie toegestaan)
+            threshold = SYSTEM_MAX_KW * 0.10
+
+        # Harde ondergrens voor ruis (anders wordt hij zenuwachtig van 50W verschil)
+        threshold = max(threshold, 0.15)
+
         is_stable = iqr < threshold
 
         return median, is_stable
@@ -271,20 +294,18 @@ class SolarAI:
         # 1. Prepareer DataFrame
         df = pd.DataFrame(self.cached_solcast_data)
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
-        df.rename(
-            columns={
-                "pv_estimate": "pv_estimate",
-                "pv_estimate10": "pv_estimate10",
-                "pv_estimate90": "pv_estimate90",
-            },
-            inplace=True,
-        )
         df.sort_values("timestamp", inplace=True)
 
         # 2. AI Predictie
         if self.is_fitted and self.model:
             X_pred = self._create_features(df)
-            df["ai_power_raw"] = self.model.predict(X_pred)
+            pred_ai = self.model.predict(X_pred)
+
+            # ENSEMBLING (BLENDING):
+            # We combineren de AI (leert schaduw/panelen) met Solcast (leert wolken/weer).
+            # Dit voorkomt dat de AI 'zenuwachtig' wordt of compleet mist.
+            # Factor 0.6 = We vertrouwen de AI iets meer dan Solcast.
+            df["ai_power_raw"] = (0.6 * pred_ai) + (0.4 * df["pv_estimate"])
             df["ai_power_raw"] = df["ai_power_raw"].clip(0, SYSTEM_MAX_KW)
         else:
             # Fallback als model nog niet getraind is
@@ -323,6 +344,10 @@ class SolarAI:
             today_peak = 0.0
         else:
             today_peak = df_today["ai_power"].max()
+
+        logger.info(
+            f"SolarAI: Vandaag piek voorspeld op {today_peak:.2f} kW (Median PV: {median_pv:.2f} kW)"
+        )
 
         # Classificeer de dag
         # We gebruiken SYSTEM_MAX_KW (2.0) als referentie

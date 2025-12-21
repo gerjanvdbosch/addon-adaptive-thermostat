@@ -94,6 +94,11 @@ class TrainResponse(BaseModel):
     background: bool
 
 
+class DeleteResponse(BaseModel):
+    status: str
+    deleted_key: str
+
+
 # ==============================================================================
 # TRAINING & CONTROL ENDPOINTS
 # ==============================================================================
@@ -205,5 +210,95 @@ def get_thermal_history(limit: int = 100, offset: int = 0):
         )
         results = s.execute(stmt).scalars().all()
         return results
+    finally:
+        s.close()
+
+
+# ==============================================================================
+# DELETE ENDPOINTS
+# ==============================================================================
+
+
+@app.delete("/history/setpoint/{item_id}", response_model=DeleteResponse)
+def delete_setpoint(item_id: int):
+    """Verwijder een setpoint record op basis van ID."""
+    s = Session()
+    try:
+        record = s.get(Setpoint, item_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Setpoint record not found")
+
+        s.delete(record)
+        s.commit()
+        return {"status": "success", "deleted_key": str(item_id)}
+    except Exception as e:
+        s.rollback()
+        logger.error(f"Failed to delete setpoint {item_id}: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        s.close()
+
+
+@app.delete("/history/thermal/{item_id}", response_model=DeleteResponse)
+def delete_thermal(item_id: int):
+    """Verwijder een thermal record op basis van ID."""
+    s = Session()
+    try:
+        record = s.get(HeatingCycle, item_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="HeatingCycle record not found")
+
+        s.delete(record)
+        s.commit()
+        return {"status": "success", "deleted_key": str(item_id)}
+    except Exception as e:
+        s.rollback()
+        logger.error(f"Failed to delete thermal {item_id}: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        s.close()
+
+
+@app.delete("/history/solar/{timestamp}", response_model=DeleteResponse)
+def delete_solar(timestamp: datetime):
+    """
+    Verwijder een solar record op basis van timestamp (Primary Key).
+    Let op: Timestamp moet URL-encoded zijn (bijv. 2025-12-21T10:00:00Z)
+    """
+    s = Session()
+    try:
+        record = s.get(SolarRecord, timestamp)
+        if not record:
+            raise HTTPException(status_code=404, detail="Solar record not found")
+
+        s.delete(record)
+        s.commit()
+        return {"status": "success", "deleted_key": timestamp.isoformat()}
+    except Exception as e:
+        s.rollback()
+        logger.error(f"Failed to delete solar {timestamp}: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        s.close()
+
+
+@app.delete("/history/presence/{timestamp}", response_model=DeleteResponse)
+def delete_presence(timestamp: datetime):
+    """
+    Verwijder een presence record op basis van timestamp (Primary Key).
+    """
+    s = Session()
+    try:
+        record = s.get(PresenceRecord, timestamp)
+        if not record:
+            raise HTTPException(status_code=404, detail="Presence record not found")
+
+        s.delete(record)
+        s.commit()
+        return {"status": "success", "deleted_key": timestamp.isoformat()}
+    except Exception as e:
+        s.rollback()
+        logger.error(f"Failed to delete presence {timestamp}: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
     finally:
         s.close()

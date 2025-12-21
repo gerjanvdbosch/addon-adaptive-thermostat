@@ -260,9 +260,9 @@ class ThermostatAI:
         if self.last_ai_action_ts:
             elapsed = (datetime.now() - self.last_ai_action_ts).total_seconds()
             if elapsed < cooldown_seconds:
-                # We zitten in de cooldown periode, dus we adviseren: "Doe niets (huidige setpoint)"
+                cooldown_remaining = (cooldown_seconds - elapsed) / 3600
                 logger.info(
-                    f"ThermostatAI: Cooldown actief (nog {int(cooldown_seconds - elapsed) / 3600} uur)"
+                    f"ThermostatAI: Cooldown actief (nog {cooldown_remaining:.2f}h)."
                 )
                 return None
 
