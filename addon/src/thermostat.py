@@ -229,7 +229,7 @@ class ThermostatAI:
                     logger.info("ThermostatAI: Stabiliteit gestart.")
                 else:
                     stable_hours = (ts - self.stability_start_ts).total_seconds() / 3600
-                    if stable_hours > float(self.opts.get("stability_hours", 8.0)):
+                    if stable_hours > float(self.opts.get("stability_hours", 6.0)):
                         logger.info(
                             "ThermostatAI: Stabiliteit bereikt, loggen setpoint."
                         )
@@ -241,8 +241,11 @@ class ThermostatAI:
                         )
                         self.stability_start_ts = ts
                     else:
+                        stable_hours_remaining = (
+                            float(self.opts.get("stability_hours", 6.0)) - stable_hours
+                        )
                         logger.info(
-                            f"ThermostatAI: Stabiliteit nog niet bereikt ({stable_hours:.2f}h)."
+                            f"ThermostatAI: Stabiliteit nog niet bereikt (nog {stable_hours_remaining:.2f}h)."
                         )
             else:
                 self.stability_start_ts = None
