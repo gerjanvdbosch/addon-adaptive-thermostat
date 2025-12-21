@@ -345,6 +345,9 @@ class SolarAI:
         df["window_avg_power"] = df["ai_power"].rolling(window=indexer).mean()
 
         future = df[df["timestamp"] >= (now_utc - timedelta(minutes=15))].copy()
+        future.dropna(subset=["window_avg_power"], inplace=True)
+        # ------------------------------------------------------------------------
+
         if future.empty:
             return {"action": "WAIT", "reason": "Einde zonnige dagdeel."}
 
@@ -359,27 +362,25 @@ class SolarAI:
         if df_today.empty:
             return {"action": "WAIT", "reason": "Nacht: Wachten op morgen"}
 
-        # De absolute max van de hele dag (kan in verleden liggen)
-        historical_peak = df_today["ai_power"].max()
-        today_peak = max(historical_peak, median_pv)
+        # De absolute max van de hele dag (uit voorspelling)
+        forecast_peak = df_today["ai_power"].max()
 
-        # Bepaal wat er nog haalbaar is
-        future = df[df["timestamp"] >= (now_utc - timedelta(minutes=15))].copy()
-        if future.empty:
-            future_max = 0.0
-        else:
-            future_max = future["ai_power"].max()
+        # REALITY CHECK: Als we nu meer meten dan voorspeld, is dat de nieuwe piek
+        historical_peak = max(forecast_peak, median_pv)
 
+        # De max die we NOG kunnen halen (Toekomst of Nu)
+        future_max = future["ai_power"].max() if not future.empty else 0.0
         remaining_potential = max(future_max, median_pv)
 
-        # De referentie is wat er nog kan komen (of wat nu is), begrensd door de historie
-        reference_peak = min(today_peak, remaining_potential)
+        # De lat leggen we op wat er nog haalbaar is, niet op wat er al geweest is.
+        reference_peak = min(historical_peak, remaining_potential)
 
         logger.info(
-            f"SolarAI: DagPiek: {today_peak:.2f}kW | Haalbaar: {remaining_potential:.2f}kW | Actueel: {median_pv:.2f}kW"
+            f"SolarAI: DagPiek: {historical_peak:.2f}kW | Haalbaar: {remaining_potential:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
-        day_quality_ratio = today_peak / max(1.0, SYSTEM_MAX_KW)
+        day_quality_ratio = historical_peak / max(1.0, SYSTEM_MAX_KW)
+
         if day_quality_ratio > 0.75:
             day_type = "Sunny ☀️"
             percentage = 0.7
@@ -394,15 +395,14 @@ class SolarAI:
         min_noise_limit = 0.05
         final_trigger_val = max(dynamic_threshold, min_noise_limit)
 
-        # 4. Zoek beste window
-        window_steps = max(1, int(SWW_DURATION_HOURS * 2))
-        indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_steps)
-        df["window_avg_power"] = df["ai_power"].rolling(window=indexer).mean()
+        # ==========================================================================
 
-        if future.empty:
-            return {"action": "WAIT", "reason": "Einde zonnige dagdeel."}
+        # Veilig ophalen van de index (door dropna zou idxmax veilig moeten zijn)
+        best_idx = future["window_avg_power"].idxmax()
+        if pd.isna(best_idx):
+            return {"action": "WAIT", "reason": "Geen geldig tijdslot."}
 
-        best_row = future.loc[future["window_avg_power"].idxmax()]
+        best_row = future.loc[best_idx]
         best_power = best_row["window_avg_power"]
 
         local_tz = datetime.now().astimezone().tzinfo
@@ -423,7 +423,7 @@ class SolarAI:
             return {
                 "action": "START",
                 "reason": f"[{day_type}] Nu meer zon dan voorspeld! (Actueel {median_pv:.2f}kW > Verwacht {best_power:.2f}kW)",
-                "plan_start": datetime.now().astimezone(local_tz),
+                "plan_start": datetime.now(local_tz),
             }
         # ---------------------------------------------
 

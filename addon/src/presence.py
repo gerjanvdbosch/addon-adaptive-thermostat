@@ -108,7 +108,7 @@ class PresenceAI:
         logger.info("PresenceAI: Training start...")
         df = fetch_presence_history(days=90)
 
-        if len(df) < 200:
+        if len(df) < 2000:
             logger.warning("PresenceAI: Te weinig data voor betrouwbare voorspelling.")
             return
 

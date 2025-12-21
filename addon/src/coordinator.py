@@ -144,7 +144,9 @@ class ClimateCoordinator:
             return
 
         if abs(target_sp - current_sp) >= self.min_change_threshold:
-            logger.info(f"Coordinator: Aanpassen van {current_sp} naar {target_sp:.1f}")
+            logger.info(
+                f"Coordinator: Thermostaat wil aanpassen van {current_sp} naar {target_sp:.1f}"
+            )
             self._set_setpoint_safe(target_sp, current_action)
         else:
             logger.info(
@@ -211,10 +213,16 @@ class ClimateCoordinator:
 
         if current_action == "heating" and target_setpoint < current_setpoint:
             if duration_mins < self.min_run_minutes:
+                logger.info(
+                    f"Coordinator: Verandering naar lager setpoint geblokkeerd (run tijd {duration_mins:.1f} min < {self.min_run_minutes} min)"
+                )
                 return False
 
         if current_action != "heating" and target_setpoint > current_setpoint:
             if duration_mins < self.min_off_minutes:
+                logger.info(
+                    f"Coordinator: Verandering naar hoger setpoint geblokkeerd (off tijd {duration_mins:.1f} min < {self.min_off_minutes} min)"
+                )
                 return False
 
         return True
