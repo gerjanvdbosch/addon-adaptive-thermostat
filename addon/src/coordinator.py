@@ -140,6 +140,9 @@ class ClimateCoordinator:
 
         target_sp = self.thermostat_ai.get_recommended_setpoint(features, current_sp)
 
+        if target_sp is None:
+            return
+
         if abs(target_sp - current_sp) >= self.min_change_threshold:
             logger.info(f"Coordinator: Aanpassen van {current_sp} naar {target_sp:.1f}")
             self._set_setpoint_safe(target_sp, current_action)

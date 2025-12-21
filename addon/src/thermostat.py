@@ -230,7 +230,9 @@ class ThermostatAI:
                 else:
                     stable_hours = (ts - self.stability_start_ts).total_seconds() / 3600
                     if stable_hours > float(self.opts.get("stability_hours", 8.0)):
-                        logger.info("Stabiliteit bereikt: Datapunt opslaan.")
+                        logger.info(
+                            "ThermostatAI: Stabiliteit bereikt, loggen setpoint."
+                        )
                         feats = self.collector.features_from_raw(raw_data, timestamp=ts)
                         insert_setpoint(
                             feature_dict=feats,
@@ -244,7 +246,7 @@ class ThermostatAI:
                         )
             else:
                 self.stability_start_ts = None
-                logger.info("ThermostatAI: Stabiliteit verloren.")
+                logger.info("ThermostatAI: Niet stabiel, reset timer.")
 
         return updated
 
@@ -260,9 +262,9 @@ class ThermostatAI:
             if elapsed < cooldown_seconds:
                 # We zitten in de cooldown periode, dus we adviseren: "Doe niets (huidige setpoint)"
                 logger.info(
-                    f"ThermostatAI: Cooldown actief (nog {int(cooldown_seconds - elapsed / 3600)} uur)"
+                    f"ThermostatAI: Cooldown actief (nog {int(cooldown_seconds - elapsed) / 3600} uur)"
                 )
-                return current_sp
+                return None
 
         # 2. Voorspelling
         if not self.is_fitted or self.model is None:
@@ -278,6 +280,7 @@ class ThermostatAI:
             prediction = self.model.predict(df_input[self.feature_columns])
             pred_delta = float(prediction[0])
         except Exception:
+            logger.exception("ThermostatAI: Fout bij voorspelling setpoint.")
             return current_sp
 
         new_target = current_sp + pred_delta

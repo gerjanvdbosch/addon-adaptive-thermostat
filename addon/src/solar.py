@@ -140,7 +140,7 @@ class SolarAI:
 
         df = fetch_solar_training_data_orm(days=180)
 
-        if len(df) < 100:
+        if len(df) < 2000:
             logger.warning(
                 f"SolarAI: Te weinig data ({len(df)} samples). Training overgeslagen."
             )
@@ -261,7 +261,7 @@ class SolarAI:
     # 4. INFERENCE (Het "SWW Moment" bepalen)
     # ==============================================================================
 
-    def get_sww_recommendation(self):
+    def get_solar_recommendation(self):
         """
         Analyseert de forecast en de huidige bias om een start-advies te geven.
         """
@@ -313,6 +313,44 @@ class SolarAI:
         else:
             df["ai_power"] = df["ai_power_raw"]
 
+        # We kijken naar de piek van VANDAAG (vanaf middernacht tot middernacht)
+        today_start = now_utc.normalize()
+        today_end = today_start + timedelta(days=1)
+
+        df_today = df[(df["timestamp"] >= today_start) & (df["timestamp"] < today_end)]
+
+        if df_today.empty:
+            today_peak = 0.0
+        else:
+            today_peak = df_today["ai_power"].max()
+
+        # Classificeer de dag
+        # We gebruiken SYSTEM_MAX_KW (2.0) als referentie
+        day_quality_ratio = today_peak / max(1.0, SYSTEM_MAX_KW)
+
+        if day_quality_ratio > 0.75:
+            day_type = "Sunny ☀️"
+            # Op een topdag wachten we tot we minimaal 70% van de piek hebben
+            dynamic_threshold = today_peak * 0.7
+        elif day_quality_ratio > 0.4:
+            day_type = "Average ⛅"
+            # Op een gemiddelde dag zijn we tevreden met 60% van de piek
+            dynamic_threshold = today_peak * 0.6
+        else:
+            day_type = "Gloomy ☁️"
+            # Op een donkere dag pakken we alles wat we pakken kunnen (90% van die kleine piek)
+            dynamic_threshold = today_peak * 0.9
+
+        # HARDE ONDERGRENS:
+        # Een warmtepompboiler heeft minimaal ~400-500W nodig voor de compressor.
+        # Draaien onder de 450W heeft geen zin (dan trek je alles uit het net).
+        min_technical_limit = 0.45
+
+        # We stellen de drempel in, maar nooit lager dan wat technisch nuttig is.
+        final_trigger_val = max(dynamic_threshold, min_technical_limit)
+
+        # ==========================================================================
+
         # 4. Zoek beste window (Rolling Average)
         # Solcast is per 30 min, dus SWW_DURATION_HOURS * 2
         window_steps = max(1, int(SWW_DURATION_HOURS * 2))
@@ -322,7 +360,7 @@ class SolarAI:
         # 5. Filter op de toekomst
         future = df[df["timestamp"] >= (now_utc - timedelta(minutes=15))].copy()
         if future.empty:
-            return {"action": "WAIT", "reason": "Einde van de dag bereikt."}
+            return {"action": "WAIT", "reason": "Einde dag."}
 
         best_row = future.loc[future["window_avg_power"].idxmax()]
         best_power = best_row["window_avg_power"]
@@ -331,12 +369,19 @@ class SolarAI:
         local_tz = datetime.now().astimezone().tzinfo
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
 
-        # 6. Besluitvorming
-        # A. Is er genoeg zon?
-        if best_power < 0.6:
+        # 6. Besluitvorming met de NIEUWE dynamische logica
+
+        # A. Is de beste piek van vandaag goed genoeg voor onze dynamische drempel?
+        if best_power < final_trigger_val:
+            # Specifieke reden geven voor loggen
+            if best_power < min_technical_limit:
+                msg = f"Te weinig zon (Max {best_power:.2f}kW < Min {min_technical_limit}kW)"
+            else:
+                msg = f"Sparen voor beter moment (Max {best_power:.2f}kW < Drempel {final_trigger_val:.2f}kW)"
+
             return {
                 "action": "WAIT",
-                "reason": f"Te weinig zon verwacht ({best_power:.2f}kW)",
+                "reason": f"[{day_type}] {msg}",
                 "plan_start": start_time_local,
             }
 
@@ -349,13 +394,13 @@ class SolarAI:
             if not is_stable and median_pv < 1.0:
                 return {
                     "action": "WAIT_CLOUD",
-                    "reason": "Wachten op stabieler zonlicht",
+                    "reason": f"[{day_type}] Wachten op stabieler zonlicht",
                     "plan_start": start_time_local,
                 }
 
             return {
                 "action": "START",
-                "reason": f"Optimaal venster ({best_power:.2f}kW)",
+                "reason": f"[{day_type}] Optimaal venster! ({best_power:.2f}kW >= {final_trigger_val:.2f}kW)",
                 "plan_start": start_time_local,
             }
 
@@ -364,13 +409,13 @@ class SolarAI:
             wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
             return {
                 "action": "WAIT",
-                "reason": f"Piek over {wait_min} min",
+                "reason": f"[{day_type}] Piek over {wait_min} min ({best_power:.2f}kW)",
                 "plan_start": start_time_local,
             }
 
         return {
             "action": "WAIT",
-            "reason": "Piek reeds gepasseerd",
+            "reason": f"[{day_type}] Piek reeds gepasseerd",
             "plan_start": start_time_local,
         }
 
@@ -394,7 +439,7 @@ class SolarAI:
         self._update_solcast_cache()
 
         # 3. Krijg advies en log het
-        advice = self.get_sww_recommendation()
+        advice = self.get_solar_recommendation()
 
         res = advice["action"]
         reason = advice["reason"]
