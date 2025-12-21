@@ -423,7 +423,7 @@ class SolarAI:
             return {
                 "action": "START",
                 "reason": f"[{day_type}] Nu meer zon dan voorspeld! (Actueel {median_pv:.2f}kW > Verwacht {best_power:.2f}kW)",
-                "plan_start": datetime.now(timezone.utc),
+                "plan_start": datetime.now().astimezone(local_tz),
             }
         # ---------------------------------------------
 
