@@ -20,7 +20,7 @@ options:
   thermostat_interval_seconds: 60
   solar_interval_seconds: 15
   cooldown_hours: 2.0
-  stability_hours: 6.0
+  stability_hours: 8
   full_retrain_time: "03:00"
   min_setpoint: 15.0
   max_setpoint: 25.0
@@ -32,13 +32,13 @@ options:
     temp_change: sensor.woonkamer_temperatuur_verandering
     min_temp: sensor.minimale_temperatuur_1d
     max_temp: sensor.temperatuur_1d
-    solar_kwh: sensor.solcast_pv_forecast_forecast_today
-    wind_speed: sensor.windkracht_1d
-    wind_dir: sensor.windrichting_azimut_1d
     outside_temp: sensor.temperatuur
     home_presence: input_boolean.thuis_aanwezig
     hvac_mode: sensor.ecodan_heatpump_ca09ec_status_bedrijf
+    supply_temp: sensor.ecodan_heatpump_ca09ec_aanvoer_temp
     heat_demand: binary_sensor.ecodan_heatpump_ca09ec_status_in1_thermostaat
+    solar_kwh: sensor.solcast_pv_forecast_forecast_today
+    pv_power: sensor.fuj7chn07b_pv_output_actual
 schema:
   thermostat_entity: "str?"
   solar_entity: "str?"
@@ -49,7 +49,7 @@ schema:
   thermostat_interval_seconds: "int?"
   solar_interval_seconds: "int?"
   cooldown_hours: "float?"
-  stability_hours: "float?"
+  stability_hours: "int?"
   full_retrain_time: "str?"
   min_setpoint: "float?"
   max_setpoint: "float?"
@@ -61,13 +61,13 @@ schema:
     temp_change: "str?"
     min_temp: "str?"
     max_temp: "str?"
-    solar_kwh: "str?"
-    wind_speed: "str?"
-    wind_dir: "str?"
     outside_temp: "str?"
     home_presence: "str?"
     hvac_mode: "str?"
+    supply_temp: "str?"
     heat_demand: "str?"
+    solar_kwh: "str?"
+    pv_power: "str?"
 ports:
   8000/tcp: 8000
 map:

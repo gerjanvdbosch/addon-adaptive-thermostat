@@ -50,9 +50,6 @@ class Setpoint(Base):
     outside_temp = Column(Float)
     min_temp = Column(Float)
     max_temp = Column(Float)
-    wind_speed = Column(Float)
-    wind_dir_sin = Column(Float)
-    wind_dir_cos = Column(Float)
     solar_kwh = Column(Float)
 
 
@@ -73,11 +70,13 @@ class HeatingCycle(Base):
 
     __tablename__ = "heating_cycles"
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, index=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     start_temp = Column(Float)
     end_temp = Column(Float)
     outside_temp = Column(Float)
     duration_minutes = Column(Float)
+    avg_solar = Column(Float, nullable=True)
+    avg_supply_temp = Column(Float, nullable=True)
 
 
 class PresenceRecord(Base):
@@ -154,7 +153,13 @@ def fetch_solar_training_data_orm(days: int = 180):
 
 
 def upsert_heating_cycle(
-    timestamp, start_temp, end_temp, outside_temp, duration_minutes
+    timestamp,
+    start_temp,
+    end_temp,
+    outside_temp,
+    duration_minutes,
+    avg_solar=None,
+    avg_supply_temp=None,
 ):
     s: SASession = Session()
     try:
@@ -165,9 +170,14 @@ def upsert_heating_cycle(
                 end_temp=end_temp,
                 outside_temp=outside_temp,
                 duration_minutes=duration_minutes,
+                avg_solar=avg_solar,
+                avg_supply_temp=avg_supply_temp,
             )
         )
         s.commit()
+    except Exception:
+        logger.exception("DB: Fout bij opslaan heating cycle")
+        s.rollback()
     finally:
         s.close()
 

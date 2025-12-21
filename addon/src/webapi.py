@@ -48,9 +48,6 @@ class SetpointOut(BaseModel):
     outside_temp: Optional[float]
     min_temp: Optional[float]
     max_temp: Optional[float]
-    wind_speed: Optional[float]
-    wind_dir_sin: Optional[float]
-    wind_dir_cos: Optional[float]
     solar_kwh: Optional[float]
 
     class Config:

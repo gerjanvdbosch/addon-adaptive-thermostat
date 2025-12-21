@@ -41,7 +41,7 @@ def _load_options():
         "solar_interval_seconds": int(os.getenv("SOLAR_INTERVAL_SECONDS", 15)),
         "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 2)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
-        "stability_hours": float(os.getenv("STABILITY_HOURS", 6.0)),
+        "stability_hours": float(os.getenv("STABILITY_HOURS", 8)),
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),
         "max_setpoint": float(os.getenv("MAX_SETPOINT", 24.0)),
         "min_change_threshold": float(os.getenv("MIN_CHANGE_THRESHOLD", 0.3)),

@@ -145,12 +145,12 @@ class ClimateCoordinator:
 
         if abs(target_sp - current_sp) >= self.min_change_threshold:
             logger.info(
-                f"Coordinator: Thermostaat wil aanpassen van {current_sp} naar {target_sp:.1f}"
+                f"Coordinator: Thermostaat wil aanpassen van {current_sp} naar {target_sp:.2f}"
             )
             self._set_setpoint_safe(target_sp, current_action)
         else:
             logger.info(
-                f"Coordinator: Verandering van {current_sp} naar {target_sp:.1f} onder drempel."
+                f"Coordinator: Verandering van {current_sp} naar {target_sp:.2f} onder drempel."
             )
 
     def _handle_away_logic(self, current_sp, features):
