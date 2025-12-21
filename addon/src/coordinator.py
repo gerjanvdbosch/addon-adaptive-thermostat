@@ -122,8 +122,11 @@ class ClimateCoordinator:
         else:
             self._handle_away_logic(current_sp, features, hvac_mode)
 
-    def _manage_home_comfort(self, features, current_sp, current_action):
-        """Logica voor als de bewoners thuis zijn."""
+    def _manage_home_comfort(self, features, current_sp, hvac_mode):
+        """
+        Logica voor als de bewoners thuis zijn.
+        Nu met bescherming tegen het onderbreken van lopende WP-runs.
+        """
         if self.is_preheating:
             logger.info("Coordinator: Gebruiker is thuis. Voorverwarmen voltooid.")
             self.is_preheating = False
@@ -131,8 +134,15 @@ class ClimateCoordinator:
         # Vraag de AI om het ideale setpoint
         target_sp = self.thermostat_ai.get_recommended_setpoint(features, current_sp)
 
-        # Als target_sp None is, zit de AI in cooldown
         if target_sp is None:
+            return
+
+        # Als de WP aan het verwarmen is ('heating') en de AI wil de temp verlagen
+        if hvac_mode == "heating" and target_sp < current_sp:
+            logger.info(
+                f"Coordinator: Systeem is nog bezig. "
+                f"Setpoint {current_sp:.1f}C behouden om cyclus niet te onderbreken."
+            )
             return
 
         # Alleen aanpassen als het verschil groot genoeg is (tegen pendelen)
@@ -140,7 +150,7 @@ class ClimateCoordinator:
             logger.info(
                 f"Coordinator: AI adviseert wijziging: {current_sp} -> {target_sp:.2f}"
             )
-            self._set_setpoint_safe(target_sp, current_action)
+            self._set_setpoint_safe(target_sp, hvac_mode)
         else:
             logger.info(
                 f"Coordinator: Verandering van {current_sp} naar {target_sp:.2f} onder drempel."
@@ -174,7 +184,7 @@ class ClimateCoordinator:
         # We wachten tot de kamer op temperatuur is en de WP uit zichzelf stopt.
         if hvac_mode == "heating" and current_sp > self.away_temp:
             logger.info(
-                f"Coordinator: Afwezig, maar WP is nog actief bezig. "
+                f"Coordinator: Afwezig, Systeem is nog actief. "
                 f"Setpoint {current_sp:.1f}C behouden tot cyclus eindigt."
             )
             return
@@ -182,7 +192,7 @@ class ClimateCoordinator:
         # 3. Als de WP niet (meer) verwarmt, mag hij naar de afwezigheidsstand
         if abs(current_sp - self.away_temp) > 0.1:
             logger.info(
-                f"Coordinator: Afwezig en WP is idle. Setpoint naar {self.away_temp}C."
+                f"Coordinator: Systeem is uit. Setpoint naar {self.away_temp}C."
             )
             self._set_setpoint_safe(self.away_temp, hvac_mode)
 
