@@ -193,7 +193,7 @@ class SolarAI:
                 logger.debug("SolarAI: Solcast data is up-to-date.")
                 return
 
-            payload = self.ha.get_attributes(self.entity_solcast)
+            payload = self.ha.get_payload(self.entity_solcast)
             if (
                 payload
                 and "attributes" in payload
