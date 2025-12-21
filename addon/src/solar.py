@@ -296,6 +296,11 @@ class SolarAI:
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
         df.sort_values("timestamp", inplace=True)
 
+        df = df[df["pv_estimate"] > 0.01]
+
+        if df.empty:
+            return {"action": "WAIT", "reason": "Nacht: Geen zon"}
+
         # 2. AI Predictie
         if self.is_fitted and self.model:
             X_pred = self._create_features(df)
@@ -334,20 +339,13 @@ class SolarAI:
         else:
             df["ai_power"] = df["ai_power_raw"]
 
-        # We kijken naar de piek van VANDAAG (vanaf middernacht tot middernacht)
-        today_start = now_utc.normalize()
-        today_end = today_start + timedelta(days=1)
+        forecast_peak = df["ai_power"].max()
 
-        df_today = df[(df["timestamp"] >= today_start) & (df["timestamp"] < today_end)]
-
-        if df_today.empty:
-            # Kan gebeuren als het 23:30 is en de zon morgen pas opkomt
-            return {"action": "WAIT", "reason": "Nacht: Wachten op morgen"}
-
-        today_peak = df_today["ai_power"].max()
+        # REALITY CHECK: Piek is minstens wat we nu meten
+        today_peak = max(forecast_peak, median_pv)
 
         logger.info(
-            f"SolarAI: Vandaag piek voorspeld op {today_peak:.2f} kW (Median PV: {median_pv:.2f} kW)"
+            f"SolarAI: Dagpiek vastgesteld op {today_peak:.2f} kW (Forecast: {forecast_peak:.2f}, Actueel: {median_pv:.2f})"
         )
 
         # Classificeer de dag
@@ -388,30 +386,49 @@ class SolarAI:
         local_tz = datetime.now().astimezone().tzinfo
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
 
-        # 6. Besluitvorming
+        # ==========================================================================
+        # 6. BESLUITVORMING (VOLGORDE GECORRIGEERD)
+        # ==========================================================================
 
-        # A. Is het überhaupt de moeite waard?
-        if best_power < min_noise_limit:
+        # A. Is het überhaupt de moeite waard? (Absolute ondergrens)
+        # We kijken hier naar best_power (toekomst) EN median_pv (nu).
+        # Als beiden < 50W zijn, dan is het echt te donker.
+        if best_power < min_noise_limit and median_pv < min_noise_limit:
             return {
                 "action": "WAIT",
                 "reason": f"[{day_type}] Te weinig licht (<{min_noise_limit*1000:.0f}W)",
                 "plan_start": start_time_local,
             }
 
-        # B. Is dit blok goed genoeg t.o.v. de dagpiek?
+        # --- FIX 2: OPPORTUNISME CHECK (NU EERST!) ---
+        # Is de huidige werkelijke opbrengst (median_pv) NU al hoger dan de drempel?
+        # En ook hoger dan wat de AI had voorspeld?
+        # DAN: NIET WACHTEN, STARTEN!
+        if median_pv > final_trigger_val and median_pv > best_power:
+            return {
+                "action": "START",
+                "reason": f"[{day_type}] Nu meer zon dan voorspeld! (Actueel {median_pv:.2f}kW > Verwacht {best_power:.2f}kW)",
+                "plan_start": datetime.now(timezone.utc),
+            }
+        # ---------------------------------------------
+
+        # B. Is de voorspelde piek wel goed genoeg?
+        # (Dit doen we pas NA de opportunisme check)
         if best_power < final_trigger_val:
             return {
                 "action": "WAIT",
-                "reason": f"[{day_type}] Sparen voor piek ({best_power:.2f}kW < {final_trigger_val:.2f}kW)",
+                "reason": f"[{day_type}] Wachten op piek ({best_power:.2f}kW < {final_trigger_val:.2f}kW)",
                 "plan_start": start_time_local,
             }
 
-        # B. Zitten we in het ideale blok? (-15min marge)
+        # C. Zitten we in het ideale blok? (-15min marge)
         if (
             (best_row["timestamp"] - timedelta(minutes=15))
             <= now_utc
             < (best_row["timestamp"] + timedelta(minutes=30))
         ):
+            # Op bewolkte/zonnige dagen wachten we als het nu toevallig even bewolkt is
+            # Maar op donkere dagen (Gloomy) zijn we niet kieskeurig.
             if (
                 "Gloomy" not in day_type
                 and not is_stable
@@ -429,6 +446,7 @@ class SolarAI:
                 "plan_start": start_time_local,
             }
 
+        # D. Het beste moment ligt in de toekomst
         wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
         if wait_min > 0:
             return {
@@ -439,7 +457,7 @@ class SolarAI:
 
         return {
             "action": "WAIT",
-            "reason": f"[{day_type}] Piek net gepasseerd",
+            "reason": f"[{day_type}] Piek gepasseerd",
             "plan_start": start_time_local,
         }
 
