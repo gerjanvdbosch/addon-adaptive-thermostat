@@ -329,15 +329,15 @@ class SolarAI:
         day_quality_ratio = today_peak / max(1.0, SYSTEM_MAX_KW)
 
         if day_quality_ratio > 0.75:
-            day_type = "Sunny ☀️"
+            day_type = "Zonnig"
             # Op een topdag wachten we tot we minimaal 70% van de piek hebben
             dynamic_threshold = today_peak * 0.7
         elif day_quality_ratio > 0.4:
-            day_type = "Average ⛅"
+            day_type = "Bewolkt"
             # Op een gemiddelde dag zijn we tevreden met 60% van de piek
             dynamic_threshold = today_peak * 0.6
         else:
-            day_type = "Gloomy ☁️"
+            day_type = "Donker"
             # Op een donkere dag pakken we alles wat we pakken kunnen (90% van die kleine piek)
             dynamic_threshold = today_peak * 0.9
 
