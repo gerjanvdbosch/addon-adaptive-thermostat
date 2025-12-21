@@ -341,9 +341,10 @@ class SolarAI:
         df_today = df[(df["timestamp"] >= today_start) & (df["timestamp"] < today_end)]
 
         if df_today.empty:
-            today_peak = 0.0
-        else:
-            today_peak = df_today["ai_power"].max()
+            # Kan gebeuren als het 23:30 is en de zon morgen pas opkomt
+            return {"action": "WAIT", "reason": "Nacht: Wachten op morgen"}
+
+        today_peak = df_today["ai_power"].max()
 
         logger.info(
             f"SolarAI: Vandaag piek voorspeld op {today_peak:.2f} kW (Median PV: {median_pv:.2f} kW)"
@@ -354,25 +355,18 @@ class SolarAI:
         day_quality_ratio = today_peak / max(1.0, SYSTEM_MAX_KW)
 
         if day_quality_ratio > 0.75:
-            day_type = "Zonnig"
-            # Op een topdag wachten we tot we minimaal 70% van de piek hebben
+            day_type = "Sunny ☀️"
             dynamic_threshold = today_peak * 0.7
         elif day_quality_ratio > 0.4:
-            day_type = "Bewolkt"
-            # Op een gemiddelde dag zijn we tevreden met 60% van de piek
+            day_type = "Average ⛅"
             dynamic_threshold = today_peak * 0.6
         else:
-            day_type = "Donker"
-            # Op een donkere dag pakken we alles wat we pakken kunnen (90% van die kleine piek)
+            day_type = "Gloomy ☁️"
             dynamic_threshold = today_peak * 0.9
 
-        # HARDE ONDERGRENS:
-        # Een warmtepompboiler heeft minimaal ~400-500W nodig voor de compressor.
-        # Draaien onder de 450W heeft geen zin (dan trek je alles uit het net).
-        min_technical_limit = 0.45
-
-        # We stellen de drempel in, maar nooit lager dan wat technisch nuttig is.
-        final_trigger_val = max(dynamic_threshold, min_technical_limit)
+        # Minimaal 50 Watt om meetfouten te negeren
+        min_noise_limit = 0.05
+        final_trigger_val = max(dynamic_threshold, min_noise_limit)
 
         # ==========================================================================
 
@@ -385,28 +379,30 @@ class SolarAI:
         # 5. Filter op de toekomst
         future = df[df["timestamp"] >= (now_utc - timedelta(minutes=15))].copy()
         if future.empty:
-            return {"action": "WAIT", "reason": "Einde dag."}
+            return {"action": "WAIT", "reason": "Einde zonnige dagdeel."}
 
         best_row = future.loc[future["window_avg_power"].idxmax()]
         best_power = best_row["window_avg_power"]
 
-        # Tijdstippen
+        # Tijd conversie
         local_tz = datetime.now().astimezone().tzinfo
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
 
-        # 6. Besluitvorming met de NIEUWE dynamische logica
+        # 6. Besluitvorming
 
-        # A. Is de beste piek van vandaag goed genoeg voor onze dynamische drempel?
-        if best_power < final_trigger_val:
-            # Specifieke reden geven voor loggen
-            if best_power < min_technical_limit:
-                msg = f"Te weinig zon (Max {best_power:.2f}kW < Min {min_technical_limit}kW)"
-            else:
-                msg = f"Sparen voor beter moment (Max {best_power:.2f}kW < Drempel {final_trigger_val:.2f}kW)"
-
+        # A. Is het überhaupt de moeite waard?
+        if best_power < min_noise_limit:
             return {
                 "action": "WAIT",
-                "reason": f"[{day_type}] {msg}",
+                "reason": f"[{day_type}] Te weinig licht (<{min_noise_limit*1000:.0f}W)",
+                "plan_start": start_time_local,
+            }
+
+        # B. Is dit blok goed genoeg t.o.v. de dagpiek?
+        if best_power < final_trigger_val:
+            return {
+                "action": "WAIT",
+                "reason": f"[{day_type}] Sparen voor piek ({best_power:.2f}kW < {final_trigger_val:.2f}kW)",
                 "plan_start": start_time_local,
             }
 
@@ -416,7 +412,11 @@ class SolarAI:
             <= now_utc
             < (best_row["timestamp"] + timedelta(minutes=30))
         ):
-            if not is_stable and median_pv < 1.0:
+            if (
+                "Gloomy" not in day_type
+                and not is_stable
+                and median_pv < (best_power * 0.8)
+            ):
                 return {
                     "action": "WAIT_CLOUD",
                     "reason": f"[{day_type}] Wachten op stabieler zonlicht",
@@ -425,13 +425,12 @@ class SolarAI:
 
             return {
                 "action": "START",
-                "reason": f"[{day_type}] Optimaal venster! ({best_power:.2f}kW >= {final_trigger_val:.2f}kW)",
+                "reason": f"[{day_type}] Optimaal venster! ({best_power:.2f}kW)",
                 "plan_start": start_time_local,
             }
 
-        # C. Te vroeg?
-        if now_utc < best_row["timestamp"]:
-            wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
+        wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
+        if wait_min > 0:
             return {
                 "action": "WAIT",
                 "reason": f"[{day_type}] Piek over {wait_min} min ({best_power:.2f}kW)",
@@ -440,7 +439,7 @@ class SolarAI:
 
         return {
             "action": "WAIT",
-            "reason": f"[{day_type}] Piek reeds gepasseerd",
+            "reason": f"[{day_type}] Piek net gepasseerd",
             "plan_start": start_time_local,
         }
 
