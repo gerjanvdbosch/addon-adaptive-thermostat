@@ -39,7 +39,7 @@ class SolarAI:
         self.model_path = Path(
             self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
         )
-        self.interval = int(self.opts.get("solar_interval_seconds", 60))
+        self.interval = int(self.opts.get("solar_interval_seconds", 15))
 
         # Sensoren
         self.entity_pv = self.opts.get(
@@ -58,7 +58,6 @@ class SolarAI:
         # --- State ---
         self.model = None
         self.is_fitted = False
-        self.last_run_ts = None
         self.smoothed_bias = 1.0  # Startwaarde voor bias correctie
 
         # Solcast Cache
@@ -186,10 +185,12 @@ class SolarAI:
         try:
             poll_state = self.ha.get_state(self.entity_solcast_poll)
             if not poll_state or poll_state in ["unknown", "unavailable"]:
+                logger.warning("SolarAI: Solcast poll sensor onbereikbaar of onbekend.")
                 return
 
             current_poll_ts = poll_state
             if current_poll_ts == self.last_solcast_poll_ts:
+                logger.debug("SolarAI: Solcast data is up-to-date.")
                 return
 
             state = self.ha.get_state(self.entity_solcast)
@@ -373,12 +374,6 @@ class SolarAI:
     def run_cycle(self):
         """Wordt elke minuut aangeroepen vanuit de main loop."""
         now = datetime.now(timezone.utc)
-        if (
-            self.last_run_ts
-            and (now - self.last_run_ts).total_seconds() < self.interval
-        ):
-            return
-        self.last_run_ts = now
 
         # 1. Haal PV waarde op
         try:
