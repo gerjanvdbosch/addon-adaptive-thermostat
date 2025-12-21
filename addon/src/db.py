@@ -100,7 +100,11 @@ def insert_setpoint(feature_dict: dict, setpoint: float, observed_current: float
     s: SASession = Session()
     try:
         # Filter de dict zodat alleen keys die als kolom bestaan worden gebruikt
-        valid_data = {k: v for k, v in feature_dict.items() if hasattr(Setpoint, k)}
+        valid_data = {
+            k: v
+            for k, v in feature_dict.items()
+            if hasattr(Setpoint, k) and k not in {"setpoint", "current_setpoint"}
+        }
         record = Setpoint(
             setpoint=setpoint, current_setpoint=observed_current, **valid_data
         )
