@@ -218,6 +218,8 @@ class SolarAI:
 
                 self.last_solcast_poll_ts = current_poll_ts
                 logger.info("SolarAI: Solcast cache vernieuwd")
+            else:
+                logger.warning("SolarAI: Solcast sensor data onvolledig.")
 
         except Exception:
             logger.exception("SolarAI: Error tijdens Solcast update.")

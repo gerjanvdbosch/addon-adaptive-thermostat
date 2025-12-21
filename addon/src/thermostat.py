@@ -226,6 +226,7 @@ class ThermostatAI:
             if is_stable:
                 if self.stability_start_ts is None:
                     self.stability_start_ts = ts
+                    logger.info("ThermostatAI: Stabiliteit gestart.")
                 else:
                     stable_hours = (ts - self.stability_start_ts).total_seconds() / 3600
                     if stable_hours > float(self.opts.get("stability_hours", 8.0)):
@@ -237,8 +238,13 @@ class ThermostatAI:
                             observed_current=curr_sp_rounded,
                         )
                         self.stability_start_ts = ts
+                    else:
+                        logger.debug(
+                            f"ThermostatAI: Stabiliteit nog niet bereikt ({stable_hours:.2f}h)."
+                        )
             else:
                 self.stability_start_ts = None
+                logger.info("ThermostatAI: Stabiliteit verloren.")
 
         return updated
 
@@ -248,13 +254,13 @@ class ThermostatAI:
         Houdt nu ook rekening met de COOLDOWN.
         """
         # 1. Check Cooldown: Als we recent iets veranderd hebben, houden we ons even stil.
-        cooldown_seconds = float(self.opts.get("cooldown_hours", 1)) * 3600
+        cooldown_seconds = float(self.opts.get("cooldown_hours", 2)) * 3600
         if self.last_ai_action_ts:
             elapsed = (datetime.now() - self.last_ai_action_ts).total_seconds()
             if elapsed < cooldown_seconds:
                 # We zitten in de cooldown periode, dus we adviseren: "Doe niets (huidige setpoint)"
                 logger.info(
-                    f"Cooldown actief (nog {int(cooldown_seconds - elapsed)}s)."
+                    f"ThermostatAI: Cooldown actief (nog {int(cooldown_seconds - elapsed / 60)} min)"
                 )
                 return current_sp
 

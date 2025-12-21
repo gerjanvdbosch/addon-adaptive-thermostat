@@ -39,7 +39,7 @@ def _load_options():
             os.getenv("THERMOSTAT_INTERVAL_SECONDS", 60)
         ),
         "solar_interval_seconds": int(os.getenv("SOLAR_INTERVAL_SECONDS", 15)),
-        "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 1)),
+        "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 2)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
         "stability_hours": float(os.getenv("STABILITY_HOURS", 6.0)),
         "min_setpoint": float(os.getenv("MIN_SETPOINT", 15.0)),

@@ -19,7 +19,7 @@ options:
   away_temp: 19.0
   thermostat_interval_seconds: 60
   solar_interval_seconds: 15
-  cooldown_hours: 1.0
+  cooldown_hours: 2.0
   stability_hours: 6.0
   full_retrain_time: "03:00"
   min_setpoint: 15.0
