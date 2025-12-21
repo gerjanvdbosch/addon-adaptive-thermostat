@@ -37,7 +37,7 @@ class Setpoint(Base):
 
     __tablename__ = "setpoints"
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=lambda: datetime.now, index=True)
+    timestamp = Column(DateTime, default=datetime.now, index=True)
     setpoint = Column(
         Float, index=True
     )  # De 'nieuwe' waarde (User override of AI resultaat)
