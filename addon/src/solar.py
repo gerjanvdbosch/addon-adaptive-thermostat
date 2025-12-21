@@ -339,60 +339,67 @@ class SolarAI:
         else:
             df["ai_power"] = df["ai_power_raw"]
 
-        forecast_peak = df["ai_power"].max()
+        # 4. Rolling Window & Filter Toekomst
+        window_steps = max(1, int(SWW_DURATION_HOURS * 2))
+        indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_steps)
+        df["window_avg_power"] = df["ai_power"].rolling(window=indexer).mean()
 
-        # REALITY CHECK: Piek is minstens wat we nu meten
-        today_peak = max(forecast_peak, median_pv)
+        future = df[df["timestamp"] >= (now_utc - timedelta(minutes=15))].copy()
+        if future.empty:
+            return {"action": "WAIT", "reason": "Einde zonnige dagdeel."}
+
+        # ==========================================================================
+        # DAG CLASSIFICATIE & DREMPEL (AANGEPAST)
+        # ==========================================================================
+
+        today_start = now_utc.normalize()
+        today_end = today_start + timedelta(days=1)
+        df_today = df[(df["timestamp"] >= today_start) & (df["timestamp"] < today_end)]
+
+        if df_today.empty:
+            return {"action": "WAIT", "reason": "Nacht: Wachten op morgen"}
+
+        # De absolute max van de hele dag (kan in verleden liggen)
+        historical_peak = df_today["ai_power"].max()
+
+        # De max die we NOG kunnen halen (Toekomst of Nu)
+        future_max = future["ai_power"].max() if not future.empty else 0.0
+        remaining_potential = max(future_max, median_pv)
+
+        # De lat leggen we op wat er nog haalbaar is, niet op wat er al geweest is.
+        reference_peak = min(historical_peak, remaining_potential)
 
         logger.info(
-            f"SolarAI: Dagpiek vastgesteld op {today_peak:.2f} kW (Forecast: {forecast_peak:.2f}, Actueel: {median_pv:.2f})"
+            f"SolarAI: DagPiek: {historical_peak:.2f}kW | Haalbaar: {remaining_potential:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
-        # Classificeer de dag
-        # We gebruiken SYSTEM_MAX_KW (2.0) als referentie
-        day_quality_ratio = today_peak / max(1.0, SYSTEM_MAX_KW)
+        day_quality_ratio = historical_peak / max(1.0, SYSTEM_MAX_KW)
 
         if day_quality_ratio > 0.75:
             day_type = "Sunny ☀️"
-            dynamic_threshold = today_peak * 0.7
+            percentage = 0.7
         elif day_quality_ratio > 0.4:
             day_type = "Average ⛅"
-            dynamic_threshold = today_peak * 0.6
+            percentage = 0.6
         else:
             day_type = "Gloomy ☁️"
-            dynamic_threshold = today_peak * 0.9
+            percentage = 0.9
 
-        # Minimaal 50 Watt om meetfouten te negeren
+        dynamic_threshold = reference_peak * percentage
         min_noise_limit = 0.05
         final_trigger_val = max(dynamic_threshold, min_noise_limit)
 
         # ==========================================================================
 
-        # 4. Zoek beste window (Rolling Average)
-        # Solcast is per 30 min, dus SWW_DURATION_HOURS * 2
-        window_steps = max(1, int(SWW_DURATION_HOURS * 2))
-        indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_steps)
-        df["window_avg_power"] = df["ai_power"].rolling(window=indexer).mean()
-
-        # 5. Filter op de toekomst
-        future = df[df["timestamp"] >= (now_utc - timedelta(minutes=15))].copy()
-        if future.empty:
-            return {"action": "WAIT", "reason": "Einde zonnige dagdeel."}
-
         best_row = future.loc[future["window_avg_power"].idxmax()]
         best_power = best_row["window_avg_power"]
 
-        # Tijd conversie
         local_tz = datetime.now().astimezone().tzinfo
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
 
-        # ==========================================================================
-        # 6. BESLUITVORMING (VOLGORDE GECORRIGEERD)
-        # ==========================================================================
+        # 6. Besluitvorming
 
-        # A. Is het überhaupt de moeite waard? (Absolute ondergrens)
-        # We kijken hier naar best_power (toekomst) EN median_pv (nu).
-        # Als beiden < 50W zijn, dan is het echt te donker.
+        # A. Ondergrens
         if best_power < min_noise_limit and median_pv < min_noise_limit:
             return {
                 "action": "WAIT",
@@ -400,10 +407,7 @@ class SolarAI:
                 "plan_start": start_time_local,
             }
 
-        # --- FIX 2: OPPORTUNISME CHECK (NU EERST!) ---
-        # Is de huidige werkelijke opbrengst (median_pv) NU al hoger dan de drempel?
-        # En ook hoger dan wat de AI had voorspeld?
-        # DAN: NIET WACHTEN, STARTEN!
+        # B. Opportunisme (NU > Drempel EN Nu > Voorspelling)
         if median_pv > final_trigger_val and median_pv > best_power:
             return {
                 "action": "START",
@@ -412,8 +416,7 @@ class SolarAI:
             }
         # ---------------------------------------------
 
-        # B. Is de voorspelde piek wel goed genoeg?
-        # (Dit doen we pas NA de opportunisme check)
+        # C. Voorspelling check
         if best_power < final_trigger_val:
             return {
                 "action": "WAIT",
@@ -446,18 +449,10 @@ class SolarAI:
                 "plan_start": start_time_local,
             }
 
-        # D. Het beste moment ligt in de toekomst
         wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
-        if wait_min > 0:
-            return {
-                "action": "WAIT",
-                "reason": f"[{day_type}] Piek over {wait_min} min ({best_power:.2f}kW)",
-                "plan_start": start_time_local,
-            }
-
         return {
             "action": "WAIT",
-            "reason": f"[{day_type}] Piek gepasseerd",
+            "reason": f"[{day_type}] Piek over {wait_min} min ({best_power:.2f}kW)",
             "plan_start": start_time_local,
         }
 
