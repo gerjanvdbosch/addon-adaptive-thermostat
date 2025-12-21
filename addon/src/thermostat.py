@@ -198,7 +198,7 @@ class ThermostatAI:
             if not is_recent_ai:
                 prev_sp = self.last_known_setpoint
                 logger.info(
-                    f"User Override Gedetecteerd: {prev_sp} -> {curr_sp_rounded}. Retraining..."
+                    f"User Override Gedetecteerd: {prev_sp} -> {curr_sp_rounded}."
                 )
 
                 feats = self.collector.features_from_raw(

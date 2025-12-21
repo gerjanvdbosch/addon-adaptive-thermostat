@@ -2,7 +2,7 @@ import logging
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections import deque
 
@@ -203,7 +203,11 @@ class SolarAI:
 
                 # Opslaan in DB voor toekomstige training
                 for item in raw_data:
-                    ts = pd.to_datetime(item["period_start"]).to_pydatetime()
+                    ts = (
+                        pd.to_datetime(item["period_start"])
+                        .tz_convert("UTC")
+                        .to_pydatetime()
+                    )
                     upsert_solar_record(
                         ts,
                         solcast_est=item["pv_estimate"],
@@ -219,7 +223,7 @@ class SolarAI:
 
     def _process_pv_sample(self, pv_kw):
         """Verwerkt de huidige meting en slaat periodiek op."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         self.pv_buffer.append(pv_kw)
 
         # Aggregatie per blok van AGGREGATION_MINUTES
@@ -368,7 +372,7 @@ class SolarAI:
 
     def run_cycle(self):
         """Wordt elke minuut aangeroepen vanuit de main loop."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if (
             self.last_run_ts
             and (now - self.last_run_ts).total_seconds() < self.interval
