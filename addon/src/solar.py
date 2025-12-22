@@ -63,6 +63,7 @@ class SolarAI:
         # Solcast Cache
         self.cached_solcast_data = []
         self.last_solcast_poll_ts = None
+        self.last_midnight_reset_date = datetime.now().date()
 
         # Stabiliteits Buffer (Historie van laatste 10 min)
         self.history_len = int(600 / max(1, self.interval))
@@ -180,6 +181,17 @@ class SolarAI:
     # 3. DATA VERWERKING (Runtime)
     # ==============================================================================
 
+    def _check_midnight_reset(self):
+        """Wist de cache zodra er een nieuwe dag begint."""
+        today = datetime.now().date()
+        if today != self.last_midnight_reset_date:
+            logger.info(
+                "SolarAI: Nieuwe dag gedetecteerd. Solcast cache wordt geleegd."
+            )
+            self.cached_solcast_data = []
+            self.last_solcast_poll_ts = None
+            self.last_midnight_reset_date = today
+
     def _update_solcast_cache(self):
         """Haalt nieuwe voorspellingen op uit HA en slaat ze op in de DB."""
         try:
@@ -285,9 +297,7 @@ class SolarAI:
     # ==============================================================================
 
     def get_solar_recommendation(self):
-        """
-        Analyseert de forecast en de huidige bias om een start-advies te geven.
-        """
+        """Analyseert de forecast en de huidige bias om een start-advies te geven."""
         if not self.cached_solcast_data:
             return {"action": "WAIT", "reason": "Wachten op Solcast data..."}
 
@@ -469,6 +479,8 @@ class SolarAI:
 
     def run_cycle(self):
         """Wordt elke minuut aangeroepen vanuit de main loop."""
+        self._check_midnight_reset()
+
         now = datetime.now(timezone.utc)
 
         # 1. Haal PV waarde op
