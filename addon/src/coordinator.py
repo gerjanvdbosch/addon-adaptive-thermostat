@@ -153,7 +153,7 @@ class ClimateCoordinator:
             self._set_setpoint_safe(target_sp, hvac_mode)
         else:
             logger.info(
-                f"Coordinator: AI advies van {current_sp} naar {target_sp:.2f} onder drempel ({self.min_change_threshold}). Geen actie."
+                f"Coordinator: AI advies: {current_sp} -> {target_sp:.2f} onder drempel ({self.min_change_threshold}). Geen actie."
             )
 
     def _handle_away_logic(self, current_sp, features, hvac_mode):
