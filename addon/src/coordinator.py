@@ -212,6 +212,9 @@ class ClimateCoordinator:
 
                 if context.current_temp > start_threshold:
                     if context.current_setpoint < context.current_temp:
+                        logger.info(
+                            f"Coordinator: Huidig {context.current_temp} > Startgrens {start_threshold:.1f}. Huidige setpoint {context.current_setpoint:.1f} behouden."
+                        )
                         return context.current_setpoint
 
                     logger.info(
