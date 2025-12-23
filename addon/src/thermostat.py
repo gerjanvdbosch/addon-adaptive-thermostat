@@ -12,7 +12,7 @@ from sklearn.metrics import mean_absolute_error
 
 # Project imports
 from db import fetch_training_setpoints_df, insert_setpoint
-from collector import Collector, FEATURE_ORDER
+from collector import Collector
 from ha_client import HAClient
 from utils import safe_round, safe_float
 
@@ -38,7 +38,28 @@ class ThermostatAI:
                 "thermostat_model_path", "/config/models/thermostat_model.joblib"
             )
         )
-        self.feature_columns = FEATURE_ORDER
+        self.feature_columns = [
+            "hour_sin",  # Ochtend/Avond
+            "hour_cos",
+            "day_sin",  # Werkdag/Weekend
+            "day_cos",
+            "doy_sin",  # Seizoen (Zomer/Winter)
+            "doy_cos",
+            "home_presence",
+            "hvac_mode",  # Verwarmen/Koelen
+            "heat_demand",
+            "current_temp",  # Huidige binnen temp
+            "current_setpoint",  # Waar staat hij nu op? (Startpunt voor delta)
+            "temp_change",  # Hoe snel warmt het op/koelt het af?
+            "outside_temp",  # Actuele buitentemperatuur (Cruciaal)
+            "min_temp",
+            "max_temp",
+            "solar_kwh",  # Zonkracht op de ramen (gratis warmte)
+            "wind_speed",
+            "wind_dir_sin",
+            "wind_dir_cos",
+        ]
+
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Runtime State
@@ -258,18 +279,8 @@ class ThermostatAI:
         Geeft de aanbevolen setpoint terug.
         Houdt nu ook rekening met de COOLDOWN.
         """
-        # 1. Check Cooldown: Als we recent iets veranderd hebben, houden we ons even stil.
-        cooldown_seconds = float(self.opts.get("cooldown_hours", 2)) * 3600
-        if self.last_ai_action_ts:
-            elapsed = (datetime.now() - self.last_ai_action_ts).total_seconds()
-            if elapsed < cooldown_seconds:
-                cooldown_remaining = (cooldown_seconds - elapsed) / 3600
-                logger.info(
-                    f"ThermostatAI: Cooldown actief (nog {cooldown_remaining:.2f}h)."
-                )
-                return None
 
-        # 2. Voorspelling
+        # 1. Voorspelling
         if not self.is_fitted or self.model is None:
             return current_sp
 
@@ -288,8 +299,21 @@ class ThermostatAI:
 
         new_target = current_sp + pred_delta
 
-        # 3. Bounds checken
+        # 2. Bounds checken
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 25.0))
 
-        return max(min(new_target, max_sp), min_sp)
+        new_setpoint = max(min(new_target, max_sp), min_sp)
+
+        # 3. Check Cooldown: Als we recent iets veranderd hebben, houden we ons even stil.
+        cooldown_seconds = float(self.opts.get("cooldown_hours", 2)) * 3600
+        if self.last_ai_action_ts:
+            elapsed = (datetime.now() - self.last_ai_action_ts).total_seconds()
+            if elapsed < cooldown_seconds:
+                cooldown_remaining = (cooldown_seconds - elapsed) / 3600
+                logger.info(
+                    f"ThermostatAI: Cooldown actief (nog {cooldown_remaining:.2f}h, voorspelling {new_setpoint:.2f} overgeslagen)."
+                )
+                return current_sp
+
+        return new_setpoint

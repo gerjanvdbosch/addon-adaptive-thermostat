@@ -51,6 +51,9 @@ class Setpoint(Base):
     min_temp = Column(Float)
     max_temp = Column(Float)
     solar_kwh = Column(Float)
+    wind_speed = Column(Float)
+    wind_dir_sin = Column(Float)
+    wind_dir_cos = Column(Float)
 
 
 class SolarRecord(Base):
@@ -73,8 +76,8 @@ class HeatingCycle(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     start_temp = Column(Float)
     end_temp = Column(Float)
-    outside_temp = Column(Float)
     duration_minutes = Column(Float)
+    avg_outside_temp = Column(Float)
     avg_solar = Column(Float, nullable=True)
     avg_supply_temp = Column(Float, nullable=True)
 
@@ -156,10 +159,10 @@ def upsert_heating_cycle(
     timestamp,
     start_temp,
     end_temp,
-    outside_temp,
     duration_minutes,
-    avg_solar=None,
-    avg_supply_temp=None,
+    avg_outside_temp,
+    avg_solar,
+    avg_supply_temp,
 ):
     s: SASession = Session()
     try:
@@ -168,8 +171,8 @@ def upsert_heating_cycle(
                 timestamp=timestamp,
                 start_temp=start_temp,
                 end_temp=end_temp,
-                outside_temp=outside_temp,
                 duration_minutes=duration_minutes,
+                avg_outside_temp=avg_outside_temp,
                 avg_solar=avg_solar,
                 avg_supply_temp=avg_supply_temp,
             )

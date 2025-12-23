@@ -39,6 +39,8 @@ options:
     heat_demand: binary_sensor.ecodan_heatpump_ca09ec_status_in1_thermostaat
     solar_kwh: sensor.solcast_pv_forecast_forecast_today
     pv_power: sensor.fuj7chn07b_pv_output_actual
+    wind_speed: sensor.windkracht_1d
+    wind_dir: sensor.windrichting_azimut_1d
 schema:
   thermostat_entity: "str?"
   solar_entity: "str?"
@@ -68,6 +70,8 @@ schema:
     heat_demand: "str?"
     solar_kwh: "str?"
     pv_power: "str?"
+    wind_speed: "str?"
+    wind_dir: "str?"
 ports:
   8000/tcp: 8000
 map:

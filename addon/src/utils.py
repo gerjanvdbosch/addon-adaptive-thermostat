@@ -66,3 +66,13 @@ def cyclical_doy(ts):
     doy_sin = math.sin(2 * math.pi * doy / 366.0)
     doy_cos = math.cos(2 * math.pi * doy / 366.0)
     return doy_sin, doy_cos
+
+
+def encode_wind(degrees):
+    if degrees is None:
+        return 0.0, 0.0
+    try:
+        rad = math.radians(float(degrees) % 360)
+        return math.sin(rad), math.cos(rad)
+    except Exception:
+        return 0.0, 0.0

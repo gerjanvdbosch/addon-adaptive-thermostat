@@ -8,28 +8,10 @@ from utils import (
     cyclical_day,
     cyclical_doy,
     safe_bool_to_float,
+    encode_wind,
 )
 
 logger = logging.getLogger(__name__)
-
-FEATURE_ORDER = [
-    "hour_sin",  # Ochtend/Avond
-    "hour_cos",
-    "day_sin",  # Werkdag/Weekend
-    "day_cos",
-    "doy_sin",  # Seizoen (Zomer/Winter)
-    "doy_cos",
-    "home_presence",
-    "hvac_mode",  # Verwarmen/Koelen
-    "heat_demand",
-    "current_temp",  # Huidige binnen temp
-    "current_setpoint",  # Waar staat hij nu op? (Startpunt voor delta)
-    "temp_change",  # Hoe snel warmt het op/koelt het af?
-    "outside_temp",  # Actuele buitentemperatuur (Cruciaal)
-    "min_temp",
-    "max_temp",
-    "solar_kwh",  # Zonkracht op de ramen (gratis warmte)
-]
 
 
 class Collector:
@@ -67,6 +49,8 @@ class Collector:
         hx, hy = cyclical_hour(ts)
         dx, dy = cyclical_day(ts)  # Day of Week
         doy_x, doy_y = cyclical_doy(ts)  # Day of Year (Seizoen)
+        wind_dir = sensor_dict.get("wind_dir")
+        wtd_sin, wtd_cos = encode_wind(wind_dir)
 
         hvac_mode = {
             "Uit": 0,
@@ -99,6 +83,9 @@ class Collector:
             "min_temp": safe_float(sensor_dict.get("min_temp")),
             "max_temp": safe_float(sensor_dict.get("max_temp")),
             "solar_kwh": safe_float(sensor_dict.get("solar_kwh")),
+            "wind_speed": safe_float(sensor_dict.get("wind_speed")),
+            "wind_dir_sin": wtd_sin,
+            "wind_dir_cos": wtd_cos,
             "pv_power": safe_float(sensor_dict.get("pv_power")),
             "supply_temp": safe_float(sensor_dict.get("supply_temp")),
         }

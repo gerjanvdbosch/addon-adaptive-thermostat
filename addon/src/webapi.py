@@ -78,8 +78,8 @@ class ThermalOut(BaseModel):
     timestamp: datetime
     start_temp: Optional[float]
     end_temp: Optional[float]
-    outside_temp: Optional[float]
     duration_minutes: Optional[float]
+    avg_outside_temp: Optional[float]
     avg_solar: Optional[float]
     avg_supply_temp: Optional[float]
 

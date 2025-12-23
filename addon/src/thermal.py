@@ -32,11 +32,14 @@ class ThermalAI:
         )
 
         # State tracking
+        self.is_fitted = False
+        self.model = None
         self.cycle_start_ts = None
         self.start_temp = None
 
         self.solar_samples = []
         self.supply_temps = []
+        self.outside_samples = []
 
         self.last_state = "off"
         self.last_run_ts = None
@@ -100,11 +103,14 @@ class ThermalAI:
 
             self.solar_samples = []
             self.supply_temps = []
+            self.outside_samples = []
 
             if solar is not None:
                 self.solar_samples.append(solar)
             if supply is not None:
                 self.supply_temps.append(supply)
+            if outside is not None:
+                self.outside_samples.append(outside)
 
             logger.info(f"ThermalAI: Verwarmingscyclus gestart op {temp}°C")
 
@@ -137,18 +143,23 @@ class ThermalAI:
                         if self.solar_samples
                         else 0.0
                     )
+                    avg_outside = (
+                        (sum(self.outside_samples) / len(self.outside_samples))
+                        if self.outside_samples
+                        else (outside or 10.0)
+                    )
 
                     logger.info(
                         f"ThermalAI: Cyclus voltooid: +{temp_delta:.2f}°C in {duration_min:.0f} min. "
-                        f"Gemiddelde zon: {avg_solar:.0f}W, Gemiddelde aanvoer: {avg_supply:.1f}°C"
+                        f"Gemiddelde zon: {avg_solar:.0f}W, Gemiddelde aanvoer: {avg_supply:.1f}°C, Gemiddelde buitentemp: {avg_outside:.1f}°C"
                     )
 
                     upsert_heating_cycle(
                         timestamp=self.cycle_start_ts,
                         start_temp=self.start_temp,
                         end_temp=temp,
-                        outside_temp=outside or 10.0,
                         duration_minutes=duration_min,
+                        avg_outside_temp=avg_outside,
                         avg_solar=avg_solar,
                         avg_supply_temp=avg_supply,
                     )
@@ -162,6 +173,7 @@ class ThermalAI:
             self.start_temp = None
             self.solar_samples = []
             self.supply_temps = []
+            self.outside_samples = []
 
         self.last_state = current_action
 

@@ -403,7 +403,7 @@ class SolarAI:
             percentage = 0.9
 
         dynamic_threshold = reference_peak * percentage
-        min_noise_limit = 0.05
+        min_noise_limit = 0.1
         final_trigger_val = max(dynamic_threshold, min_noise_limit)
 
         # ==========================================================================

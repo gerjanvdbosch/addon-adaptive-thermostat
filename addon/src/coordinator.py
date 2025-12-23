@@ -1,10 +1,10 @@
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
 
 # Project imports
 from utils import safe_float, safe_bool
-
-# AI Modules
 from thermostat import ThermostatAI
 from solar import SolarAI
 from presence import PresenceAI
@@ -14,206 +14,302 @@ from collector import Collector
 logger = logging.getLogger(__name__)
 
 
-class ClimateCoordinator:
-    """
-    De ClimateCoordinator is de centrale manager van het systeem.
-    Beheert de interactie tussen de verschillende AI agents en Home Assistant.
-    """
+class HouseState(Enum):
+    COMFORT = "Comfort"
+    ECO = "Eco"
+    PREHEAT = "Voorverwarmen"
+    SOLAR_BOOST = "Zonnebuffer"
+    UNKNOWN = "Onbekend"
 
+
+@dataclass
+class ClimateContext:
+    """Bevat alle 'feiten' van dit moment."""
+
+    current_temp: float
+    current_setpoint: float
+    is_compressor_active: bool
+    hvac_mode: str
+    is_home: bool
+    ai_recommendation: float
+    minutes_to_comfort: int
+    preheat_needed: bool
+    preheat_prob: float
+    solar_excess: bool
+
+
+class ClimateCoordinator:
     def __init__(self, ha_client, collector: Collector, opts: dict):
-        self.opts = opts or {}
-        # Dependency Injection: Gebruik de reeds bestaande connecties
         self.ha = ha_client
         self.collector = collector
+        self.opts = opts or {}
 
-        logger.info("Coordinator: Initializing AI Agents...")
-
-        # AI Agents initialiseren
+        # AI Agents
         self.thermostat_ai = ThermostatAI(self.ha, self.collector, opts)
         self.solar_ai = SolarAI(self.ha, opts)
         self.presence_ai = PresenceAI(opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
 
-        # Settings
-        self.home_temp = float(self.opts.get("home_temp", 20.0))
-        self.away_temp = float(self.opts.get("away_temp", 19.0))
-        self.min_change_threshold = float(self.opts.get("min_change_threshold", 0.5))
+        # Configuraties
+        self.settings = {
+            "home_fallback": float(self.opts.get("home_temp", 20.0)),
+            "away_min": float(self.opts.get("away_temp", 19.0)),
+            "solar_boost_delta": float(self.opts.get("solar_boost_delta", 1.0)),
+            "comfort_hysteresis": float(self.opts.get("comfort_hysteresis", 0.5)),
+            "min_off_min": int(self.opts.get("min_off_minutes", 30)),
+            "deadband": float(self.opts.get("min_change_threshold", 0.5)),
+        }
 
-        # Compressor Protection
-        self.min_run_minutes = int(self.opts.get("min_run_minutes", 60))
-        self.min_off_minutes = int(self.opts.get("min_off_minutes", 30))
+        # Veiligheid Timer
+        self.last_switch_time = datetime.now() - timedelta(hours=1)
 
-        # Runtime State
-        self.last_hvac_mode = "off"
-        self.last_action_change_ts = datetime.now() - timedelta(hours=1)
-        self.is_preheating = False
+        logger.info("Coordinator: Klimaatsysteem gestart.")
 
     # ==============================================================================
-    # PUBLIC METHODS (Voor de Scheduler)
+    # MAIN LOOP
     # ==============================================================================
 
     def tick(self):
-        """Wordt elke minuut aangeroepen door de main loop."""
         try:
-            self._run_logic()
+            # 1. Data Verzamelen
+            raw = self.collector.read_sensors()
+            features = self.collector.features_from_raw(raw)
+            cur_sp = features.get("current_setpoint")
+
+            if cur_sp is None:
+                return
+
+            # Bepaal status en activiteit
+            hvac_mode = self._get_hvac_mode(raw)
+
+            # 2. AI Modellen Updaten (Altijd!)
+            # We geven de specifieke mode mee zodat AI leert van SWW vs Heating
+            self.thermal_ai.run_cycle(features, hvac_mode)
+            self.presence_ai.log_current_state(features)
+
+            # 3. Context Bouwen & Override Check
+            context = self._build_context(raw, features, cur_sp, hvac_mode)
+
+            if self.thermostat_ai.update_learning_state(raw, cur_sp):
+                logger.info(f"Coordinator: Gebruikers-override actief (Set: {cur_sp})")
+                return
+
+            # 4. Status Bepalen
+            target_state = self._determine_house_state(context)
+
+            # 5. Doel Temperatuur Berekenen (Inclusief hysteresis & probability!)
+            target_temp = self._calculate_target_for_state(target_state, context)
+
+            # 6. Uitvoeren
+            self._execute_safe_transition(target_temp, context, target_state)
+
         except Exception:
-            logger.exception("Coordinator: Error during tick logic")
+            logger.exception("Coordinator: Fout in logic")
 
     def solar_tick(self):
-        """Wordt elke 15-30 seconden aangeroepen voor zonne-energie beheer."""
         try:
             self.solar_ai.run_cycle()
         except Exception:
-            logger.exception("Coordinator: Error during solar tick")
+            logger.exception("Coordinator: Fout in solar logic")
 
     def perform_nightly_training(self):
-        """Wordt 's nachts aangeroepen om alle modellen te verversen met nieuwe data."""
-        logger.info("Coordinator: Starting nightly AI training...")
-        try:
-            self.presence_ai.train()
-            self.thermal_ai.train()
-            self.solar_ai.train()
-            self.thermostat_ai.train()
-            logger.info("Coordinator: All models updated successfully.")
-        except Exception:
-            logger.exception("Coordinator: Training session failed")
+        logger.info("Coordinator: Start nachtelijke AI training...")
+        for agent in [
+            self.presence_ai,
+            self.thermal_ai,
+            self.solar_ai,
+            self.thermostat_ai,
+        ]:
+            try:
+                agent.train()
+            except Exception:
+                logger.error(f"Training mislukt voor {agent}")
+        logger.info("Coordinator: Training voltooid.")
 
     # ==============================================================================
     # INTERNE LOGICA
     # ==============================================================================
 
-    def _run_logic(self):
-        # 1. Data ophalen
-        try:
-            raw_data = self.collector.read_sensors()
-            features = self.collector.features_from_raw(raw_data)
-            current_sp = features.get("current_setpoint")
-            hvac_mode = self._get_hvac_mode(raw_data)
-        except Exception as e:
-            logger.error(f"Coordinator: Sensor read failed: {e}")
-            return
+    def _build_context(self, raw, features, cur_sp, hvac_mode) -> ClimateContext:
+        is_active = self._is_compressor_active(hvac_mode)
+        is_home = safe_bool(features.get("home_presence", 0))
 
-        if current_sp is None:
-            logger.error("Coordinator: Current setpoint is None, aborting tick.")
-            return
+        # AI Vragen
+        ai_rec = self.thermostat_ai.get_recommended_setpoint(features, cur_sp)
 
-        # 2. AI Agents Updaten & Checken op User Override
-        override_detected = self.thermostat_ai.update_learning_state(
-            raw_data, current_sp
+        # Bereken altijd de opwarmtijd
+        heat_mins = (
+            self.thermal_ai.predict_heating_time(
+                self.settings["home_fallback"], features
+            )
+            or 180
         )
 
-        # Update ThermalAI voor cyclus monitoring
-        self.thermal_ai.run_cycle(features, hvac_mode)
-
-        # Update PresenceAI historie
-        self.presence_ai.log_current_state(features)
-
-        if override_detected:
-            logger.info(
-                "Coordinator: User override actief, AI-aanpassingen gepauzeerd."
+        # Haal probability op
+        if not is_home:
+            should_preheat, prob = self.presence_ai.should_preheat(
+                dynamic_minutes=heat_mins
             )
-            return
-
-        # 3. Beslis-logica: Thuis vs Afwezig
-        is_home = safe_bool(features.get("home_presence", 0.0))
-
-        if is_home:
-            self._manage_home_comfort(features, current_sp, hvac_mode)
         else:
-            self._handle_away_logic(current_sp, features, hvac_mode)
+            should_preheat = False
+            prob = 0.0
 
-    def _manage_home_comfort(self, features, current_sp, hvac_mode):
+        # Solar Status (Placeholder)
+        solar_excess = False
+
+        context = ClimateContext(
+            current_temp=safe_float(features.get("current_temp", 20)),
+            current_setpoint=cur_sp,
+            is_compressor_active=is_active,
+            hvac_mode=hvac_mode,
+            is_home=is_home,
+            ai_recommendation=ai_rec,
+            minutes_to_comfort=heat_mins,
+            preheat_needed=should_preheat,
+            preheat_prob=prob,
+            solar_excess=solar_excess,
+        )
+        return context
+
+    def _determine_house_state(self, context: ClimateContext) -> HouseState:
+        if context.is_home:
+            return HouseState.COMFORT
+        if context.preheat_needed:
+            return HouseState.PREHEAT
+        if context.solar_excess:
+            return HouseState.SOLAR_BOOST
+        return HouseState.ECO
+
+    def _calculate_target_for_state(
+        self, state: HouseState, context: ClimateContext
+    ) -> float:
         """
-        Logica voor als de bewoners thuis zijn.
-        Nu met bescherming tegen het onderbreken van lopende WP-runs.
+        Berekent doel temperatuur.
         """
-        if self.is_preheating:
-            logger.info("Coordinator: Gebruiker is thuis. Voorverwarmen voltooid.")
-            self.is_preheating = False
 
-        # Vraag de AI om het ideale setpoint
-        target_sp = self.thermostat_ai.get_recommended_setpoint(features, current_sp)
+        # --- COMFORT (THUIS) ---
+        if state == HouseState.COMFORT:
+            base_temp = (
+                context.ai_recommendation
+                if context.ai_recommendation
+                else self.settings["home_fallback"]
+            )
 
-        if target_sp is None:
+            # Solar boost
+            if context.solar_excess:
+                return base_temp + self.settings["solar_boost_delta"]
+
+            # HYSTERESIS LOGICA:
+            # Als de compressor UIT staat, houden we hem uit tot de drempel bereikt is.
+            start_threshold = base_temp - self.settings["comfort_hysteresis"]
+
+            if not context.is_compressor_active:
+                if context.current_temp > start_threshold:
+                    # --- VERBETERING 3: Betere Logging ---
+                    logger.debug(
+                        f"Coordinator: Huidig {context.current_temp} > Startgrens {start_threshold:.1f}. Systeem blijft UIT."
+                    )
+                    return start_threshold
+
+            # Als hij WEL draait (of temp te laag), gaan we naar doel.
+            return base_temp
+
+        # --- PREHEAT (SLIM MET PROBABILITY) ---
+        elif state == HouseState.PREHEAT:
+            base_temp = (
+                context.ai_recommendation
+                if context.ai_recommendation
+                else self.settings["home_fallback"]
+            )
+
+            # Als de kans > 80% is -> Volle bak stoken
+            if context.preheat_prob >= 0.8:
+                return base_temp
+
+            # Als de kans tussen threshold (bv 40%) en 80% is -> Voorzichtig voorverwarmen (-0.5 graad)
+            # Dit voorkomt onnodig stoken als je toch niet thuiskomt, maar zorgt dat de vloer niet ijskoud is.
+            logger.info(
+                f"Coordinator: Pre-heat soft start (Kans {context.preheat_prob:.2f}). Doel iets verlaagd."
+            )
+            return base_temp - 0.5
+
+        # --- SOLAR BUFFER (WEG) ---
+        elif state == HouseState.SOLAR_BOOST:
+            return self.settings["away_min"] + 2.0
+
+        # --- ECO (WEG) ---
+        elif state == HouseState.ECO:
+            return self.settings["away_min"]
+
+        return self.settings["away_min"]
+
+    def _execute_safe_transition(
+        self, target_temp, context: ClimateContext, state: HouseState
+    ):
+        current_temp = context.current_setpoint
+
+        # Deadband check
+        if abs(target_temp - current_temp) < self.settings["deadband"]:
             return
 
-        # Als de WP aan het verwarmen is ('heating') en de AI wil de temp verlagen
-        if hvac_mode == "heating" and target_sp < current_sp:
+        # Safety Check
+        action = "heating" if target_temp > current_temp else "off"
+
+        # We geven het hele context object mee voor de active check
+        is_safe, reason_log = self._is_hardware_safe_with_reason(
+            action, context, target_temp
+        )
+
+        if not is_safe:
             logger.info(
-                f"Coordinator: Systeem is nog bezig. "
-                f"Setpoint {current_sp:.1f}C behouden om cyclus niet te onderbreken."
+                f"Coordinator: Wacht [{state.value}] Doel {target_temp:.1f}C geweigerd: {reason_log}"
             )
             return
 
-        # Alleen aanpassen als het verschil groot genoeg is (tegen pendelen)
-        if abs(target_sp - current_sp) >= self.min_change_threshold:
-            logger.info(
-                f"Coordinator: AI adviseert wijziging: {current_sp} -> {target_sp:.2f}"
-            )
-            self._set_setpoint_safe(target_sp, hvac_mode)
-        else:
-            logger.info(
-                f"Coordinator: AI advies: {current_sp} -> {target_sp:.2f} onder drempel ({self.min_change_threshold}). Geen actie."
-            )
-
-    def _handle_away_logic(self, current_sp, features, hvac_mode):
-        """
-        Logica voor als de bewoners weg zijn.
-        Bevat bescherming om lopende warmtepomp-cycli niet te onderbreken.
-        """
-        # 1. Check of we moeten voorverwarmen voor een verwachte terugkomst
-        minutes_needed = (
-            self.thermal_ai.predict_heating_time(self.home_temp, features) or 180
+        # Uitvoeren
+        logger.info(
+            f"Coordinator: Actie [{state.value}]: Setpoint aanpassen {current_temp} -> {target_temp:.1f}C"
         )
-        should_preheat, prob = self.presence_ai.should_preheat(
-            dynamic_minutes=minutes_needed
-        )
+        self.ha.set_setpoint(target_temp)
+        self.thermostat_ai.notify_system_change(target_temp)
 
-        if should_preheat:
-            if not self.is_preheating:
-                logger.info(
-                    f"Coordinator: Dynamic Pre-heat trigger! Kans {prob:.2f} over {minutes_needed:.0f} min."
+        self.last_switch_time = datetime.now()
+
+    def _is_hardware_safe_with_reason(
+        self, intended_action, context: ClimateContext, target_sp
+    ):
+        """
+        Controleert of we mogen schakelen.
+        Gebruikt context.is_compressor_active om te zien of hij draait.
+        """
+        now = datetime.now()
+        mins_since_switch = (now - self.last_switch_time).total_seconds() / 60.0
+
+        # REGEL 1: Starten na rust
+        # Als we willen starten ('heating') en hij is nu NIET actief:
+        if intended_action == "heating" and not context.is_compressor_active:
+            if mins_since_switch < self.settings["min_off_min"]:
+                wait_time = int(self.settings["min_off_min"] - mins_since_switch)
+                return (
+                    False,
+                    f"Compressor staat pas {mins_since_switch:.0f}m uit (min {self.settings['min_off_min']}m). Nog {wait_time}m wachten.",
                 )
-            self.is_preheating = True
-            self._set_setpoint_safe(self.home_temp, hvac_mode)
-            return
 
-        self.is_preheating = False
+        # REGEL 2: Cyclus Afmaken (Cruciaal)
+        # Als hij actief is (Verwarmen OF SWW), en we willen omlaag: Niet doen.
+        if context.is_compressor_active and target_sp < context.current_setpoint:
+            # Kleine wijzigingen naar beneden blokkeren we.
+            if (context.current_setpoint - target_sp) < 2.0:
+                return (
+                    False,
+                    f"Systeem is actief ({context.hvac_mode}). We breken de cyclus niet af.",
+                )
 
-        # 2. "Afmaak-logica": Als de WP nu aan het verwarmen is, verlagen we het setpoint NIET.
-        # We wachten tot de kamer op temperatuur is en de WP uit zichzelf stopt.
-        if hvac_mode == "heating" and current_sp > self.away_temp:
-            logger.info(
-                f"Coordinator: Afwezig, Systeem is nog actief. "
-                f"Setpoint {current_sp:.1f}C behouden tot cyclus eindigt."
-            )
-            return
+        return True, "OK"
 
-        # 3. Als de WP niet (meer) verwarmt, mag hij naar de afwezigheidsstand
-        if abs(current_sp - self.away_temp) > 0.1:
-            logger.info(
-                f"Coordinator: Systeem is uit. Setpoint naar {self.away_temp}C."
-            )
-            self._set_setpoint_safe(self.away_temp, hvac_mode)
-
-    def _set_setpoint_safe(self, target_sp, current_action):
-        """Controleert veiligheidstijden voordat HA wordt aangestuurd."""
-        # Haal meest recente setpoint op om race conditions te voorkomen
-        current_sp = safe_float(self.ha.get_setpoint())
-        if current_sp is None or abs(target_sp - current_sp) < 0.1:
-            return
-
-        if self._is_change_safe(target_sp, current_sp, current_action):
-            logger.info(
-                f"Coordinator: Veiligheidscheck OK. HA aansturen -> {target_sp:.1f}"
-            )
-            self.ha.set_setpoint(target_sp)
-            # Informeer de AI dat dit een systeem-actie was (voorkomt User Override detectie)
-            self.thermostat_ai.notify_system_change(target_sp)
-        else:
-            logger.debug(
-                "Coordinator: Wijziging uitgesteld door compressor-bescherming."
-            )
+    # ==============================================================================
+    # SUPPORT
+    # ==============================================================================
 
     def _get_hvac_mode(self, raw_data):
         """Vertaalt de status van HA naar een interne hvac_mode."""
@@ -226,32 +322,5 @@ class ClimateCoordinator:
             "Vorstbescherming": "frost_protection",
         }.get(raw_data.get("hvac_mode"), "off")
 
-    def _is_change_safe(self, target_setpoint, current_setpoint, current_action):
-        """
-        Compressor-bescherming:
-        Voorkomt dat de warmtepomp te snel achter elkaar aan- of uitgeschakeld wordt.
-        """
-        now = datetime.now()
-
-        # Als de status ('heating' vs 'off') is veranderd t.o.v. de vorige check
-        if current_action != self.last_hvac_mode:
-            self.last_hvac_mode = current_action
-            self.last_action_change_ts = now
-
-        duration_mins = (now - self.last_action_change_ts).total_seconds() / 60.0
-
-        if current_action == "heating" and target_setpoint < current_setpoint:
-            if duration_mins < self.min_run_minutes:
-                logger.info(
-                    f"Coordinator: Systeem draait pas {duration_mins:.1f} min (minimaal: {self.min_run_minutes})."
-                )
-                return False
-
-        if current_action != "heating" and target_setpoint > current_setpoint:
-            if duration_mins < self.min_off_minutes:
-                logger.info(
-                    f"Coordinator: Systeem is pas {duration_mins:.1f} min uit (minimaal: {self.min_off_minutes})."
-                )
-                return False
-
-        return True
+    def _is_compressor_active(self, hvac_mode):
+        return hvac_mode in ["heating", "hot_water", "legionella_run", "cooling"]
