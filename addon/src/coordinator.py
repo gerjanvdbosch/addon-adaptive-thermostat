@@ -52,8 +52,8 @@ class ClimateCoordinator:
 
         # Configuraties
         self.settings = {
-            "home_fallback": float(self.opts.get("home_temp", 20.0)),
-            "away_min": float(self.opts.get("away_temp", 19.0)),
+            "home_fallback": float(self.opts.get("comfort_temp", 20.0)),
+            "away_min": float(self.opts.get("eco_temp", 19.0)),
             "solar_boost_delta": float(self.opts.get("solar_boost_delta", 1.0)),
             "comfort_hysteresis": float(self.opts.get("comfort_hysteresis", 0.5)),
             "min_off_min": int(self.opts.get("min_off_minutes", 30)),

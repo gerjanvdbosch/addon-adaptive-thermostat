@@ -15,8 +15,8 @@ options:
   solar_entity: input_text.zonnepanelen_beste_moment
   presence_entity: input_number.kans_thuis_aanwezig
   thermal_entity: input_number.warmtepomp_voorverwarming_tijd_minuten
-  home_temp: 20.0
-  away_temp: 19.0
+  comfort_temp: 20.0
+  eco_temp: 19.0
   thermostat_interval_seconds: 60
   solar_interval_seconds: 15
   cooldown_hours: 2.0
@@ -46,8 +46,8 @@ schema:
   solar_entity: "str?"
   presence_entity: "str?"
   thermal_entity: "str?"
-  home_temp: "float?"
-  away_temp: "float?"
+  comfort_temp: "float?"
+  eco_temp: "float?"
   thermostat_interval_seconds: "int?"
   solar_interval_seconds: "int?"
   cooldown_hours: "float?"

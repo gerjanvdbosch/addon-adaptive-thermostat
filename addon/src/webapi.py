@@ -1,13 +1,12 @@
 import logging
 import threading
+
 from datetime import datetime
 from typing import List, Optional
-
+from utils import safe_bool
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, desc
-
-# Project imports
 from db import Session, Setpoint, SolarRecord, PresenceRecord, HeatingCycle
 
 logger = logging.getLogger(__name__)
@@ -101,9 +100,92 @@ class DeleteResponse(BaseModel):
     deleted_key: str
 
 
+class AIStatus(BaseModel):
+    thermostat: dict
+    solar: dict
+    presence: dict
+    thermal: dict
+    system: dict
+
+
 # ==============================================================================
 # TRAINING & CONTROL ENDPOINTS
 # ==============================================================================
+
+
+@app.get("/status", response_model=AIStatus)
+def get_current_status():
+    """
+    Haalt de actuele voorspellingen en status op van alle AI modellen.
+    Dit is de 'live' weergave van wat het systeem nu denkt en plant.
+    """
+
+    if GLOBAL_COORDINATOR is None:
+        raise HTTPException(status_code=503, detail="Coordinator not linked.")
+
+    try:
+        # 1. Verzamel de meest recente sensor data voor context
+        raw_data = GLOBAL_COORDINATOR.collector.read_sensors()
+        features = GLOBAL_COORDINATOR.collector.features_from_raw(raw_data)
+
+        cur_sp = features.get("current_setpoint", 0.0)
+        cur_temp = features.get("current_temp", 0.0)
+
+        # 2. Vraag Thermostaat voorspelling
+        rec_sp = GLOBAL_COORDINATOR.thermostat_ai.get_recommended_setpoint(
+            features, cur_sp
+        )
+
+        # 3. Vraag Solar aanbeveling
+        solar_rec = GLOBAL_COORDINATOR.solar_ai.get_solar_recommendation()
+
+        # 4. Vraag Thermal voorspelling (hoe lang duurt opwarmen naar comfort?)
+        comfort_temp = GLOBAL_COORDINATOR.settings.get("home_fallback", 20.0)
+        heating_mins = GLOBAL_COORDINATOR.thermal_ai.predict_heating_time(
+            comfort_temp, features
+        )
+
+        # 5. Vraag Presence voorspelling (kans op thuiskomst binnen de opwarmtijd)
+        should_preheat, prob = GLOBAL_COORDINATOR.presence_ai.should_preheat(
+            dynamic_minutes=heating_mins
+        )
+
+        return {
+            "thermostat": {
+                "current_setpoint": cur_sp,
+                "recommended_setpoint": round(rec_sp, 2),
+                "delta": round(rec_sp - cur_sp, 2),
+                "cooldown_active": GLOBAL_COORDINATOR.thermostat_ai.last_ai_action_ts
+                is not None,
+            },
+            "solar": {
+                "action": solar_rec.get("action"),
+                "reason": solar_rec.get("reason"),
+                "planned_start": solar_rec.get("plan_start"),
+                "bias": round(GLOBAL_COORDINATOR.solar_ai.smoothed_bias, 2),
+            },
+            "presence": {
+                "is_home": safe_bool(features.get("home_presence")),
+                "preheat_trigger": should_preheat,
+                "probability_home_soon": round(prob, 2),
+                "lookahead_minutes": round(heating_mins or 0),
+            },
+            "thermal": {
+                "current_temp": cur_temp,
+                "target_comfort": comfort_temp,
+                "predicted_minutes_to_reach_target": round(heating_mins or 0),
+            },
+            "system": {
+                "hvac_mode": GLOBAL_COORDINATOR._get_hvac_mode(raw_data),
+                "compressor_active": GLOBAL_COORDINATOR._is_compressor_active(
+                    GLOBAL_COORDINATOR._get_hvac_mode(raw_data)
+                ),
+                "last_switch_time": GLOBAL_COORDINATOR.last_switch_time,
+            },
+        }
+    except Exception as e:
+        logger.exception(f"API: Error fetching status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/train", response_model=TrainResponse)
