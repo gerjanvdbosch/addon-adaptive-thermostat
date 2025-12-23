@@ -210,6 +210,9 @@ class ClimateCoordinator:
                     return base_temp
 
                 if base_temp < context.current_setpoint:
+                    logger.info(
+                        f"Coordinator: Doel {base_temp:.1f} < Huidige setpoint {context.current_setpoint:.1f}. Setpoint behouden."
+                    )
                     return base_temp
 
                 if context.current_temp > start_threshold:
