@@ -52,16 +52,16 @@ class ClimateCoordinator:
 
         # Configuraties
         self.settings = {
-            "home_fallback": float(self.opts.get("comfort_temp", 20.0)),
-            "away_min": float(self.opts.get("eco_temp", 19.0)),
+            "comfort_temp": float(self.opts.get("comfort_temp", 20.0)),
+            "eco_temp": float(self.opts.get("eco_temp", 19.0)),
             "solar_boost_delta": float(self.opts.get("solar_boost_delta", 1.0)),
             "comfort_hysteresis": float(self.opts.get("comfort_hysteresis", 0.5)),
             "min_off_min": int(self.opts.get("min_off_minutes", 30)),
             "deadband": float(self.opts.get("min_change_threshold", 0.5)),
         }
 
-        # Veiligheid Timer
-        self.last_switch_time = datetime.now() - timedelta(hours=1)
+        # Timer voor de laatste fysieke aanpassing van het setpoint (Cooldown basis)
+        self.last_switch_time = datetime.now() - timedelta(hours=24)
 
         logger.info("Coordinator: Klimaatsysteem gestart.")
 
@@ -91,7 +91,8 @@ class ClimateCoordinator:
             context = self._build_context(raw, features, cur_sp, hvac_mode)
 
             if self.thermostat_ai.update_learning_state(raw, cur_sp):
-                logger.info(f"Coordinator: Gebruikers-override actief (Set: {cur_sp})")
+                logger.info(f"Coordinator: Gebruikers-override actief ({cur_sp}).")
+                self.last_switch_time = datetime.now()
                 return
 
             # 4. Status Bepalen
@@ -140,7 +141,7 @@ class ClimateCoordinator:
         # Bereken altijd de opwarmtijd
         heat_mins = (
             self.thermal_ai.predict_heating_time(
-                self.settings["home_fallback"], features
+                self.settings["comfort_temp"], features
             )
             or 180
         )
@@ -191,7 +192,7 @@ class ClimateCoordinator:
             base_temp = (
                 context.ai_recommendation
                 if context.ai_recommendation
-                else self.settings["home_fallback"]
+                else self.settings["comfort_temp"]
             )
 
             # Solar boost
@@ -236,7 +237,7 @@ class ClimateCoordinator:
             base_temp = (
                 context.ai_recommendation
                 if context.ai_recommendation
-                else self.settings["home_fallback"]
+                else self.settings["comfort_temp"]
             )
 
             # Als de kans > 80% is -> Volle bak stoken
@@ -252,92 +253,73 @@ class ClimateCoordinator:
 
         # --- SOLAR BUFFER (WEG) ---
         elif state == HouseState.SOLAR_BOOST:
-            return self.settings["away_min"] + 2.0
+            return self.settings["eco_temp"] + 2.0
 
-        # --- ECO (WEG) ---
-        elif state == HouseState.ECO:
-            return self.settings["away_min"]
-
-        return self.settings["away_min"]
+        return self.settings["eco_temp"]
 
     def _execute_safe_transition(
         self, target_temp, context: ClimateContext, state: HouseState
     ):
-        current_temp = context.current_setpoint
+        current_sp = context.current_setpoint
 
-        # Deadband check
-        if abs(target_temp - current_temp) < self.settings["deadband"]:
+        # 1. Deadband Check
+        if abs(target_temp - current_sp) < self.settings["deadband"]:
             return
 
-        # Safety Check
-        action = "heating" if target_temp > current_temp else "off"
+        # 2. Bepaal actie voor hardware check
+        intended_action = "heating" if target_temp > current_sp else "off"
 
-        # We geven het hele context object mee voor de active check
-        is_safe, reason_log = self._is_hardware_safe_with_reason(
-            action, context, target_temp
+        # 3. De Poortwachter (Cooldown, Hardware, Cycle-protection)
+        is_safe, reason = self._is_hardware_safe_with_reason(
+            intended_action, context, target_temp
         )
 
         if not is_safe:
             logger.info(
-                f"Coordinator: Wacht [{state.value}] Doel {target_temp:.1f}C geweigerd: {reason_log}"
+                f"Coordinator: Wacht [{state.value}] Doel {target_temp:.1f}C geweigerd: {reason}"
             )
             return
 
         # Uitvoeren
         logger.info(
-            f"Coordinator: Actie [{state.value}]: Setpoint aanpassen {current_temp} -> {target_temp:.1f}C"
+            f"Coordinator: Actie [{state.value}]: Setpoint aanpassen {current_sp} -> {target_temp:.1f}C"
         )
         self.ha.set_setpoint(target_temp)
         self.thermostat_ai.notify_system_change(target_temp)
-
         self.last_switch_time = datetime.now()
 
     def _is_hardware_safe_with_reason(
         self, intended_action, context: ClimateContext, target_sp
     ):
-        """
-        Controleert of we mogen schakelen.
-        Gebruikt context.is_compressor_active om te zien of hij draait.
-        """
         now = datetime.now()
-        mins_since_switch = (now - self.last_switch_time).total_seconds() / 60.0
+        mins_since_change = (now - self.last_switch_time).total_seconds() / 60.0
 
-        # REGEL 1: Starten na rust
-        # Als we willen starten ('heating') en hij is nu NIET actief:
-        if intended_action == "heating" and not context.is_compressor_active:
-            if mins_since_switch < self.settings["min_off_min"]:
-                wait_time = int(self.settings["min_off_min"] - mins_since_switch)
-                return (
-                    False,
-                    f"Compressor staat pas {mins_since_switch:.0f}m uit (min {self.settings['min_off_min']}m). Nog {wait_time}m wachten.",
-                )
+        min_off_mins = self.settings["min_off_min"]
+        ai_cooldown_mins = float(self.opts.get("cooldown_hours", 2)) * 60
 
-        # REGEL 2: Cyclus Afmaken (Cruciaal)
-        # Als hij actief is (Verwarmen OF SWW), en we willen omlaag: Niet doen.
+        # 1. Anti-pendel (Cyclus afmaken)
         if context.is_compressor_active and target_sp < context.current_setpoint:
-            # Kleine wijzigingen naar beneden blokkeren we.
             if (context.current_setpoint - target_sp) < 2.0:
-                return (
-                    False,
-                    f"Systeem is actief ({context.hvac_mode}). We breken de cyclus niet af.",
-                )
+                return False, f"Cyclus actief ({context.hvac_mode})"
+
+        # 2. Besparing altijd toestaan
+        if target_sp < (context.current_setpoint - 0.1):
+            return True, "Besparing"
+
+        # 3. Hardware rusttijd na uitschakelen
+        if intended_action == "heating" and not context.is_compressor_active:
+            if mins_since_change < min_off_mins:
+                return False, "Hardware rusttijd"
+
+        # 4. AI Cooldown
+        if mins_since_change < ai_cooldown_mins:
+            # Hysteresis safety: als het echt koud is, negeer cooldown
+            start_threshold = target_sp - self.settings["comfort_hysteresis"]
+            if (
+                context.current_temp is not None
+                and context.current_temp < start_threshold
+            ):
+                return True, "Hysteresis override"
+            return False, "AI Cooldown"
 
         return True, "OK"
-
-    # ==============================================================================
-    # SUPPORT
-    # ==============================================================================
-
-    def _get_hvac_mode(self, raw_data):
-        """Vertaalt de status van HA naar een interne hvac_mode."""
-        return {
-            "Uit": "off",
-            "Verwarmen": "heating",
-            "SWW": "hot_water",
-            "Koelen": "cooling",
-            "Legionellapreventie": "legionella_run",
-            "Vorstbescherming": "frost_protection",
-        }.get(raw_data.get("hvac_mode"), "off")
-
-    def _is_compressor_active(self, hvac_mode):
-        return hvac_mode in ["heating", "hot_water", "legionella_run", "cooling"]

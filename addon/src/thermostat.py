@@ -2,6 +2,7 @@ import logging
 import joblib
 import time
 import pandas as pd
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -69,6 +70,10 @@ class ThermostatAI:
         self.last_known_setpoint = None
         self.stability_start_ts = None
         self.last_ai_action_ts = None
+
+        self.prediction_buffer = deque(
+            maxlen=5
+        )  # Buffer voor de laatste 5 ticks (~2.5 min)
 
         # Initialisatie
         self._load_model()
@@ -258,34 +263,22 @@ class ThermostatAI:
             return current_sp
 
         df_input = pd.DataFrame([features]).reindex(columns=self.feature_columns)
-
-        # Zorg dat alles numeriek is voor het geval er ergens een string in je features zit
         df_input = df_input.apply(pd.to_numeric, errors="coerce")
 
         try:
             prediction = self.model.predict(df_input)
             pred_delta = float(prediction[0])
+            raw_rec = current_sp + pred_delta
+
+            # 2. Smoothing: Voeg toe aan buffer en pak het gemiddelde
+            self.prediction_buffer.append(raw_rec)
+            smoothed_rec = sum(self.prediction_buffer) / len(self.prediction_buffer)
         except Exception:
             logger.exception("ThermostatAI: Fout bij voorspelling setpoint.")
             return current_sp
 
-        new_target = current_sp + pred_delta
-
-        # 2. Bounds checken
+        # 3. Bounds checken
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 25.0))
 
-        new_setpoint = max(min(new_target, max_sp), min_sp)
-
-        # 3. Check Cooldown: Als we recent iets veranderd hebben, houden we ons even stil.
-        cooldown_seconds = float(self.opts.get("cooldown_hours", 2)) * 3600
-        if self.last_ai_action_ts:
-            elapsed = (datetime.now() - self.last_ai_action_ts).total_seconds()
-            if elapsed < cooldown_seconds:
-                cooldown_remaining = (cooldown_seconds - elapsed) / 3600
-                logger.info(
-                    f"ThermostatAI: Cooldown actief (nog {cooldown_remaining:.2f}h, voorspelling {new_setpoint:.2f} overgeslagen)."
-                )
-                return current_sp
-
-        return new_setpoint
+        return max(min(smoothed_rec, max_sp), min_sp)
