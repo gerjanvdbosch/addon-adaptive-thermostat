@@ -157,8 +157,8 @@ class ClimateCoordinator:
         # Solar Status (Placeholder)
         solar_excess = False
 
-        context = ClimateContext(
-            current_temp=safe_float(features.get("current_temp", 20)),
+        return ClimateContext(
+            current_temp=safe_float(features.get("current_temp")),
             current_setpoint=cur_sp,
             is_compressor_active=is_active,
             hvac_mode=hvac_mode,
@@ -169,7 +169,6 @@ class ClimateCoordinator:
             preheat_prob=prob,
             solar_excess=solar_excess,
         )
-        return context
 
     def _determine_house_state(self, context: ClimateContext) -> HouseState:
         if context.is_home:
@@ -208,6 +207,9 @@ class ClimateCoordinator:
                     logger.warning(
                         "Coordinator: Geen huidige temperatuur bekend, hysteresis overgeslagen."
                     )
+                    return base_temp
+
+                if base_temp < context.current_setpoint:
                     return base_temp
 
                 if context.current_temp > start_threshold:
