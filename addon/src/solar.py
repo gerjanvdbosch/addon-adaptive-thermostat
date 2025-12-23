@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections import deque
+from utils import add_cyclic_time_features
 
 # Machine Learning
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -40,6 +41,19 @@ class SolarAI:
         self.model_path = Path(
             self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
         )
+
+        # Feature definitie
+        self.feature_columns = [
+            "hour_sin",
+            "hour_cos",
+            "doy_sin",
+            "doy_cos",
+            "pv_estimate",
+            "pv_estimate10",
+            "pv_estimate90",
+            "uncertainty",
+        ]
+
         self.interval = int(self.opts.get("solar_interval_seconds", 15))
 
         # Sensoren
@@ -108,29 +122,15 @@ class SolarAI:
         if df["timestamp"].dt.tz is not None:
             df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
 
-        # Cyclische Tijd Features
-        hours = df["timestamp"].dt.hour + df["timestamp"].dt.minute / 60.0
-        doy = df["timestamp"].dt.dayofyear
-
-        df["hour_sin"] = np.sin(2 * np.pi * hours / 24)
-        df["hour_cos"] = np.cos(2 * np.pi * hours / 24)
-        df["doy_sin"] = np.sin(2 * np.pi * doy / 366)
-        df["doy_cos"] = np.cos(2 * np.pi * doy / 366)
+        df = add_cyclic_time_features(df, col_name="timestamp")
 
         # Onzekerheid (Verschil tussen Solcast P10 en P90)
         df["uncertainty"] = df["pv_estimate90"] - df["pv_estimate10"]
 
-        features = [
-            "pv_estimate",
-            "pv_estimate10",
-            "pv_estimate90",
-            "uncertainty",
-            "hour_sin",
-            "hour_cos",
-            "doy_sin",
-            "doy_cos",
-        ]
-        return df[features]
+        df_out = df.reindex(columns=self.feature_columns)
+        df_out = df_out.apply(pd.to_numeric, errors="coerce")
+
+        return df_out
 
     # ==============================================================================
     # 2. TRAINING

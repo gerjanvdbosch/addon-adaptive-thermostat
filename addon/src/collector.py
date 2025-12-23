@@ -47,8 +47,8 @@ class Collector:
 
         # Tijd features
         hx, hy = cyclical_hour(ts)
-        dx, dy = cyclical_day(ts)  # Day of Week
-        doy_x, doy_y = cyclical_doy(ts)  # Day of Year (Seizoen)
+        dx, dy = cyclical_day(ts)
+        doy_x, doy_y = cyclical_doy(ts)
         wind_dir = sensor_dict.get("wind_dir")
         wtd_sin, wtd_cos = encode_wind(wind_dir)
 
@@ -71,7 +71,7 @@ class Collector:
             "hour_cos": hy,
             "day_sin": dx,
             "day_cos": dy,
-            "doy_sin": doy_x,  # Jaarritme (Zomer vs Winter)
+            "doy_sin": doy_x,
             "doy_cos": doy_y,
             "home_presence": safe_bool_to_float(sensor_dict.get("home_presence")),
             "hvac_mode": safe_float(hvac_mode),

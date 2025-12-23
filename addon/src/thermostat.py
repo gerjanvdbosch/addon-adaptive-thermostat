@@ -1,7 +1,6 @@
 import logging
 import joblib
 import time
-import numpy as np
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +13,7 @@ from sklearn.metrics import mean_absolute_error
 from db import fetch_training_setpoints_df, insert_setpoint
 from collector import Collector
 from ha_client import HAClient
-from utils import safe_round, safe_float
+from utils import safe_round, safe_float, add_cyclic_time_features
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +38,18 @@ class ThermostatAI:
             )
         )
 
-        # DEFINITIE FEATURE VOLGORDE
         # Deze lijst bepaalt de strikte volgorde van kolommen voor het model.
         self.feature_columns = [
-            "hour_sin",  # Ochtend/Avond (Tijd)
+            "hour_sin",
             "hour_cos",
-            "day_sin",  # Werkdag/Weekend (Weekdag)
+            "day_sin",
             "day_cos",
-            "doy_sin",  # Seizoen (Jaardag)
+            "doy_sin",
             "doy_cos",
-            "home_presence",  # Status
+            "home_presence",
             "hvac_mode",
             "heat_demand",
-            "current_temp",  # Sensor data
+            "current_temp",
             "current_setpoint",
             "temp_change",
             "outside_temp",
@@ -99,28 +97,6 @@ class ThermostatAI:
             logger.exception("ThermostatAI: Opslaan mislukt.")
 
     # ==============================================================================
-    # Feature Engineering
-    # ==============================================================================
-
-    def _add_time_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Voegt cyclische tijd-features toe aan de DataFrame.
-        """
-        if "timestamp" not in df.columns:
-            return df
-
-        # Zorg dat timestamp datetime is
-        dt = pd.to_datetime(df["timestamp"])
-        df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
-        df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
-        df["day_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
-        df["day_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
-        df["doy_sin"] = np.sin(2 * np.pi * dt.dt.dayofyear / 366.0)
-        df["doy_cos"] = np.cos(2 * np.pi * dt.dt.dayofyear / 366.0)
-
-        return df
-
-    # ==============================================================================
     # TRAINING LOGICA
     # ==============================================================================
 
@@ -139,16 +115,12 @@ class ThermostatAI:
         df["delta"] = df["setpoint"] - df["current_setpoint"]
         df = df[df["delta"].abs() < 10].dropna(subset=["delta"])
 
-        # 2. NIEUW: Voeg tijd-features toe op basis van timestamp
+        # 2. Voeg tijd-features toe op basis van timestamp
         df = self._add_time_features(df)
+        df = add_cyclic_time_features(df, col_name="timestamp")
 
-        # 3. Vul ontbrekende kolommen met NaN en converteer naar numeric
-        for col in self.feature_columns:
-            if col not in df.columns:
-                df[col] = np.nan
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        X = df[self.feature_columns]
+        X = df.reindex(columns=self.feature_columns)
+        X = X.apply(pd.to_numeric, errors="coerce")
         y = df["delta"]
 
         if len(X) < 20:
@@ -286,14 +258,13 @@ class ThermostatAI:
         if not self.is_fitted or self.model is None:
             return current_sp
 
-        df_input = pd.DataFrame([features])
+        df_input = pd.DataFrame([features]).reindex(columns=self.feature_columns)
 
-        for col in self.feature_columns:
-            if col not in df_input.columns:
-                df_input[col] = np.nan
+        # Zorg dat alles numeriek is voor het geval er ergens een string in je features zit
+        df_input = df_input.apply(pd.to_numeric, errors="coerce")
 
         try:
-            prediction = self.model.predict(df_input[self.feature_columns])
+            prediction = self.model.predict(df_input)
             pred_delta = float(prediction[0])
         except Exception:
             logger.exception("ThermostatAI: Fout bij voorspelling setpoint.")

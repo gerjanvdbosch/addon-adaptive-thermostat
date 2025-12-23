@@ -204,11 +204,20 @@ class ClimateCoordinator:
             start_threshold = base_temp - self.settings["comfort_hysteresis"]
 
             if not context.is_compressor_active:
+                if context.current_temp is None:
+                    logger.warning(
+                        "Coordinator: Geen huidige temperatuur bekend, hysteresis overgeslagen."
+                    )
+                    return base_temp
+
                 if context.current_temp > start_threshold:
-                    # --- VERBETERING 3: Betere Logging ---
+                    if context.current_setpoint < context.current_temp:
+                        return context.current_setpoint
+
                     logger.info(
                         f"Coordinator: Huidig {context.current_temp} > Startgrens {start_threshold:.1f}. Systeem blijft UIT."
                     )
+
                     return start_threshold
 
             # Als hij WEL draait (of temp te laag), gaan we naar doel.

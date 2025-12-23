@@ -1,7 +1,6 @@
 import logging
 import joblib
 import pandas as pd
-import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,7 +10,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 # Project Imports
 from db import fetch_heating_cycles, upsert_heating_cycle
 from ha_client import HAClient
-from utils import safe_float
+from utils import safe_float, add_cyclic_time_features
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,17 @@ class ThermalAI:
             self.opts.get("thermal_model_path", "/config/models/thermal_model.joblib")
         )
 
+        # Let op met de volgorde, cst moet ook overeenkomen
+        self.feature_columns = [
+            "start_temp",
+            "end_temp",
+            "avg_outside_temp",
+            "avg_solar",
+            "avg_supply_temp",
+            "doy_sin",
+            "doy_cos",
+        ]
+
         # State tracking
         self.is_fitted = False
         self.model = None
@@ -46,7 +56,7 @@ class ThermalAI:
 
         # Instellingen
         self.min_cycle_minutes = 45  # Vloerverwarming is traag
-        self.dead_time_minutes = 20  # Transporttijd (gebruikt voor checks, niet in ML)
+        self.dead_time_minutes = 20  # Transporttijd
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_model()
@@ -196,27 +206,16 @@ class ThermalAI:
         # Filter ruis (vloerverwarming is traag: 0.0001 - 0.01 graad/minuut)
         df = df[(df["rate"] > 0.0001) & (df["rate"] < 0.01)].dropna()
 
-        # Tijd features toevoegen
-        dt = pd.to_datetime(df["timestamp"])
-        df["doy_sin"] = np.sin(2 * np.pi * dt.dt.dayofyear / 366.0)
-        df["doy_cos"] = np.cos(2 * np.pi * dt.dt.dayofyear / 366.0)
+        df = add_cyclic_time_features(df, col_name="timestamp")
 
         if len(df) < 8:
             logger.warning("ThermalAI: Te weinig 'clean' data na filtering.")
             return
 
-        # DE FEATURES
-        X = df[
-            [
-                "start_temp",
-                "end_temp",
-                "outside_temp",
-                "avg_solar",
-                "avg_supply_temp",
-                "doy_sin",
-                "doy_cos",
-            ]
-        ]
+        # Hierdoor garandeer je dat X altijd exact overeenkomt met de feature list
+        X = df.reindex(columns=self.feature_columns)
+        X = X.apply(pd.to_numeric, errors="coerce")
+
         y = df["rate"]
 
         # MONOTONIC CONSTRAINTS
@@ -283,30 +282,27 @@ class ThermalAI:
         if delta_needed <= 0.1:
             return 0.0
 
-        # Day of Year berekenen voor NU
-        now = datetime.now()
-        doy = now.timetuple().tm_yday
-        d_sin = np.sin(2 * np.pi * doy / 366.0)
-        d_cos = np.cos(2 * np.pi * doy / 366.0)
+        # Dictionary bouwen met de juiste keys
+        input_data = {
+            "timestamp": datetime.now(),
+            "start_temp": curr,
+            "end_temp": target_temp,
+            "avg_outside_temp": out,
+            "avg_solar": sol,
+            "avg_supply_temp": sup,
+        }
 
-        X_pred = pd.DataFrame(
-            [[curr, target_temp, out, sol, sup, d_sin, d_cos]],
-            columns=[
-                "start_temp",
-                "end_temp",
-                "outside_temp",
-                "avg_solar",
-                "avg_supply_temp",
-                "doy_sin",
-                "doy_cos",
-            ],
-        )
+        df_pred = pd.DataFrame([input_data])
+        df_pred = add_cyclic_time_features(df_pred)
+
+        X_pred = df_pred.reindex(columns=self.feature_columns)
+        X_pred = X_pred.apply(pd.to_numeric, errors="coerce")
 
         try:
             pred_rate = float(self.model.predict(X_pred)[0])
             pred_rate = max(pred_rate, 0.0005)
 
-            # Overshoot correctie: 0.2 graden marge
+            # Overshoot correctie
             adjusted_delta = max(0, delta_needed - 0.2)
             minutes_needed = adjusted_delta / pred_rate
 

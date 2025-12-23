@@ -4,13 +4,10 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
-from utils import safe_bool
 
-# Machine Learning
 from sklearn.ensemble import HistGradientBoostingClassifier
-
-# Project Imports
 from db import fetch_presence_history, upsert_presence_record
+from utils import safe_bool, add_cyclic_time_features
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +25,15 @@ class PresenceAI:
         self.model_path = Path(
             self.opts.get("presence_model_path", "/config/models/presence_model.joblib")
         )
+
+        self.feature_columns = [
+            "hour_sin",
+            "hour_cos",
+            "day_sin",
+            "day_cos",
+            "doy_sin",
+            "doy_cos",
+        ]
 
         # Voor vloerverwarming: kijk 180-240 min vooruit
         self.preheat_minutes = int(self.opts.get("preheat_minutes", 180))
@@ -65,30 +71,12 @@ class PresenceAI:
 
     def _create_features(self, df: pd.DataFrame):
         """Maakt features voor menselijke ritmes."""
-        df = df.copy()
-        if not np.issubdtype(df["timestamp"], np.datetime64):
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = add_cyclic_time_features(df, col_name="timestamp")
 
-        # Gebruik lokale tijd voor ritme-detectie
-        local_dt = df["timestamp"].dt
-        hour_float = local_dt.hour + local_dt.minute / 60.0
-        df["hour_sin"] = np.sin(2 * np.pi * hour_float / 24)
-        df["hour_cos"] = np.cos(2 * np.pi * hour_float / 24)
-        df["day_sin"] = np.sin(2 * np.pi * local_dt.dayofweek / 7)
-        df["day_cos"] = np.cos(2 * np.pi * local_dt.dayofweek / 7)
-        df["doy_sin"] = np.sin(2 * np.pi * local_dt.dayofyear / 366.0)
-        df["doy_cos"] = np.cos(2 * np.pi * local_dt.dayofyear / 366.0)
+        df_out = df.reindex(columns=self.feature_columns)
+        df_out = df_out.apply(pd.to_numeric, errors="coerce")
 
-        return df[
-            [
-                "hour_sin",
-                "hour_cos",
-                "day_sin",
-                "day_cos",
-                "doy_sin",
-                "doy_cos",
-            ]
-        ]
+        return df_out
 
     def log_current_state(self, features):
         """Verzamelt aanwezigheidsdata van Home Assistant."""
@@ -114,6 +102,13 @@ class PresenceAI:
 
         X = self._create_features(df)
         y = df["is_home"].astype(int)
+
+        # Filter ongeldige targets (features mogen NaN zijn, targets niet)
+        mask = np.isfinite(y)
+        X, y = X[mask], y[mask]
+
+        if len(X) < 100:
+            return
 
         # Classifier: Gebruik class_weight='balanced' omdat mensen vaak
         # meer weg zijn dan thuis (of andersom), wat het model kan vertekenen.
