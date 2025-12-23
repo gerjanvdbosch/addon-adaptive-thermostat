@@ -38,23 +38,26 @@ class ThermostatAI:
                 "thermostat_model_path", "/config/models/thermostat_model.joblib"
             )
         )
+
+        # DEFINITIE FEATURE VOLGORDE
+        # Deze lijst bepaalt de strikte volgorde van kolommen voor het model.
         self.feature_columns = [
-            "hour_sin",  # Ochtend/Avond
+            "hour_sin",  # Ochtend/Avond (Tijd)
             "hour_cos",
-            "day_sin",  # Werkdag/Weekend
+            "day_sin",  # Werkdag/Weekend (Weekdag)
             "day_cos",
-            "doy_sin",  # Seizoen (Zomer/Winter)
+            "doy_sin",  # Seizoen (Jaardag)
             "doy_cos",
-            "home_presence",
-            "hvac_mode",  # Verwarmen/Koelen
+            "home_presence",  # Status
+            "hvac_mode",
             "heat_demand",
-            "current_temp",  # Huidige binnen temp
-            "current_setpoint",  # Waar staat hij nu op? (Startpunt voor delta)
-            "temp_change",  # Hoe snel warmt het op/koelt het af?
-            "outside_temp",  # Actuele buitentemperatuur (Cruciaal)
+            "current_temp",  # Sensor data
+            "current_setpoint",
+            "temp_change",
+            "outside_temp",
             "min_temp",
             "max_temp",
-            "solar_kwh",  # Zonkracht op de ramen (gratis warmte)
+            "solar_kwh",
             "wind_speed",
             "wind_dir_sin",
             "wind_dir_cos",
@@ -96,13 +99,12 @@ class ThermostatAI:
             logger.exception("ThermostatAI: Opslaan mislukt.")
 
     # ==============================================================================
-    # NIEUW: Feature Engineering Methodes
+    # Feature Engineering
     # ==============================================================================
 
     def _add_time_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Voegt cyclische tijd-features toe aan de DataFrame op basis van de 'timestamp' kolom.
-        Wordt gebruikt tijdens TRAINING.
+        Voegt cyclische tijd-features toe aan de DataFrame.
         """
         if "timestamp" not in df.columns:
             return df

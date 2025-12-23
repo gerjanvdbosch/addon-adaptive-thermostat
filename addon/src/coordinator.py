@@ -206,7 +206,7 @@ class ClimateCoordinator:
             if not context.is_compressor_active:
                 if context.current_temp > start_threshold:
                     # --- VERBETERING 3: Betere Logging ---
-                    logger.debug(
+                    logger.info(
                         f"Coordinator: Huidig {context.current_temp} > Startgrens {start_threshold:.1f}. Systeem blijft UIT."
                     )
                     return start_threshold
