@@ -116,7 +116,6 @@ class ThermostatAI:
         df = df[df["delta"].abs() < 10].dropna(subset=["delta"])
 
         # 2. Voeg tijd-features toe op basis van timestamp
-        df = self._add_time_features(df)
         df = add_cyclic_time_features(df, col_name="timestamp")
 
         X = df.reindex(columns=self.feature_columns)

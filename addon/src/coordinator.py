@@ -123,7 +123,7 @@ class ClimateCoordinator:
             try:
                 agent.train()
             except Exception as e:
-                logger.error(f"Training mislukt voor {agent}: {e}")
+                logger.error(f"Training mislukt: {e}")
         logger.info("Coordinator: Training voltooid.")
 
     # ==============================================================================
