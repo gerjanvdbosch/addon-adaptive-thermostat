@@ -323,3 +323,17 @@ class ClimateCoordinator:
             return False, "AI Cooldown"
 
         return True, "OK"
+
+    def _get_hvac_mode(self, raw_data):
+        """Vertaalt de status van HA naar een interne hvac_mode."""
+        return {
+            "Uit": "off",
+            "Verwarmen": "heating",
+            "SWW": "hot_water",
+            "Koelen": "cooling",
+            "Legionellapreventie": "legionella_run",
+            "Vorstbescherming": "frost_protection",
+        }.get(raw_data.get("hvac_mode"), "off")
+
+    def _is_compressor_active(self, hvac_mode):
+        return hvac_mode in ["heating", "hot_water", "legionella_run", "cooling"]
