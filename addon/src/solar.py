@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections import deque
+from enum import Enum
 from utils import add_cyclic_time_features
 
 # Machine Learning
@@ -18,13 +19,14 @@ from ha_client import HAClient
 
 logger = logging.getLogger(__name__)
 
-# ==============================================================================
-# CONFIGURATIE & CONSTANTEN
-# ==============================================================================
-SYSTEM_MAX_KW = 2.0  # Max vermogen van je omvormer
-SWW_DURATION_HOURS = 1.0  # Hoe lang duurt een run voor warm water?
-AGGREGATION_MINUTES = 30  # Hoe vaak slaan we een record op in de DB?
-EARLY_START_THRESHOLD = 0.95  # Venster-optimalisatie: start bij 95% van de komende piek
+
+class SolarStatus(Enum):
+    START = "START"
+    WAIT = "WAIT"
+    WAIT_STABLE = "WAIT_STABLE"
+    NIGHT = "NIGHT"
+    DONE = "DONE"  # Dag is voorbij, geen forecast meer
+    LOW_LIGHT = "LOW_LIGHT"  # Wel dag, maar te weinig licht om iets te doen
 
 
 class SolarAI:
@@ -54,6 +56,20 @@ class SolarAI:
             "uncertainty",
         ]
 
+        # Systeem instellingen
+        self.system_max_kw = float(self.opts.get("system_max_kw", 2.0))
+        self.sww_duration_hours = float(self.opts.get("sww_duration_hours", 1.0))
+        self.aggregation_minutes = int(self.opts.get("aggregation_minutes", 30))
+
+        # Logica drempels
+        self.early_start_threshold = float(self.opts.get("early_start_threshold", 0.95))
+        self.min_viable_kw = float(
+            self.opts.get("min_viable_kw", 0.3)
+        )  # Onder 300W = LOW_LIGHT
+        self.min_noise_kw = float(
+            self.opts.get("min_noise_kw", 0.01)
+        )  # Onder 10W = NIGHT/Ruis
+
         self.interval = int(self.opts.get("solar_interval_seconds", 15))
 
         # Sensoren
@@ -80,11 +96,11 @@ class SolarAI:
         self.last_solcast_poll_ts = None
         self.last_midnight_reset_date = datetime.now().date()
 
-        # Stabiliteits Buffer (Historie van laatste 10 min)
+        # Stabiliteits Buffer
         self.history_len = int(600 / max(1, self.interval))
         self.pv_buffer = deque(maxlen=self.history_len)
 
-        # Slot Aggregatie (voor DB opslag)
+        # Slot Aggregatie
         self.current_slot_start = None
         self.slot_samples = []
 
@@ -149,7 +165,7 @@ class SolarAI:
             return
 
         X = self._create_features(df)
-        y = df["actual_pv_yield"].clip(0, SYSTEM_MAX_KW)
+        y = df["actual_pv_yield"].clip(0, self.system_max_kw)
 
         # Filter NaN's
         mask = np.isfinite(y)
@@ -186,9 +202,7 @@ class SolarAI:
         """Wist de cache zodra er een nieuwe dag begint."""
         today = datetime.now().date()
         if today != self.last_midnight_reset_date:
-            logger.info(
-                "SolarAI: Nieuwe dag gedetecteerd. Solcast cache wordt geleegd."
-            )
+            logger.info("SolarAI: Nieuwe dag. Cache reset.")
             self.cached_solcast_data = []
             self.last_solcast_poll_ts = None
             self.last_midnight_reset_date = today
@@ -242,8 +256,9 @@ class SolarAI:
         now = datetime.now(timezone.utc)
         self.pv_buffer.append(pv_kw)
 
-        # Aggregatie per blok van AGGREGATION_MINUTES
-        slot_minute = (now.minute // AGGREGATION_MINUTES) * AGGREGATION_MINUTES
+        slot_minute = (
+            now.minute // self.aggregation_minutes
+        ) * self.aggregation_minutes
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
         if self.current_slot_start and slot_start > self.current_slot_start:
@@ -270,25 +285,13 @@ class SolarAI:
         # Dit geeft aan hoe hard de waarden heen en weer springen
         iqr = np.percentile(arr, 75) - np.percentile(arr, 25)
 
-        # 1. Bepaal of we momenteel op "hoog vermogen" draaien
-        # Grens: 40% van wat je systeem kan (bij 2.0kW is dit 0.8kW)
-        high_power_limit = SYSTEM_MAX_KW * 0.4
-
-        # 2. Bepaal de drempel voor instabiliteit
+        high_power_limit = self.system_max_kw * 0.4
         if median > high_power_limit:
-            # Bij hoog vermogen (felle zon) zijn de klappen van wolken groter.
-            # We tolereren fluctuaties tot 20% van de systeemcapaciteit.
-            # (Bij 2.0kW = 0.4kW fluctuatie toegestaan)
-            threshold = SYSTEM_MAX_KW * 0.20
+            threshold = self.system_max_kw * 0.20
         else:
-            # Bij laag vermogen (ochtend/avond/winter) is de basislijn lager.
-            # We tolereren dan minder absolute schommeling (10% capaciteit).
-            # (Bij 2.0kW = 0.2kW fluctuatie toegestaan)
-            threshold = SYSTEM_MAX_KW * 0.10
+            threshold = self.system_max_kw * 0.10
 
-        # Harde ondergrens voor ruis (anders wordt hij zenuwachtig van 50W verschil)
         threshold = max(threshold, 0.15)
-
         is_stable = iqr < threshold
 
         return median, is_stable
@@ -300,32 +303,32 @@ class SolarAI:
     def get_solar_recommendation(self):
         """Analyseert de forecast en de huidige bias om een start-advies te geven."""
         if not self.cached_solcast_data:
-            return {"action": "WAIT", "reason": "Wachten op Solcast data..."}
+            return {"action": SolarStatus.WAIT, "reason": "Geen Solcast data"}
 
         # ----------------------------------------------------------------------
-        # 1. VOORBEREIDING DATA
+        # 1. DATAFRAME & NACHT CHECK
         # ----------------------------------------------------------------------
         df = pd.DataFrame(self.cached_solcast_data)
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
         df.sort_values("timestamp", inplace=True)
 
         # Filter nachtwaarden eruit
-        df = df[df["pv_estimate"] > 0.01]
+        df = df[df["pv_estimate"] > self.min_noise_kw]
         if df.empty:
-            return {"action": "WAIT", "reason": "Nacht: Geen zon"}
+            return {"action": SolarStatus.NIGHT, "reason": "Zon is onder"}
 
         now_utc = pd.Timestamp.now(tz="UTC")
         local_tz = datetime.now().astimezone().tzinfo
 
         # ----------------------------------------------------------------------
-        # 2. AI PREDICTIE
+        # 2. AI PREDICTIE & BIAS
         # ----------------------------------------------------------------------
         if self.is_fitted and self.model:
             X_pred = self._create_features(df)
             pred_ai = self.model.predict(X_pred)
             # Blending: 60% AI, 40% Solcast
             df["ai_power_raw"] = (0.6 * pred_ai) + (0.4 * df["pv_estimate"])
-            df["ai_power_raw"] = df["ai_power_raw"].clip(0, SYSTEM_MAX_KW)
+            df["ai_power_raw"] = df["ai_power_raw"].clip(0, self.system_max_kw)
         else:
             df["ai_power_raw"] = df.get("pv_estimate", 0.0)
 
@@ -341,23 +344,20 @@ class SolarAI:
         # Update Bias
         if df.loc[nearest_idx, "time_diff"] < pd.Timedelta(minutes=45):
             expected_now = df.loc[nearest_idx, "ai_power_raw"]
-
-            # Voorkom delen door nul of extreme uitschieters bij zonsopkomst
-            if expected_now > 0.1:
+            if expected_now > self.min_noise_kw:
                 new_bias = median_pv / expected_now
                 # EWMA smoothing
                 self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
                 self.smoothed_bias = np.clip(self.smoothed_bias, 0.4, 1.6)
 
-        # Pas bias toe op de hele dataframe
         df["ai_power"] = (df["ai_power_raw"] * self.smoothed_bias).clip(
-            0, SYSTEM_MAX_KW
+            0, self.system_max_kw
         )
 
         # ----------------------------------------------------------------------
-        # 4. ROLLING WINDOW (SWW BLOK)
+        # 3. ROLLING WINDOW
         # ----------------------------------------------------------------------
-        window_steps = max(1, int(SWW_DURATION_HOURS * 2))  # Bijv. 2 stappen van 30min
+        window_steps = max(1, int(self.sww_duration_hours * 2))
         indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_steps)
 
         # We gebruiken de biased power voor het plannen
@@ -368,23 +368,33 @@ class SolarAI:
         future.dropna(subset=["window_avg_power"], inplace=True)
 
         if future.empty:
-            return {"action": "WAIT", "reason": "Einde zonnige dagdeel."}
+            return {"action": SolarStatus.DONE, "reason": "Einde dag forecast"}
 
         # ----------------------------------------------------------------------
-        # 5. BESTE MOMENT BEPALEN (MET 95% OPTIMALISATIE!)
+        # 4. POTENTIE CHECK (Vroege exit)
         # ----------------------------------------------------------------------
-        # Dit is de verbetering: We wachten niet op de absolute 100% piek,
-        # maar pakken de EERSTE kans die >95% van de piek is.
-        # Dit zorgt dat je op mooie dagen 1 a 2 uur eerder start.
+        conservative_future_bias = min(self.smoothed_bias, 1.1)
+        future_max_raw = future["ai_power_raw"].rolling(window=indexer).mean().max()
+        if pd.isna(future_max_raw):
+            future_max_raw = 0.0
+
+        adjusted_future_max = future_max_raw * conservative_future_bias
+
+        if adjusted_future_max < self.min_viable_kw and median_pv < self.min_viable_kw:
+            return {
+                "action": SolarStatus.LOW_LIGHT,
+                "reason": f"Max verwachting te laag ({adjusted_future_max:.2f}kW)",
+            }
+
+        # ----------------------------------------------------------------------
+        # 5. BESTE MOMENT SELECTIE (95% REGEL)
+        # ----------------------------------------------------------------------
         max_peak_power = future["window_avg_power"].max()
-        threshold = max(max_peak_power * EARLY_START_THRESHOLD, 0.01)
-
+        threshold = max(max_peak_power * self.early_start_threshold, 0.01)
         candidates = future[future["window_avg_power"] >= threshold]
 
         if not candidates.empty:
-            best_row = candidates.iloc[
-                0
-            ]  # Pak de EERSTE (vroegste) die aan de eis voldoet
+            best_row = candidates.iloc[0]
             best_idx = best_row.name
         else:
             best_idx = future["window_avg_power"].idxmax()
@@ -400,14 +410,11 @@ class SolarAI:
         today_end = today_start + timedelta(days=1)
         df_today = df[(df["timestamp"] >= today_start) & (df["timestamp"] < today_end)]
 
-        # Historische piek (wat was vandaag maximaal mogelijk volgens forecast?)
         forecast_peak_day = (
             df_today["window_avg_power"].max() if not df_today.empty else 0.0
         )
-
-        # Hier telt huidige piek WEL mee: Hoe 'mooi' is de dag in het algemeen?
         actual_day_max = max(forecast_peak_day, median_pv)
-        day_quality_ratio = actual_day_max / max(1.0, SYSTEM_MAX_KW)
+        day_quality_ratio = actual_day_max / max(1.0, self.system_max_kw)
 
         if day_quality_ratio > 0.75:
             day_type = "Sunny ☀️"
@@ -422,93 +429,58 @@ class SolarAI:
         # ----------------------------------------------------------------------
         # 6. TARGET BEPALING (De "Lat")
         # ----------------------------------------------------------------------
-
-        # Gebruik een behoudende bias voor de toekomstverwachting.
-        # Als bias < 1 (bewolkt), verlagen we de verwachting.
-        # Als bias > 1 (zonniger), rekenen we ons niet rijk (max 1.0 of 1.1).
-        conservative_future_bias = min(self.smoothed_bias, 1.1)
-
-        # Wat is de ruwe (ongecorrigeerde) potentie in de toekomst?
-        future_max_raw = future["ai_power_raw"].rolling(window=indexer).mean().max()
-        if pd.isna(future_max_raw):
-            future_max_raw = 0.0
-
-        # De referentie is: Wat gaat de forecast doen, geschaald naar de realiteit van nu?
-        # Dit lost het "Spook-Piek" probleem op.
-        adjusted_future_max = future_max_raw * conservative_future_bias
-
         reference_peak = adjusted_future_max
         dynamic_threshold = reference_peak * percentage
-        min_noise_limit = 0.15  # Minimaal 150W om überhaupt te overwegen
-
-        final_trigger_val = max(dynamic_threshold, min_noise_limit)
+        final_trigger_val = max(dynamic_threshold, self.min_noise_kw)
 
         logger.info(
             f"SolarAI: Ref-Future: {reference_peak:.2f}kW | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
-        # ----------------------------------------------------------------------
-        # 7. BESLUITVORMING
-        # ----------------------------------------------------------------------
-
-        # A. Absolute ondergrens (Nacht/Schemer)
-        if best_power < min_noise_limit and median_pv < min_noise_limit:
+        # A. Ondergrens
+        if best_power < self.min_noise_kw and median_pv < self.min_noise_kw:
             return {
-                "action": "WAIT",
-                "reason": f"[{day_type}] Te weinig licht (<{min_noise_limit*1000:.0f}W)",
+                "action": SolarStatus.NIGHT,
+                "reason": f"Te weinig licht (<{self.min_noise_kw*1000:.0f}W)",
                 "plan_start": start_time_local,
             }
 
-        # B. Opportunisme (Is het NU veel zonniger dan het MODEL dacht?)
-        # Vergelijk huidige meting met de voorspelling van DIT specifieke slot (Appels met Appels)
+        # B. Opportunisme
         current_slot_forecast_raw = df.loc[nearest_idx, "ai_power_raw"]
-
-        # Is het nu 20% zonniger dan voorspeld?
         is_sunny_surprise = median_pv > (current_slot_forecast_raw * 1.20)
-
-        # EN: Is het gemiddelde voor het komende uur wel acceptabel?
-        # (Niet starten op een piek van 1 minuut als de rest 0 is)
-        is_viable_run = best_power > (SYSTEM_MAX_KW * 0.25)
+        is_viable_run = best_power > self.min_viable_kw
 
         if is_sunny_surprise and is_viable_run:
             return {
-                "action": "START",
-                "reason": (
-                    f"[{day_type}] Nu veel zonniger dan slot-voorspelling! "
-                    f"(Actueel {median_pv:.2f}kW > Slot {current_slot_forecast_raw:.2f}kW)"
-                ),
+                "action": SolarStatus.START,
+                "reason": f"[{day_type}] Opportunisme: Feller dan forecast!",
                 "plan_start": datetime.now(local_tz),
             }
 
-        # C. Normale Drempel Check
-        # Starten we omdat we de dynamische drempel hebben bereikt?
-        # Of omdat de toekomst slechter is dan nu (Sunset scenario)?
-
+        # C. Normale Drempel
         if median_pv >= final_trigger_val:
-            # We zitten boven de drempel. Maar is het stabiel genoeg?
-            # Bij Gloomy dagen negeren we stabiliteit (pakken wat we pakken kunnen)
             if (
                 "Gloomy" not in day_type
                 and not is_stable
                 and median_pv < (best_power * 0.9)
             ):
                 return {
-                    "action": "WAIT_CLOUD",
-                    "reason": f"[{day_type}] Drempel bereikt, maar wacht op stabiel licht",
+                    "action": SolarStatus.WAIT_STABLE,
+                    "reason": f"[{day_type}] Wachten op stabiel licht",
                     "plan_start": start_time_local,
                 }
 
             return {
-                "action": "START",
-                "reason": f"[{day_type}] Actueel ({median_pv:.2f}kW) boven drempel ({final_trigger_val:.2f}kW)",
+                "action": SolarStatus.START,
+                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} >= {final_trigger_val:.2f})",
                 "plan_start": datetime.now(local_tz),
             }
 
         # D. Wachten
         wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
         return {
-            "action": "WAIT",
-            "reason": f"[{day_type}] Wachten op piek over {wait_min} min (Verwacht {best_power:.2f}kW)",
+            "action": SolarStatus.WAIT,
+            "reason": f"[{day_type}] Piek over {wait_min} min ({best_power:.2f}kW)",
             "plan_start": start_time_local,
         }
 
@@ -536,7 +508,9 @@ class SolarAI:
         # 3. Krijg advies en log het
         advice = self.get_solar_recommendation()
 
-        res = advice["action"]
+        # Haal de string waarde uit de Enum
+        res_enum = advice["action"]
+        res_str = res_enum.value
         reason = advice["reason"]
         p_time = (
             advice.get("plan_start").strftime("%H:%M")
@@ -545,12 +519,13 @@ class SolarAI:
         )
 
         logger.info(
-            f"SolarAI: [{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}"
+            f"SolarAI: [{res_str}] {reason} | Plan: {p_time} | Bias: {self.smoothed_bias:.2f}"
         )
 
         self.ha.set_solar_prediction(
-            f"[{res}] {reason} | Gepland: {p_time} | Bias: {self.smoothed_bias:.2f}",
+            f"[{res_str}] {reason}",
             {
+                "status": res_str,
                 "reason": reason,
                 "planned_start": p_time,
                 "bias_factor": round(self.smoothed_bias, 2),
