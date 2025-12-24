@@ -176,10 +176,9 @@ def get_current_status():
 
         # ----------------------------------------------------------------------
 
-        # 4. Vraag Thermal voorspelling (hoe lang duurt opwarmen naar comfort?)
-        comfort_temp = GLOBAL_COORDINATOR.settings.get("home_fallback", 20.0)
+        # 4. Vraag Thermal voorspelling (hoe lang duurt opwarmen naar cur_sp)
         heating_mins = GLOBAL_COORDINATOR.thermal_ai.predict_heating_time(
-            comfort_temp, features
+            cur_sp, features
         )
 
         # 5. Vraag Presence voorspelling (kans op thuiskomst binnen de opwarmtijd)
@@ -209,7 +208,6 @@ def get_current_status():
             },
             "thermal": {
                 "current_temp": cur_temp,
-                "target_comfort": comfort_temp,
                 "predicted_minutes_to_reach_target": round(heating_mins or 0),
             },
             "system": {
