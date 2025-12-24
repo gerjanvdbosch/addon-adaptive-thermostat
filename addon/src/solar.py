@@ -532,3 +532,49 @@ class SolarAI:
                 "last_update": now.isoformat(),
             },
         )
+
+    def _get_readable_influences(self, df_row: pd.DataFrame) -> dict:
+        """
+        Vertaalt de cryptische feature columns naar leesbare info voor de gebruiker.
+        Wordt gebruikt voor attributen in Home Assistant.
+        """
+        if df_row.empty:
+            return {}
+
+        row = df_row.iloc[0]
+        influences = {}
+
+        # 1. Solcast Basis (De belangrijkste input)
+        if "pv_estimate" in self.feature_columns:
+            val = row.get("pv_estimate", 0.0)
+            influences["Basis Forecast"] = f"{val:.2f} kW"
+
+        # 2. Onzekerheid (Cloud Spread)
+        # Dit geeft aan hoe zeker Solcast is. Groot verschil = wisselvallig weer.
+        if "uncertainty" in self.feature_columns:
+            unc = row.get("uncertainty", 0.0)
+            # Label geven aan de onzekerheid
+            if unc < 0.2:
+                label = "Laag (Zeker)"
+            elif unc < 0.6:
+                label = "Gemiddeld"
+            else:
+                label = "Hoog (Wisselvallig)"
+            influences["Onzekerheid"] = f"{label} ({unc:.2f} kW)"
+
+        # 3. Context (Tijd & Seizoen)
+        # We gaan geen sin/cos waarden tonen, dat zegt niemand iets.
+        # We geven aan dat deze meewegen in het model.
+        if "hour_sin" in self.feature_columns:
+            # We kunnen hier eventueel het uur terugrekenen, maar 'Time Context' is vaak genoeg
+            influences["Model Context"] = "Tijd & Seizoen meegewogen"
+
+        # 4. De AI Bias (Jouw lokale correctie)
+        # Dit is geen input feature, maar wel cruciaal voor het resultaat
+        bias_pct = (self.smoothed_bias - 1.0) * 100
+        direction = "+" if bias_pct > 0 else ""
+        influences["AI Correctie"] = (
+            f"{self.smoothed_bias:.2f} ({direction}{bias_pct:.0f}%)"
+        )
+
+        return influences

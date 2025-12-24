@@ -1,5 +1,6 @@
 import logging
 import threading
+import pandas as pd
 
 from datetime import datetime
 from typing import List, Optional
@@ -131,8 +132,8 @@ def get_current_status():
         cur_sp = features.get("current_setpoint", 0.0)
         cur_temp = features.get("current_temp", 0.0)
 
-        # Haal de invloeden op
-        influences = GLOBAL_COORDINATOR.thermostat_ai.get_influence_factors(
+        # Haal de invloeden op (Thermostaat)
+        influences_thermostat = GLOBAL_COORDINATOR.thermostat_ai.get_influence_factors(
             features, cur_sp
         )
 
@@ -141,8 +142,39 @@ def get_current_status():
             features, cur_sp
         )
 
-        # 3. Vraag Solar aanbeveling
-        solar_rec = GLOBAL_COORDINATOR.solar_ai.get_solar_recommendation()
+        # ----------------------------------------------------------------------
+        # 3. Vraag Solar aanbeveling & Invloeden (Uitgebreid)
+        # ----------------------------------------------------------------------
+        solar_ai = GLOBAL_COORDINATOR.solar_ai
+        solar_rec = solar_ai.get_solar_recommendation()
+
+        # Enum handling: Zorg dat we de string waarde krijgen
+        action_val = solar_rec.get("action")
+        status_str = (
+            action_val.value if hasattr(action_val, "value") else str(action_val)
+        )
+
+        # Bereken de Readable Influences (Live)
+        solar_influences = {}
+        if solar_ai.cached_solcast_data:
+            now_utc = pd.Timestamp.now(tz="UTC")
+            df_now = pd.DataFrame(solar_ai.cached_solcast_data)
+            df_now["timestamp"] = pd.to_datetime(df_now["period_start"], utc=True)
+
+            # Zoek dichtstbijzijnde record
+            df_now["time_diff"] = (df_now["timestamp"] - now_utc).abs()
+            nearest_row = df_now.nsmallest(1, "time_diff")
+
+            if not nearest_row.empty:
+                # Gebruik de interne functies van SolarAI om features te maken
+                # Dit is veilig omdat we de instantie delen
+                try:
+                    X_now = solar_ai._create_features(nearest_row)
+                    solar_influences = solar_ai._get_readable_influences(X_now)
+                except Exception as e:
+                    logger.warning(f"API: Kon solar influences niet berekenen: {e}")
+
+        # ----------------------------------------------------------------------
 
         # 4. Vraag Thermal voorspelling (hoe lang duurt opwarmen naar comfort?)
         comfort_temp = GLOBAL_COORDINATOR.settings.get("home_fallback", 20.0)
@@ -160,13 +192,14 @@ def get_current_status():
                 "current_setpoint": cur_sp,
                 "recommended_setpoint": round(rec_sp, 2),
                 "delta": round(rec_sp - cur_sp, 2),
-                "explanation": influences,
+                "explanation": influences_thermostat,
             },
             "solar": {
-                "action": solar_rec.get("action"),
+                "status": status_str,
                 "reason": solar_rec.get("reason"),
                 "planned_start": solar_rec.get("plan_start"),
-                "bias": round(GLOBAL_COORDINATOR.solar_ai.smoothed_bias, 2),
+                "bias": round(solar_ai.smoothed_bias, 2),
+                "influences": solar_influences,  # De nieuwe feature!
             },
             "presence": {
                 "is_home": safe_bool(features.get("home_presence")),
