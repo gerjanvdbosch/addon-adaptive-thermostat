@@ -37,7 +37,7 @@ class HAClient:
             attributes = {}
 
         url = f"{self.url}/states/{entity_id}"
-        payload = {"friendly_name": entity_id, "state": state, "attributes": attributes}
+        payload = {"state": state, "attributes": attributes}
 
         try:
             r = requests.post(url, json=payload, headers=self.headers)
