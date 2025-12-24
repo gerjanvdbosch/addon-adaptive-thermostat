@@ -2,6 +2,8 @@ import logging
 import joblib
 import numpy as np
 import pandas as pd
+import shap
+
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -174,3 +176,78 @@ class PresenceAI:
             )
 
         return triggered, max_prob
+
+    def get_influence_factors(self, target_time):
+        """
+        Gebruikt SHAP om uit te leggen WAAROM het model denkt dat je thuis bent (of komt).
+        Breekt de voorspelling op in: Tijdstip, Weekdag en Seizoen.
+        """
+        if not self.is_fitted or not self.model:
+            return {"Status": "Model nog niet getraind"}
+
+        try:
+            # 1. Bereid data voor (voor het specifieke tijdstip)
+            df = pd.DataFrame([{"timestamp": target_time}])
+            X = self._create_features(df)
+
+            # 2. SHAP Berekening
+            # Voor classifiers geeft TreeExplainer de impact op de 'log-odds' (kansverhouding)
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
+
+            # Bij binaire classificatie (Thuis/Niet Thuis) is de output soms een lijst
+            # We hebben de waarden voor de positieve klasse (1 = Thuis) nodig.
+            if isinstance(shap_values, list):
+                vals = shap_values[1][0]  # [0] is klasse 0, [1] is klasse 1
+            elif len(shap_values.shape) == 2:
+                vals = shap_values[0]  # Soms direct de array
+            else:
+                vals = shap_values
+
+            raw_influences = {
+                col: float(val) for col, val in zip(self.feature_columns, vals)
+            }
+
+            # 3. Groeperen en vertalen
+            influences = {}
+
+            # Helper
+            def format_impact(val):
+                if abs(val) < 0.05:
+                    return None
+                # Positief = Verhoogt de kans op aanwezigheid
+                # Negatief = Verlaagt de kans (dus voorspelt afwezigheid)
+                return "Verhoogt Kans" if val > 0 else "Verlaagt Kans"
+
+            # Tijdstip (Uur van de dag)
+            # Dit pakt het dag-nacht ritme
+            hour_impact = raw_influences.get("hour_sin", 0) + raw_influences.get(
+                "hour_cos", 0
+            )
+            imp = format_impact(hour_impact)
+            if imp:
+                influences["Tijdstip"] = f"{imp} ({hour_impact:+.2f})"
+
+            # Weekdag (Werkdag vs Weekend)
+            # Dit pakt het weekritme (bijv. woensdagmiddag thuis, maandag weg)
+            day_impact = raw_influences.get("day_sin", 0) + raw_influences.get(
+                "day_cos", 0
+            )
+            imp = format_impact(day_impact)
+            if imp:
+                influences["Weekdag"] = f"{imp} ({day_impact:+.2f})"
+
+            # Seizoen (Vakanties/Jaarritme)
+            # Minder relevant voor dagelijkse patronen, maar kan vakanties oppikken
+            doy_impact = raw_influences.get("doy_sin", 0) + raw_influences.get(
+                "doy_cos", 0
+            )
+            if abs(doy_impact) > 0.1:  # Alleen melden als het significant is
+                imp = format_impact(doy_impact)
+                influences["Seizoen"] = f"{imp} ({doy_impact:+.2f})"
+
+            return influences
+
+        except Exception as e:
+            logger.error(f"PresenceAI: SHAP berekening mislukt: {e}")
+            return {}

@@ -2,7 +2,7 @@ import logging
 import threading
 import pandas as pd
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from utils import safe_bool
 from fastapi import FastAPI, HTTPException, Query
@@ -133,7 +133,7 @@ def get_current_status():
         cur_temp = features.get("current_temp", 0.0)
 
         # Haal de invloeden op (Thermostaat)
-        influences_thermostat = GLOBAL_COORDINATOR.thermostat_ai.get_influence_factors(
+        thermostat_influences = GLOBAL_COORDINATOR.thermostat_ai.get_influence_factors(
             features, cur_sp
         )
 
@@ -166,13 +166,11 @@ def get_current_status():
             nearest_row = df_now.nsmallest(1, "time_diff")
 
             if not nearest_row.empty:
-                # Gebruik de interne functies van SolarAI om features te maken
-                # Dit is veilig omdat we de instantie delen
                 try:
                     X_now = solar_ai._create_features(nearest_row)
-                    solar_influences = solar_ai._get_readable_influences(X_now)
+                    solar_influences = solar_ai.get_influence_factors(X_now)
                 except Exception as e:
-                    logger.warning(f"API: Kon solar influences niet berekenen: {e}")
+                    logger.warning(f"WebAPI: Kon solar influences niet berekenen: {e}")
 
         # ----------------------------------------------------------------------
 
@@ -181,9 +179,18 @@ def get_current_status():
             cur_sp, features
         )
 
+        thermal_influences = GLOBAL_COORDINATOR.thermal_ai.get_influence_factors(
+            cur_sp, features
+        )
+
         # 5. Vraag Presence voorspelling (kans op thuiskomst binnen de opwarmtijd)
         should_preheat, prob = GLOBAL_COORDINATOR.presence_ai.should_preheat(
             dynamic_minutes=heating_mins
+        )
+
+        target_time = datetime.now() + timedelta(minutes=(heating_mins or 0))
+        presence_influences = GLOBAL_COORDINATOR.presence_ai.get_influence_factors(
+            target_time
         )
 
         return {
@@ -191,7 +198,7 @@ def get_current_status():
                 "current_setpoint": cur_sp,
                 "recommended_setpoint": round(rec_sp, 2),
                 "delta": round(rec_sp - cur_sp, 2),
-                "explanation": influences_thermostat,
+                "explanation": thermostat_influences,
             },
             "solar": {
                 "status": status_str,
@@ -205,10 +212,12 @@ def get_current_status():
                 "preheat_trigger": should_preheat,
                 "probability_home_soon": round(prob, 2),
                 "lookahead_minutes": round(heating_mins or 0),
+                "explanation": presence_influences,
             },
             "thermal": {
                 "current_temp": cur_temp,
                 "predicted_minutes_to_reach_target": round(heating_mins or 0),
+                "explanation": thermal_influences,
             },
             "system": {
                 "hvac_mode": GLOBAL_COORDINATOR._get_hvac_mode(raw_data),

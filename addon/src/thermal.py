@@ -1,6 +1,9 @@
 import logging
 import joblib
 import pandas as pd
+import numpy as np
+import shap
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -310,3 +313,107 @@ class ThermalAI:
         except Exception:
             logger.exception("ThermalAI: Fout bij predictie.")
             return 180.0
+
+    def get_influence_factors(self, target_temp, features):
+        """
+        Gebruikt SHAP om uit te leggen WAAROM het opwarmen lang/kort duurt.
+        Geeft inzicht in de invloed van starttemp, buitentemp, zon, etc. op de opwarmsnelheid.
+        """
+        if not self.is_fitted or not self.model:
+            return {"Status": "Model nog niet getraind"}
+
+        try:
+            # 1. Bereid data voor (exact zoals in predict_heating_time)
+            curr = safe_float(features.get("current_temp"))
+            out = safe_float(features.get("outside_temp"))
+            sol = safe_float(features.get("pv_power", 0.0))
+            sup = safe_float(features.get("supply_temp"))
+
+            if not sup or sup < 20:
+                sup = 25.0
+            if curr is None or out is None:
+                return {}
+
+            input_data = {
+                "timestamp": datetime.now(),
+                "start_temp": curr,
+                "end_temp": target_temp,
+                "avg_outside_temp": out,
+                "avg_solar": sol,
+                "avg_supply_temp": sup,
+            }
+
+            df_pred = pd.DataFrame([input_data])
+            df_pred = add_cyclic_time_features(df_pred)
+
+            X = df_pred.reindex(columns=self.feature_columns)
+            X = X.apply(pd.to_numeric, errors="coerce")
+
+            # 2. SHAP Berekening
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
+
+            # Base value = gemiddelde opwarmsnelheid van het model (in graden/minuut)
+            base_rate = float(
+                explainer.expected_value[0]
+                if isinstance(explainer.expected_value, (list, np.ndarray))
+                else explainer.expected_value
+            )
+
+            vals = shap_values[0]
+            raw_influences = {
+                col: float(val) for col, val in zip(self.feature_columns, vals)
+            }
+
+            # 3. Vertalen naar begrijpelijke tekst
+            # Omdat de output 'graden per minuut' is, is het lastig te interpreteren voor een leek.
+            # We vertalen het naar: "Versnelt" of "Vertraagt" de opwarming.
+
+            influences = {
+                "Basis Snelheid": f"{base_rate * 60:.2f}°C/uur",  # Omrekenen naar graden per uur is leesbaarder
+            }
+
+            # Helper om impact te formatteren
+            def format_impact(val, name):
+                if abs(val) < 0.0001:
+                    return  # Te klein, negeren
+
+                # Positieve shap = Snellere opwarming = Kortere tijd
+                # Negatieve shap = Tragere opwarming = Langere tijd
+                effect = "Versnelt" if val > 0 else "Vertraagt"
+
+                # We kunnen de impact ook uitdrukken in % tov de basis
+                pct = (val / base_rate) * 100 if base_rate != 0 else 0
+                return f"{effect} ({pct:+.0f}%)"
+
+            # 4. De belangrijkste factoren
+
+            # Starttemperatuur (Is de vloer al warm?)
+            imp = format_impact(raw_influences.get("start_temp", 0), "Starttemperatuur")
+            if imp:
+                influences["Starttemperatuur"] = imp
+
+            # Buitentemperatuur (Isolatieverlies)
+            imp = format_impact(
+                raw_influences.get("avg_outside_temp", 0), "Buitentemperatuur"
+            )
+            if imp:
+                influences["Buitentemperatuur"] = imp
+
+            # Aanvoertemperatuur (Hoe heet stookt de WP?)
+            imp = format_impact(
+                raw_influences.get("avg_supply_temp", 0), "Aanvoertemperatuur"
+            )
+            if imp:
+                influences["Aanvoertemperatuur"] = imp
+
+            # Zon
+            imp = format_impact(raw_influences.get("avg_solar", 0), "Zon")
+            if imp:
+                influences["Zon"] = imp
+
+            return influences
+
+        except Exception as e:
+            logger.error(f"ThermalAI: SHAP berekening mislukt: {e}")
+            return {}

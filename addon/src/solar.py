@@ -539,7 +539,7 @@ class SolarAI:
             },
         )
 
-    def _get_readable_influences(self, df_row: pd.DataFrame) -> dict:
+    def get_influence_factors(self, df_row: pd.DataFrame) -> dict:
         """
         Gebruikt SHAP om uit te leggen hoe het AI model tot de 'ai_power_raw' komt,
         en voegt daarna de Bias-correctie toe voor het totaalplaatje.
