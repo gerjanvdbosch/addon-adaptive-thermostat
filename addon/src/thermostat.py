@@ -312,7 +312,12 @@ class ThermostatAI:
             # 3. Groepeer en converteer naar standaard floats
             # We gebruiken float() om numpy.float64 om te zetten naar een native python float
             readable_influences = {
-                "Tijd/Dag": float(
+                "Basiswaarde": float(
+                    explainer.expected_value[0]
+                    if isinstance(explainer.expected_value, (list, np.ndarray))
+                    else explainer.expected_value
+                ),
+                "Tijd/dag": float(
                     influences.get("hour_sin", 0)
                     + influences.get("hour_cos", 0)
                     + influences.get("day_sin", 0)
@@ -320,12 +325,18 @@ class ThermostatAI:
                 ),
                 "Aanwezigheid": float(influences.get("home_presence", 0)),
                 "Buitentemperatuur": float(influences.get("outside_temp", 0)),
+                "Minimale temperatuur": float(influences.get("min_temp", 0)),
+                "Maximale temperatuur": float(influences.get("max_temp", 0)),
                 "Zonkracht": float(influences.get("solar_kwh", 0)),
-                "Huidige Temp": float(influences.get("current_temp", 0)),
-                "Basiswaarde": float(
-                    explainer.expected_value[0]
-                    if isinstance(explainer.expected_value, (list, np.ndarray))
-                    else explainer.expected_value
+                "Huidige temperatuur": float(influences.get("current_temp", 0)),
+                "Huidige setpoint": float(influences.get("current_setpoint", 0)),
+                "Temperatuurverandering": float(influences.get("temp_change", 0)),
+                "Thermostaatvraag": float(influences.get("heat_demand", 0)),
+                "HVAC modus": float(influences.get("hvac_mode", 0)),
+                "Windsnelheid": float(influences.get("wind_speed", 0)),
+                "Windrichting": float(
+                    influences.get("wind_dir_sin", 0)
+                    + influences.get("wind_dir_cos", 0)
                 ),
             }
 

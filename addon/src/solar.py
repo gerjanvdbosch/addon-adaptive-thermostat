@@ -529,7 +529,11 @@ class SolarAI:
             {
                 "status": res_str,
                 "reason": reason,
-                "planned_start": p_time,
+                "planned_start": (
+                    advice.get("plan_start").isoformat()
+                    if advice.get("plan_start")
+                    else None
+                ),
                 "bias_factor": round(self.smoothed_bias, 2),
                 "last_update": now.isoformat(),
             },
