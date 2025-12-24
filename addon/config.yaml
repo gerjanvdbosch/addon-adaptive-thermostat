@@ -13,7 +13,7 @@ init: false
 homeassistant_api: true
 options:
   thermostat_entity: input_number.adaptive_thermostat_setpoint
-  solar_entity: input_text.zonnepanelen_beste_moment
+  solar_entity: adaptive_thermostat_solar
   presence_entity: input_number.kans_thuis_aanwezig
   thermal_entity: input_number.warmtepomp_voorverwarming_tijd_minuten
   thermostat_interval_seconds: 60
