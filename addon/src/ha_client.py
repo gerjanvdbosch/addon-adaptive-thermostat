@@ -47,7 +47,9 @@ class HAClient:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to set state for {entity_id}: {e}")
+            logger.error(
+                f"Failed to set state for {entity_id} with payload {payload}: {e}"
+            )
             return False
 
     def _call_service(self, domain, service, data):
