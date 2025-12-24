@@ -37,8 +37,7 @@ class HAClient:
             attributes = {}
 
         url = f"{self.url}/states/{entity_id}"
-
-        payload = {"state": state, "attributes": attributes}
+        payload = {"friendly_name": entity_id, "state": state, "attributes": attributes}
 
         try:
             r = requests.post(url, json=payload, headers=self.headers)
@@ -70,13 +69,12 @@ class HAClient:
 
     def set_setpoint(self, value):
         setpoint = safe_round(float(value))
-        entity = self.opts.get("thermostat_entity")
-        service_data = {"entity_id": entity, "value": safe_round(float(value))}
+        entity_id = self.opts.get("thermostat_entity")
+        service_data = {"entity_id": entity_id, "value": safe_round(float(value))}
         self._call_service("input_number", "set_value", service_data)
         logger.debug("Applied setpoint: %.1f", setpoint)
 
     def set_solar_prediction(self, value, attrs):
-        entity = self.opts.get("solar_entity")
-        service_data = {"entity_id": entity, "value": value}
-        self._call_service("input_text", "set_value", service_data)
+        entity_id = self.opts.get("solar_entity")
+        self._set_state(entity_id, value, attrs)
         logger.debug(f"Solar prediction updated: {value} with attrs {attrs}")

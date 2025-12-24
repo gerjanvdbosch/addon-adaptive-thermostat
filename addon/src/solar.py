@@ -542,8 +542,8 @@ class SolarAI:
         """
         if self.is_fitted or self.model is None:
             return {
-                "Solcast": f"{df_row.iloc[0].get('pv_estimate', 0):.2f}",
-                "Bias": f"{self.smoothed_bias:.2f}",
+                "Solcast": df_row.iloc[0].get("pv_estimate", 0),
+                "Bias": self.smoothed_bias,
             }
 
         try:

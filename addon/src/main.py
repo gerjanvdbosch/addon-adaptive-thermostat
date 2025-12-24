@@ -33,8 +33,6 @@ def _load_options():
         "solar_entity": os.getenv("SOLAR_ENTITY"),
         "presence_entity": os.getenv("PRESENCE_ENTITY"),
         "thermal_entity": os.getenv("THERMAL_ENTITY"),
-        "comfort_temp": float(os.getenv("COMFORT_TEMP", 20)),
-        "eco_temp": float(os.getenv("ECO_TEMP", 19)),
         "thermostat_interval_seconds": int(
             os.getenv("THERMOSTAT_INTERVAL_SECONDS", 60)
         ),

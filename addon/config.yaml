@@ -2,6 +2,7 @@ name: "Adaptive Thermostat"
 version: "0.4"
 slug: "adaptive_thermostat"
 description: "A scikit-learn based adaptive thermostat addon for Home Assistant"
+webui: "http://[HOST]:[PORT:8000]/status"
 arch:
   - armhf
   - armv7
@@ -15,8 +16,6 @@ options:
   solar_entity: input_text.zonnepanelen_beste_moment
   presence_entity: input_number.kans_thuis_aanwezig
   thermal_entity: input_number.warmtepomp_voorverwarming_tijd_minuten
-  comfort_temp: 20.0
-  eco_temp: 19.0
   thermostat_interval_seconds: 60
   solar_interval_seconds: 15
   cooldown_hours: 2.0
@@ -46,8 +45,6 @@ schema:
   solar_entity: "str?"
   presence_entity: "str?"
   thermal_entity: "str?"
-  comfort_temp: "float?"
-  eco_temp: "float?"
   thermostat_interval_seconds: "int?"
   solar_interval_seconds: "int?"
   cooldown_hours: "float?"

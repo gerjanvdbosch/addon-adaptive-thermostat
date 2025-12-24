@@ -270,7 +270,7 @@ class ThermalAI:
         sup = safe_float(features.get("supply_temp"))
 
         if not sup or sup < 20:
-            sup = 24.0
+            sup = 25.0
         if curr is None:
             return None
         if out is None:
