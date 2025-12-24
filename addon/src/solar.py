@@ -525,7 +525,7 @@ class SolarAI:
         )
 
         self.ha.set_solar_prediction(
-            f"[{res_str}] {reason}",
+            f"{res_str}: {reason}",
             {
                 "status": res_str,
                 "reason": reason,

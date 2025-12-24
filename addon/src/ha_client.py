@@ -32,9 +32,12 @@ class HAClient:
             logger.exception("Error getting state %s: %s", entity_id, e)
             return None
 
-    def _set_state(self, entity_id, state, attributes=None):
+    def _set_state(self, entity_id, state, attributes=None, friendly_name=None):
         if attributes is None:
             attributes = {}
+
+        if friendly_name:
+            attributes["friendly_name"] = friendly_name
 
         url = f"{self.url}/states/{entity_id}"
         payload = {"state": state, "attributes": attributes}
@@ -78,5 +81,5 @@ class HAClient:
 
     def set_solar_prediction(self, value, attrs):
         entity_id = self.opts.get("solar_entity")
-        self._set_state(entity_id, value, attrs)
+        self._set_state(entity_id, value, attrs, "Adaptive Solar Prediction")
         logger.debug(f"Solar prediction updated: {value} with attrs {attrs}")
