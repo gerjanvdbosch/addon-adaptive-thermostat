@@ -16,7 +16,7 @@ from sklearn.metrics import mean_absolute_error
 from db import fetch_training_setpoints_df, insert_setpoint
 from collector import Collector
 from ha_client import HAClient
-from utils import safe_round, safe_float, add_cyclic_time_features
+from utils import safe_float, add_cyclic_time_features, round_half
 
 logger = logging.getLogger(__name__)
 
@@ -73,15 +73,14 @@ class ThermostatAI:
         self.stability_start_ts = None
         self.last_ai_action_ts = None
 
-        self.prediction_buffer = deque(
-            maxlen=5
-        )  # Buffer voor de laatste 5 ticks (~2.5 min)
+        # Buffer voor de laatste 10 ticks
+        self.prediction_buffer = deque(maxlen=10)
 
         # Initialisatie
         self._load_model()
         sp = self.ha.get_setpoint()
         if sp is not None:
-            self.last_known_setpoint = safe_round(sp)
+            self.last_known_setpoint = round_half(sp)
 
     def _load_model(self):
         if self.model_path.exists():
@@ -170,7 +169,7 @@ class ThermostatAI:
         """
         Wordt aangeroepen door de Coordinator wanneer de AI/Systeem de setpoint verandert.
         """
-        self.last_known_setpoint = safe_round(new_setpoint)
+        self.last_known_setpoint = round_half(new_setpoint)
         self.stability_start_ts = None
         self.last_ai_action_ts = datetime.now()
 
@@ -179,7 +178,7 @@ class ThermostatAI:
         Checkt op gebruikersinteractie en stabiliteit.
         """
         ts = datetime.now()
-        curr_sp_rounded = safe_round(current_sp)
+        curr_sp_rounded = round_half(current_sp)
 
         if self.last_known_setpoint is None:
             self.last_known_setpoint = curr_sp_rounded
@@ -199,7 +198,7 @@ class ThermostatAI:
             if not is_recent_ai:
                 prev_sp = self.last_known_setpoint
                 logger.info(
-                    f"User Override Gedetecteerd: {prev_sp} -> {curr_sp_rounded}."
+                    f"ThermostatAI: User Override gedetecteerd: {prev_sp} -> {curr_sp_rounded}."
                 )
 
                 feats = self.collector.features_from_raw(
