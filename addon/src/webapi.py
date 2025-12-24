@@ -131,6 +131,11 @@ def get_current_status():
         cur_sp = features.get("current_setpoint", 0.0)
         cur_temp = features.get("current_temp", 0.0)
 
+        # Haal de invloeden op
+        influences = GLOBAL_COORDINATOR.thermostat_ai.get_influence_factors(
+            features, cur_sp
+        )
+
         # 2. Vraag Thermostaat voorspelling
         rec_sp = GLOBAL_COORDINATOR.thermostat_ai.get_recommended_setpoint(
             features, cur_sp
@@ -155,8 +160,7 @@ def get_current_status():
                 "current_setpoint": cur_sp,
                 "recommended_setpoint": round(rec_sp, 2),
                 "delta": round(rec_sp - cur_sp, 2),
-                "cooldown_active": GLOBAL_COORDINATOR.thermostat_ai.last_ai_action_ts
-                is not None,
+                "explanation": influences,
             },
             "solar": {
                 "action": solar_rec.get("action"),

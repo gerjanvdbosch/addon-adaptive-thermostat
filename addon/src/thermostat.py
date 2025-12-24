@@ -2,6 +2,8 @@ import logging
 import joblib
 import time
 import pandas as pd
+import shap
+
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -282,3 +284,42 @@ class ThermostatAI:
         max_sp = float(self.opts.get("max_setpoint", 25.0))
 
         return max(min(smoothed_rec, max_sp), min_sp)
+
+    def get_influence_factors(self, features, current_sp):
+        """
+        Berekent de invloed van elke feature op de huidige voorspelling.
+        Returns een dictionary met {feature_naam: invloed_in_graden}.
+        """
+        if not self.is_fitted or self.model is None:
+            return {}
+
+        try:
+            # 1. Bereid de data voor zoals bij een normale predictie
+            df_input = pd.DataFrame([features]).reindex(columns=self.feature_columns)
+            df_input = df_input.apply(pd.to_numeric, errors="coerce")
+
+            # 2. Gebruik SHAP TreeExplainer (geoptimaliseerd voor Gradient Boosting)
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(df_input)
+
+            # 3. Koppel de waarden aan de kolomnamen
+            # shap_values[0] bevat de bijdrage van elke kolom voor deze ene rij
+            influences = dict(zip(self.feature_columns, shap_values[0]))
+
+            # 4. Optioneel: Groepeer kleine features of maak ze leesbaar
+            readable_influences = {
+                "Tijd/Dag": influences.get("hour_sin", 0)
+                + influences.get("hour_cos", 0)
+                + influences.get("day_sin", 0)
+                + influences.get("day_cos", 0),
+                "Aanwezigheid": influences.get("home_presence", 0),
+                "Buitentemperatuur": influences.get("outside_temp", 0),
+                "Zonkracht": influences.get("solar_kwh", 0),
+                "Huidige Temp": influences.get("current_temp", 0),
+                "Basiswaarde": explainer.expected_value,  # De gemiddelde delta van het model
+            }
+
+            return readable_influences
+        except Exception as e:
+            logger.error(f"SHAP berekening mislukt: {e}")
+            return {}
