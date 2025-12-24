@@ -24,7 +24,7 @@ options:
   full_retrain_time: "03:00"
   min_setpoint: 15.0
   max_setpoint: 25.0
-  min_change_threshold: 0.5
+  min_change_threshold: 0.4
   buffer_days: 730
   log_level: info
   sensors:

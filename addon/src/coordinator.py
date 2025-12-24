@@ -52,7 +52,7 @@ class ClimateCoordinator:
             "min_safety_temp": float(self.opts.get("min_setpoint", 15.0)),
             "comfort_hysteresis": float(self.opts.get("comfort_hysteresis", 0.5)),
             "min_off_min": int(self.opts.get("min_off_minutes", 30)),
-            "deadband": float(self.opts.get("min_change_threshold", 0.5)),
+            "deadband": float(self.opts.get("min_change_threshold", 0.4)),
         }
 
         self.last_switch_time = datetime.now() - timedelta(hours=24)
@@ -174,24 +174,12 @@ class ClimateCoordinator:
         # --- COMFORT (THUIS) ---
         if state == HouseState.COMFORT:
             if context.solar_excess:
-                return base_temp + float(self.opts.get("solar_boost_delta", 1.0))
+                boost_temp = base_temp + float(self.opts.get("solar_boost_delta", 1.0))
+                logger.info(
+                    f"Coordinator: Comfort + Zonneboost modus. Doel {boost_temp:.1f}C."
+                )
+                return boost_temp
 
-            # Hysteresis bij opwarmen
-            start_threshold = base_temp - self.settings["comfort_hysteresis"]
-            if not context.is_compressor_active:
-                if (
-                    context.current_temp is not None
-                    and context.current_temp > start_threshold
-                ):
-                    if context.current_setpoint < context.current_temp:
-                        logger.info(
-                            f"Coordinator: Hysteresis actief. Huidig {context.current_temp:.1f}C > Start {start_threshold:.1f}C. Behoud setpoint {context.current_setpoint}C."
-                        )
-                        return context.current_setpoint
-                    logger.info(
-                        f"Coordinator: Hysteresis actief. Huidig {context.current_temp:.1f}C > Start {start_threshold:.1f}C. Zet naar start {start_threshold:.1f}C."
-                    )
-                    return start_threshold
             logger.info(f"Coordinator: Comfort modus. Doel {base_temp:.1f}C.")
             return base_temp
 
@@ -201,7 +189,7 @@ class ClimateCoordinator:
             )
             return base_temp if context.preheat_prob >= 0.8 else base_temp - 0.5
 
-        # Eco stand gebruikt ook AI advies
+        logger.info(f"Coordinator: Eco modus. Doel {base_temp:.1f}C.")
         return base_temp
 
     def _execute_safe_transition(
