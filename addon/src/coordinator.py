@@ -52,7 +52,7 @@ class ClimateCoordinator:
             "min_safety_temp": float(self.opts.get("min_setpoint", 15.0)),
             "comfort_hysteresis": float(self.opts.get("comfort_hysteresis", 0.5)),
             "min_off_min": int(self.opts.get("min_off_minutes", 30)),
-            "deadband": float(self.opts.get("min_change_threshold", 0.4)),
+            "deadband": float(self.opts.get("min_change_threshold", 0.5)),
         }
 
         self.last_switch_time = datetime.now() - timedelta(hours=24)

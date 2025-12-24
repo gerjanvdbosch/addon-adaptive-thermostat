@@ -198,7 +198,7 @@ def get_current_status():
                 "reason": solar_rec.get("reason"),
                 "planned_start": solar_rec.get("plan_start"),
                 "bias": round(solar_ai.smoothed_bias, 2),
-                "influences": solar_influences,  # De nieuwe feature!
+                "explanation": solar_influences,
             },
             "presence": {
                 "is_home": safe_bool(features.get("home_presence")),

@@ -2,6 +2,8 @@ import logging
 import joblib
 import numpy as np
 import pandas as pd
+import shap
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections import deque
@@ -535,46 +537,94 @@ class SolarAI:
 
     def _get_readable_influences(self, df_row: pd.DataFrame) -> dict:
         """
-        Vertaalt de cryptische feature columns naar leesbare info voor de gebruiker.
-        Wordt gebruikt voor attributen in Home Assistant.
+        Gebruikt SHAP om uit te leggen hoe het AI model tot de 'ai_power_raw' komt,
+        en voegt daarna de Bias-correctie toe voor het totaalplaatje.
         """
-        if df_row.empty:
-            return {}
+        if self.is_fitted or self.model is None:
+            return {
+                "Solcast": f"{df_row.iloc[0].get('pv_estimate', 0):.2f}",
+                "Bias": f"{self.smoothed_bias:.2f}",
+            }
 
-        row = df_row.iloc[0]
-        influences = {}
+        try:
+            # 1. Data voorbereiden (zorg dat kolommen exact kloppen met training)
+            X = df_row.reindex(columns=self.feature_columns)
+            X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
 
-        # 1. Solcast Basis (De belangrijkste input)
-        if "pv_estimate" in self.feature_columns:
-            val = row.get("pv_estimate", 0.0)
-            influences["Basis Forecast"] = f"{val:.2f} kW"
+            # 2. SHAP Berekening (TreeExplainer)
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
 
-        # 2. Onzekerheid (Cloud Spread)
-        # Dit geeft aan hoe zeker Solcast is. Groot verschil = wisselvallig weer.
-        if "uncertainty" in self.feature_columns:
-            unc = row.get("uncertainty", 0.0)
-            # Label geven aan de onzekerheid
-            if unc < 0.2:
-                label = "Laag (Zeker)"
-            elif unc < 0.6:
-                label = "Gemiddeld"
-            else:
-                label = "Hoog (Wisselvallig)"
-            influences["Onzekerheid"] = f"{label} ({unc:.2f} kW)"
+            # Base value = wat het model gemiddeld voorspelt zonder input
+            base_value = float(
+                explainer.expected_value[0]
+                if isinstance(explainer.expected_value, (list, np.ndarray))
+                else explainer.expected_value
+            )
 
-        # 3. Context (Tijd & Seizoen)
-        # We gaan geen sin/cos waarden tonen, dat zegt niemand iets.
-        # We geven aan dat deze meewegen in het model.
-        if "hour_sin" in self.feature_columns:
-            # We kunnen hier eventueel het uur terugrekenen, maar 'Time Context' is vaak genoeg
-            influences["Model Context"] = "Tijd & Seizoen meegewogen"
+            # Waarden ophalen voor de eerste (en enige) rij
+            vals = shap_values[0]
+            raw_influences = {
+                col: float(val) for col, val in zip(self.feature_columns, vals)
+            }
 
-        # 4. De AI Bias (Jouw lokale correctie)
-        # Dit is geen input feature, maar wel cruciaal voor het resultaat
-        bias_pct = (self.smoothed_bias - 1.0) * 100
-        direction = "+" if bias_pct > 0 else ""
-        influences["AI Correctie"] = (
-            f"{self.smoothed_bias:.2f} ({direction}{bias_pct:.0f}%)"
-        )
+            # 3. Groeperen van invloeden
+            # We tellen de shap-values van gerelateerde features bij elkaar op
 
-        return influences
+            # A. Solcast Basis (De directe voorspelling)
+            solcast_impact = raw_influences.get("pv_estimate", 0)
+
+            # B. Spreiding & Onzekerheid (P10, P90, Uncertainty)
+            # Als deze negatief zijn, straft het model onzekere voorspellingen af
+            uncertainty_impact = (
+                raw_influences.get("pv_estimate10", 0)
+                + raw_influences.get("pv_estimate90", 0)
+                + raw_influences.get("uncertainty", 0)
+            )
+
+            # C. Tijd & Seizoen (Correcties voor zonnestand die Solcast misschien mist)
+            time_impact = (
+                raw_influences.get("hour_sin", 0)
+                + raw_influences.get("hour_cos", 0)
+                + raw_influences.get("doy_sin", 0)
+                + raw_influences.get("doy_cos", 0)
+            )
+
+            # 4. Resultaten samenstellen
+            influences = {
+                "Model Basis": f"{base_value:.2f}",
+                "Solcast Input": f"{'+' if solcast_impact > 0 else ''}{solcast_impact:.2f}",
+            }
+
+            # Alleen tonen als ze significant zijn (> 50 Watt invloed)
+            threshold = 0.05
+
+            if abs(uncertainty_impact) > threshold:
+                influences["Onzekerheid Correctie"] = (
+                    f"{'+' if uncertainty_impact > 0 else ''}{uncertainty_impact:.2f}"
+                )
+
+            if abs(time_impact) > threshold:
+                influences["Tijd/Seizoen Correctie"] = (
+                    f"{'+' if time_impact > 0 else ''}{time_impact:.2f}"
+                )
+
+            # 5. De Bias Correctie toevoegen (Dit is POST-model, dus geen SHAP)
+            # We berekenen wat de bias in kW doet op dit moment
+            # Prediction tot nu toe:
+            raw_pred = base_value + solcast_impact + uncertainty_impact + time_impact
+            raw_pred = max(0, raw_pred)  # Clip negative
+
+            final_pred_biased = raw_pred * self.smoothed_bias
+            bias_kw_effect = final_pred_biased - raw_pred
+
+            if abs(bias_kw_effect) > 0.01:
+                pct = (self.smoothed_bias - 1.0) * 100
+                influences["Bias Effect"] = (
+                    f"{'+' if bias_kw_effect > 0 else ''}{bias_kw_effect:.2f} ({pct:+.0f}%)"
+                )
+
+            return influences
+
+        except Exception as e:
+            logger.error(f"SolarAI: SHAP berekening mislukt: {e}")

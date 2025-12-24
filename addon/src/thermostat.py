@@ -333,5 +333,5 @@ class ThermostatAI:
             return {k: round(v, 3) for k, v in readable_influences.items()}
 
         except Exception as e:
-            logger.error(f"SHAP berekening mislukt: {e}")
+            logger.error(f"ThermostatAI: SHAP berekening mislukt: {e}")
             return {}
