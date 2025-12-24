@@ -2,6 +2,7 @@ import logging
 import joblib
 import time
 import pandas as pd
+import numpy as np
 import shap
 
 from collections import deque
@@ -293,32 +294,44 @@ class ThermostatAI:
             return {}
 
         try:
-            # 1. Bereid de data voor zoals bij een normale predictie
+            # 1. Bereid de data voor
             df_input = pd.DataFrame([features]).reindex(columns=self.feature_columns)
             df_input = df_input.apply(pd.to_numeric, errors="coerce")
 
-            # 2. Gebruik SHAP TreeExplainer (geoptimaliseerd voor Gradient Boosting)
+            # 2. Gebruik SHAP TreeExplainer
             explainer = shap.TreeExplainer(self.model)
             shap_values = explainer.shap_values(df_input)
 
-            # 3. Koppel de waarden aan de kolomnamen
-            # shap_values[0] bevat de bijdrage van elke kolom voor deze ene rij
-            influences = dict(zip(self.feature_columns, shap_values[0]))
-
-            # 4. Optioneel: Groepeer kleine features of maak ze leesbaar
-            readable_influences = {
-                "Tijd/Dag": influences.get("hour_sin", 0)
-                + influences.get("hour_cos", 0)
-                + influences.get("day_sin", 0)
-                + influences.get("day_cos", 0),
-                "Aanwezigheid": influences.get("home_presence", 0),
-                "Buitentemperatuur": influences.get("outside_temp", 0),
-                "Zonkracht": influences.get("solar_kwh", 0),
-                "Huidige Temp": influences.get("current_temp", 0),
-                "Basiswaarde": explainer.expected_value,  # De gemiddelde delta van het model
+            # shap_values[0] is een numpy array.
+            # We maken een dict en zorgen dat elke waarde een standaard python float is.
+            influences = {
+                col: float(val)
+                for col, val in zip(self.feature_columns, shap_values[0])
             }
 
-            return readable_influences
+            # 3. Groepeer en converteer naar standaard floats
+            # We gebruiken float() om numpy.float64 om te zetten naar een native python float
+            readable_influences = {
+                "Tijd/Dag": float(
+                    influences.get("hour_sin", 0)
+                    + influences.get("hour_cos", 0)
+                    + influences.get("day_sin", 0)
+                    + influences.get("day_cos", 0)
+                ),
+                "Aanwezigheid": float(influences.get("home_presence", 0)),
+                "Buitentemperatuur": float(influences.get("outside_temp", 0)),
+                "Zonkracht": float(influences.get("solar_kwh", 0)),
+                "Huidige Temp": float(influences.get("current_temp", 0)),
+                "Basiswaarde": float(
+                    explainer.expected_value[0]
+                    if isinstance(explainer.expected_value, (list, np.ndarray))
+                    else explainer.expected_value
+                ),
+            }
+
+            # Optioneel: Rond de waarden af voor een schonere API response
+            return {k: round(v, 3) for k, v in readable_influences.items()}
+
         except Exception as e:
             logger.error(f"SHAP berekening mislukt: {e}")
             return {}

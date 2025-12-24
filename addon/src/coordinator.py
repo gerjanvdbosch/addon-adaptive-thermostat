@@ -123,7 +123,9 @@ class ClimateCoordinator:
 
     def _build_context(self, raw, features, cur_sp, hvac_mode) -> ClimateContext:
         is_home = safe_bool(features.get("home_presence", 0))
-        ai_rec = self.thermostat_ai.get_recommended_setpoint(features, cur_sp)
+        ai_rec = round_half(
+            self.thermostat_ai.get_recommended_setpoint(features, cur_sp)
+        )
 
         # Gebruik ai_rec als basis voor de thermal check
         heat_mins = self.thermal_ai.predict_heating_time(ai_rec, features) or 180
