@@ -253,7 +253,7 @@ class ClimateCoordinator:
 
         # --- SOLAR BUFFER (WEG) ---
         elif state == HouseState.SOLAR_BOOST:
-            return self.settings["eco_temp"] + 2.0
+            return self.settings["comfort_temp"] + 0.5
 
         return self.settings["eco_temp"]
 
@@ -264,6 +264,9 @@ class ClimateCoordinator:
 
         # 1. Deadband Check
         if abs(target_temp - current_sp) < self.settings["deadband"]:
+            logger.info(
+                f"Coordinator: Geen actie [{state.value}] Doel {target_temp:.1f}C binnen deadband van {self.settings['deadband']}C."
+            )
             return
 
         # 2. Bepaal actie voor hardware check
@@ -303,7 +306,7 @@ class ClimateCoordinator:
                 return False, f"Cyclus actief ({context.hvac_mode})"
 
         # 2. Besparing altijd toestaan
-        if target_sp < (context.current_setpoint - 0.1):
+        if target_sp < context.current_setpoint:
             return True, "Besparing"
 
         # 3. Hardware rusttijd na uitschakelen
