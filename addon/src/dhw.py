@@ -11,7 +11,7 @@ from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 # Project Imports
-from db import fetch_sensor_history  # We moeten ruwe sensor data kunnen ophalen
+from db import fetch_sensor_history, upsert_dhw_sensor_data
 from utils import add_cyclic_time_features, safe_float
 
 logger = logging.getLogger(__name__)
@@ -114,10 +114,16 @@ class DhwAI:
             logger.warning("DhwAI: Te weinig data.")
             return
 
-        # 2. Detecteer 'Events' (Snelle daling)
-        # Bereken verschil met vorige meting (resample naar 5 min voor ruisonderdrukking)
+        # 2. FILTER: Negeer data tijdens SWW-run (Destratificatie/Mixing)
+        # Als hvac_mode 'hot_water' is, is een temperatuurdaling GEEN gebruik.
+        # We filteren deze regels eruit.
+        if "hvac_mode" in df.columns:
+            # Behoud alleen rijen waar de WP NIET bezig is met warm water
+            df = df[df["hvac_mode"] != "hot_water"]
+
+        # 3. Detecteer Events (Nu op schone data)
         df = df.set_index("timestamp").resample("5min").mean().dropna()
-        df["diff"] = df["value"].diff() * -1  # Positief maken bij daling
+        df["diff"] = df["value"].diff() * -1
 
         # Als temp meer dan X graden zakt in 5 min, is het gebruik
         # We zetten 'is_usage' op 1.
@@ -214,9 +220,13 @@ class DhwAI:
             "reason": "Geen vraag, geen zon",
         }
 
-    def run_cycle(self, solar_advice):
+    def run_cycle(self, solar_advice, current_hvac_mode):
         if self.sww_top is None:
             return
+
+        upsert_dhw_sensor_data(
+            sensor_id="top", value=self.sww_top, hvac_mode=current_hvac_mode
+        )
 
         # 2. Wat zegt SolarAI op dit moment?
         solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.

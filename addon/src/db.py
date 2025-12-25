@@ -102,6 +102,7 @@ class DhwRecord(Base):
     timestamp = Column(DateTime, primary_key=True)
     sensor_id = Column(String, primary_key=True)
     value = Column(Float)
+    hvac_mode = Column(String, nullable=True)
 
 
 Base.metadata.create_all(engine)
@@ -232,7 +233,9 @@ def fetch_presence_history(days: int = 60):
 # ==============================================================================
 
 
-def upsert_dhw_sensor_data(sensor_id: str, value: float, timestamp=None):
+def upsert_dhw_sensor_data(
+    sensor_id: str, value: float, hvac_mode: str, timestamp=None
+):
     """
     Slaat een DHW sensorwaarde op in de dhw_history tabel.
     Wordt gebruikt door DhwAI.
@@ -246,7 +249,9 @@ def upsert_dhw_sensor_data(sensor_id: str, value: float, timestamp=None):
     s: SASession = Session()
     try:
         # Merge doet een insert of update op basis van Primary Key (Timestamp + SensorID)
-        rec = DhwRecord(timestamp=timestamp, sensor_id=sensor_id, value=value)
+        rec = DhwRecord(
+            timestamp=timestamp, sensor_id=sensor_id, value=value, hvac_mode=hvac_mode
+        )
         s.merge(rec)
         s.commit()
     except Exception:
