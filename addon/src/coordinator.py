@@ -10,6 +10,7 @@ from solar import SolarAI
 from presence import PresenceAI
 from thermal import ThermalAI
 from collector import Collector
+from dhw import DhwAI
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class ClimateCoordinator:
         self.solar_ai = SolarAI(self.ha, opts)
         self.presence_ai = PresenceAI(opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
+        self.dhw_ai = DhwAI(opts)
 
         # Configuraties
         self.settings = {
@@ -130,6 +132,7 @@ class ClimateCoordinator:
             self.thermal_ai,
             self.solar_ai,
             self.thermostat_ai,
+            self.dhw_ai,
         ]:
             try:
                 agent.train()

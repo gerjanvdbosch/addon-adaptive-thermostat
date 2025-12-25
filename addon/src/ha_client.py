@@ -83,3 +83,10 @@ class HAClient:
         entity_id = self.opts.get("solar_entity")
         self._set_state(entity_id, value, attrs, "Adaptive Solar Prediction")
         logger.debug(f"Solar prediction updated: {value} with attrs {attrs}")
+
+    def set_dhw_setpoint(self, value):
+        setpoint = safe_round(float(value))
+        entity_id = self.opts.get("dhw_entity")
+        service_data = {"entity_id": entity_id, "value": setpoint}
+        self._call_service("input_number", "set_value", service_data)
+        logger.debug("Applied DHW setpoint: %.1f", setpoint)
