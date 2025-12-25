@@ -193,6 +193,17 @@ def get_current_status():
             target_time
         )
 
+        sww_temp = features.get("current_sww_temp", 45.0)
+
+        dhw_rec = GLOBAL_COORDINATOR.dhw_ai.get_recommendation(
+            sww_temp, solar_rec.get("action")
+        )
+
+        # Vraag invloeden op (voor het lookahead moment)
+        lookahead = GLOBAL_COORDINATOR.dhw_ai.lookahead_minutes
+        target_ts = datetime.now() + timedelta(minutes=lookahead)
+        dhw_influences = GLOBAL_COORDINATOR.dhw_ai.get_influence_factors(target_ts)
+
         return {
             "thermostat": {
                 "current_setpoint": cur_sp,
@@ -218,6 +229,13 @@ def get_current_status():
                 "current_temp": cur_temp,
                 "predicted_minutes_to_reach_target": round(heating_mins or 0),
                 "explanation": thermal_influences,
+            },
+            "dhw": {
+                "current_temp": sww_temp,
+                "target_temp": dhw_rec.get("target"),
+                "action": dhw_rec.get("action"),
+                "reason": dhw_rec.get("reason"),
+                "explanation": dhw_influences,
             },
             "system": {
                 "hvac_mode": GLOBAL_COORDINATOR._get_hvac_mode(raw_data),

@@ -1,6 +1,7 @@
 import logging
 import joblib
 import pandas as pd
+import shap
 
 from enum import Enum
 from ha_client import HAClient
@@ -254,3 +255,64 @@ class DhwAI:
 
         # Stuur commando naar HA
         self.ha.set_dhw_setpoint(target)
+
+    def get_influence_factors(self, target_time):
+        """
+        Gebruikt SHAP om uit te leggen WAAROM het model denkt dat er water nodig is.
+        """
+        if not self.is_fitted or not self.model:
+            return {"Status": "Model nog niet getraind"}
+
+        try:
+            # 1. Data voorbereiden voor target_time
+            df = pd.DataFrame([{"timestamp": target_time}])
+            df = add_cyclic_time_features(df)
+            X = df.reindex(columns=self.feature_columns).apply(
+                pd.to_numeric, errors="coerce"
+            )
+
+            # 2. SHAP Berekening
+            explainer = shap.TreeExplainer(self.model)
+            shap_values = explainer.shap_values(X)
+
+            # Binary classification handling (we willen de waarden voor klasse 1 = Usage)
+            if isinstance(shap_values, list):
+                vals = shap_values[1][0]
+            elif len(shap_values.shape) == 2:
+                vals = shap_values[0]  # Soms is output (1, features)
+            else:
+                vals = shap_values
+
+            raw_influences = {
+                col: float(val) for col, val in zip(self.feature_columns, vals)
+            }
+
+            # 3. Vertalen naar mensentaal
+            influences = {}
+
+            def format_impact(val):
+                if abs(val) < 0.1:
+                    return None  # Ruis filteren
+                return "Verhoogt kans" if val > 0 else "Verlaagt kans"
+
+            # Tijdstip (Ochtendspits / Avondritueel)
+            time_impact = raw_influences.get("hour_sin", 0) + raw_influences.get(
+                "hour_cos", 0
+            )
+            imp = format_impact(time_impact)
+            if imp:
+                influences["Tijdstip"] = f"{imp} ({time_impact:+.2f})"
+
+            # Weekdag (Weekend vs Werkdag)
+            day_impact = raw_influences.get("day_sin", 0) + raw_influences.get(
+                "day_cos", 0
+            )
+            imp = format_impact(day_impact)
+            if imp:
+                influences["Weekdag"] = f"{imp} ({day_impact:+.2f})"
+
+            return influences
+
+        except Exception as e:
+            logger.error(f"DhwAI SHAP mislukt: {e}")
+            return {}
