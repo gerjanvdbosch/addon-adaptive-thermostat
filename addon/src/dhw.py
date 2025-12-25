@@ -62,10 +62,8 @@ class DhwAI:
         self.usage_detection_threshold = 0.4
 
         # Hoeveel minuten van tevoren moet het water warm zijn?
-        self.lookahead_minutes = int(self.opts.get("dhw_lookahead_minutes", 60))
-        self.confidence_threshold = (
-            0.65  # 65% zekerheid nodig om gas/stroom te verbruiken
-        )
+        self.lookahead_minutes = int(self.opts.get("dhw_lookahead_minutes", 90))
+        self.confidence_threshold = 0.65  # 65% zekerheid nodig om stroom te verbruiken
 
         self.feature_columns = [
             "hour_sin",
