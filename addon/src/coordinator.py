@@ -49,13 +49,31 @@ class ClimateCoordinator:
 
         # Configuraties
         self.settings = {
-            "min_safety_temp": float(self.opts.get("min_setpoint", 15.0)),
+            "min_safety_temp": float(self.opts.get("min_setpoint")),
+            "max_safety_temp": float(self.opts.get("max_setpoint")),
             "comfort_hysteresis": float(self.opts.get("comfort_hysteresis", 0.5)),
             "min_off_min": int(self.opts.get("min_off_minutes", 30)),
             "deadband": float(self.opts.get("min_change_threshold", 0.5)),
         }
 
+        self.p1_power = self.opts.get("sensor_p1", "sensor.p1_meter_power")
+
+        # Drempels (in kW)
+        self.boost_delta = float(self.opts.get("solar_boost_delta", 0.5))
+        self.boost_on_kw = float(self.opts.get("solar_boost_on_kw", 1.0))
+        self.boost_off_kw = float(self.opts.get("solar_boost_off_kw", 0.1))
+
+        # Hoe lang mag de zon weg zijn voordat we stoppen?
+        self.boost_off_delay_mins = int(
+            self.opts.get("solar_boost_off_delay_minutes", 30)
+        )
+
+        # State tracking
         self.last_switch_time = datetime.now() - timedelta(hours=24)
+        self.is_boosting = False
+
+        # Tracking voor de wolken buffer
+        self.boost_low_power_start_ts = None
 
         logger.info("Coordinator: Klimaatsysteem gestart.")
 
@@ -83,6 +101,8 @@ class ClimateCoordinator:
             if self.thermostat_ai.update_learning_state(raw, cur_sp):
                 logger.info(f"Coordinator: Gebruikers-override actief ({cur_sp}).")
                 self.last_switch_time = datetime.now()
+                self.is_boosting = False
+                self.boost_low_power_start_ts = None
                 return
 
             # 4. Status Bepalen
@@ -121,6 +141,70 @@ class ClimateCoordinator:
     # INTERNE LOGICA
     # ==============================================================================
 
+    def _check_p1_excess(self):
+        """
+        Bepaalt op basis van de P1 meter of er OVERTOLLIGE zonne-energie is.
+        Bevat een 'Wolken-buffer' om te voorkomen dat hij direct uitvalt.
+        """
+        p1_state = self.ha.get_state(self.p1_power)
+        # Conversie naar kW en injectie positief maken
+        val = float(p1_state)
+        if abs(val) > 100:
+            val = val / 1000.0  # Watt naar kW correctie
+        injection = -val
+
+        now = datetime.now()
+
+        # SCENARIO 1: We zijn aan het boosten
+        if self.is_boosting:
+            # Is er nog genoeg zon?
+            if injection >= self.boost_off_kw:
+                # Ja, zon is er (weer). Reset eventuele wolken-timer.
+                if self.boost_low_power_start_ts is not None:
+                    logger.info(
+                        f"Coordinator: Zon terug ({injection:.2f}kW). Wolken-timer gereset."
+                    )
+                    self.boost_low_power_start_ts = None
+                return True  # Blijf boosten
+
+            # Nee, vermogen is gezakt (Wolk of verbruik)
+            else:
+                if self.boost_low_power_start_ts is None:
+                    # Dit is de eerste keer dat het zakt. Start de timer.
+                    self.boost_low_power_start_ts = now
+                    logger.info(
+                        f"Coordinator: Vermogen gezakt ({injection:.2f}kW). Wolken-buffer gestart..."
+                    )
+                    return True  # Blijf nog even boosten (buffer)
+
+                # Timer loopt al. Hoe lang?
+                diff_min = (now - self.boost_low_power_start_ts).total_seconds() / 60.0
+
+                if diff_min < self.boost_off_delay_mins:
+                    # We zitten nog in de buffer tijd
+                    return True
+                else:
+                    # Buffer verlopen. Het is echt bewolkt. STOPPEN.
+                    logger.info(
+                        f"Coordinator: Buffer verlopen ({diff_min:.1f}m). Stop boost."
+                    )
+                    self.is_boosting = False
+                    self.boost_low_power_start_ts = None
+                    return False
+
+        # SCENARIO 2: We zijn NIET aan het boosten
+        else:
+            # Starten vereist veel vermogen (geen buffer nodig bij start, wel hysteresis)
+            if injection > self.boost_on_kw:
+                logger.info(
+                    f"Coordinator: Overschot gedetecteerd: {injection:.2f}kW. Start boost."
+                )
+                self.is_boosting = True
+                self.boost_low_power_start_ts = None
+                return True
+
+            return False
+
     def _build_context(self, raw, features, cur_sp, hvac_mode) -> ClimateContext:
         is_home = safe_bool(features.get("home_presence", 0))
         ai_rec = round_half(
@@ -136,8 +220,7 @@ class ClimateCoordinator:
                 dynamic_minutes=heat_mins
             )
 
-        # Solar Status (Placeholder)
-        solar_excess = False
+        solar_excess = self._check_p1_excess()
 
         return ClimateContext(
             current_temp=safe_float(features.get("current_temp")),
@@ -153,12 +236,17 @@ class ClimateCoordinator:
         )
 
     def _determine_house_state(self, context: ClimateContext) -> HouseState:
+        if context.solar_excess:
+            if (
+                context.current_temp is None
+                or context.current_temp <= self.settings["max_safety_temp"]
+            ):  # Max temp beveiliging
+                return HouseState.SOLAR_BOOST
+
         if context.is_home:
             return HouseState.COMFORT
         if context.preheat_needed:
             return HouseState.PREHEAT
-        if context.solar_excess:
-            return HouseState.SOLAR_BOOST
         return HouseState.ECO
 
     def _calculate_target_for_state(
@@ -171,35 +259,28 @@ class ClimateCoordinator:
             else self.settings["min_safety_temp"]
         )
 
-        # --- COMFORT (THUIS) ---
-        if state == HouseState.COMFORT:
-            if context.solar_excess:
-                boost_temp = base_temp + float(self.opts.get("solar_boost_delta", 1.0))
-                logger.info(
-                    f"Coordinator: Comfort + Zonneboost modus. Doel {boost_temp:.1f}C."
-                )
-                return boost_temp
+        if state == HouseState.SOLAR_BOOST:
+            return base_temp + self.boost_delta
 
-            logger.info(f"Coordinator: Comfort modus. Doel {base_temp:.1f}C.")
+        if state == HouseState.COMFORT:
             return base_temp
 
-        elif state == HouseState.PREHEAT:
-            logger.info(
-                f"Coordinator: Voorverwarmen modus. Doel {base_temp:.1f}C. Kans: {context.preheat_prob:.2f}"
-            )
+        if state == HouseState.PREHEAT:
             return base_temp if context.preheat_prob >= 0.8 else base_temp - 0.5
 
-        logger.info(f"Coordinator: Eco modus. Doel {base_temp:.1f}C.")
         return base_temp
 
     def _execute_safe_transition(
         self, target_temp, context: ClimateContext, state: HouseState
     ):
         current_sp = context.current_setpoint
+
         if abs(target_temp - current_sp) < self.settings["deadband"]:
-            logger.info(
-                f"Coordinator: Geen actie [{state.value}] Doel {target_temp:.1f}C binnen deadband van {self.settings['deadband']}C."
-            )
+            if state in [HouseState.SOLAR_BOOST, HouseState.PREHEAT]:
+                if not self.thermostat_ai.learning_blocked:
+                    self.thermostat_ai.notify_system_change(
+                        current_sp, block_learning=True
+                    )
             return
 
         intended_action = "heating" if target_temp > current_sp else "off"
@@ -217,7 +298,11 @@ class ClimateCoordinator:
             f"Coordinator: [{state.value}] Setpoint aanpassen {current_sp} -> {target_temp:.1f}C (Reden: {reason})"
         )
         self.ha.set_setpoint(target_temp)
-        self.thermostat_ai.notify_system_change(target_temp)
+
+        should_block_learning = state in [HouseState.SOLAR_BOOST, HouseState.PREHEAT]
+        self.thermostat_ai.notify_system_change(
+            target_temp, block_learning=should_block_learning
+        )
         self.last_switch_time = datetime.now()
 
     def _is_hardware_safe_with_reason(
@@ -227,37 +312,31 @@ class ClimateCoordinator:
         mins_since_change = (now - self.last_switch_time).total_seconds() / 60.0
         ai_cooldown_mins = float(self.opts.get("cooldown_hours", 2)) * 60
 
-        # REGEL 1: Cyclus Afmaken (Anti-pendel)
-        # Als de warmtepomp draait, niet zomaar stoppen voor kleine AI wijzigingen.
+        # Solar Boost mag cooldown negeren (GRATIS ENERGIE = PAKKEN)
+        if state == HouseState.SOLAR_BOOST and intended_action == "heating":
+            if (
+                not context.is_compressor_active
+                and mins_since_change < self.settings["min_off_min"]
+            ):
+                return False, "Compressor cooldown"
+            return True, "Zonneboost start"
+
         if context.is_compressor_active and target_sp < context.current_setpoint:
             if state != HouseState.ECO and (context.current_setpoint - target_sp) < 2.0:
                 return False, f"Cyclus bezig ({context.hvac_mode})"
 
-        # REGEL 2: AI Cooldown (STRICT)
-        # Als er recent handmatig of door AI is geschakeld, blokkeer AI acties.
         if mins_since_change < ai_cooldown_mins:
-            # NOODREM: Is het in huis écht kouder dan de startdrempel?
-            # Dan mag comfort winnen van de cooldown.
             comfort_threshold = target_sp - self.settings["comfort_hysteresis"]
-
             if (
                 context.current_temp is not None
                 and context.current_temp < comfort_threshold
             ):
-                return True, "Comfort prioriteit (Hysteresis grens)"
+                return True, "Comfort prioriteit"
+            return False, f"In cooldown ({int(ai_cooldown_mins - mins_since_change)}m)"
 
-            # Anders: Blokkeer de AI. Jouw handmatige setting (of de vorige AI stand) blijft staan.
-            return (
-                False,
-                f"In cooldown na wijziging ({int(ai_cooldown_mins - mins_since_change)}m resterend)",
-            )
-
-        # REGEL 3: Besparing
-        # (Alleen bereikbaar als cooldown voorbij is)
-        if target_sp < (context.current_setpoint - 0.05):
+        if target_sp < context.current_setpoint:
             return True, "Energiebesparing"
 
-        # REGEL 4: Hardware rusttijd (Compressor bescherming na UIT gaan)
         if intended_action == "heating" and not context.is_compressor_active:
             if mins_since_change < self.settings["min_off_min"]:
                 return False, "Compressor cooldown"

@@ -73,6 +73,7 @@ class ThermostatAI:
         self.last_known_setpoint = None
         self.stability_start_ts = None
         self.last_ai_action_ts = None
+        self.learning_blocked = False
 
         # Buffer voor de laatste 10 ticks
         self.prediction_buffer = deque(maxlen=10)
@@ -166,13 +167,24 @@ class ThermostatAI:
     # INTERFACE METHODEN VOOR COORDINATOR
     # ==============================================================================
 
-    def notify_system_change(self, new_setpoint):
+    def notify_system_change(self, new_setpoint, block_learning=False):
         """
-        Wordt aangeroepen door de Coordinator wanneer de AI/Systeem de setpoint verandert.
+        Wordt aangeroepen door de Coordinator.
+        block_learning=True zorgt dat deze periode NIET wordt opgeslagen als 'normaal gedrag'.
         """
         self.last_known_setpoint = round_half(new_setpoint)
         self.stability_start_ts = None
         self.last_ai_action_ts = datetime.now()
+
+        # Hier zetten we de 'blinddoek' op of af
+        self.learning_blocked = block_learning
+
+        if block_learning:
+            logger.info(
+                "ThermostatAI: Learning gepauzeerd (Solar Boost / Pre-heat actief)."
+            )
+        else:
+            logger.info("ThermostatAI: Learning actief.")
 
     def update_learning_state(self, raw_data, current_sp):
         """
@@ -188,8 +200,9 @@ class ThermostatAI:
         updated = False
 
         # 1. DETECTEER HANDMATIGE AANPASSING (USER OVERRIDE)
+        # Dit mag ALTIJD doorgaan. Als jij tijdens een Boost aan de knop draait,
+        # betekent het dat je het er niet mee eens bent. Dat is waardevolle data.
         if curr_sp_rounded != self.last_known_setpoint:
-            # Check of dit niet stiekem onze eigen actie was (race condition protection)
             is_recent_ai = (
                 self.last_ai_action_ts
                 and (ts - self.last_ai_action_ts).total_seconds() < 60
@@ -212,15 +225,22 @@ class ThermostatAI:
                 )
 
                 self.last_ai_action_ts = ts
-
-                # self.train()
                 updated = True
+
+                # Als de gebruiker ingrijpt, heffen we de blokkade op
+                self.learning_blocked = False
 
             self.last_known_setpoint = curr_sp_rounded
             self.stability_start_ts = None
 
-        # 2. STABILITEIT LOGGEN
+        # 2. STABILITEIT LOGGEN (Alleen als learning NIET geblokkeerd is!)
         else:
+            if self.learning_blocked:
+                # We zitten in een Boost. We negeren stabiliteit.
+                # Dit voorkomt dat '21 graden' als het nieuwe normaal wordt geleerd.
+                self.stability_start_ts = None
+                return False
+
             curr_temp = safe_float(raw_data.get("current_temp"))
             is_stable = curr_temp is not None and curr_temp >= current_sp
 
