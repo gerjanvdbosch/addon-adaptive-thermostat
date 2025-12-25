@@ -10,6 +10,7 @@ from sqlalchemy import (
     Float,
     DateTime,
     Boolean,
+    String,
     text,
     select,
 )
@@ -88,6 +89,19 @@ class PresenceRecord(Base):
     __tablename__ = "presence_history"
     timestamp = Column(DateTime, primary_key=True)
     is_home = Column(Boolean, index=True)
+
+
+class DhwRecord(Base):
+    """
+    Specifieke opslag voor DHW (SWW) sensorhistorie.
+    Gebruikt door DhwAI om douchegedrag en tapwatergebruik te leren.
+    """
+
+    __tablename__ = "dhw_history"
+    # Composite Primary Key: Tijdstip + SensorID (bijv. "top" of "bottom")
+    timestamp = Column(DateTime, primary_key=True)
+    sensor_id = Column(String, primary_key=True)
+    value = Column(Float)
 
 
 Base.metadata.create_all(engine)
@@ -213,7 +227,55 @@ def fetch_presence_history(days: int = 60):
         return pd.read_sql(stmt, conn)
 
 
-def cleanup_old_data(days: int = 365):
+# ==============================================================================
+# FUNCTIES - DHW (SWW)
+# ==============================================================================
+
+
+def upsert_dhw_sensor_data(sensor_id: str, value: float, timestamp=None):
+    """
+    Slaat een DHW sensorwaarde op in de dhw_history tabel.
+    Wordt gebruikt door DhwAI.
+    """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+
+    # Rond af op seconden
+    timestamp = timestamp.replace(microsecond=0)
+
+    s: SASession = Session()
+    try:
+        # Merge doet een insert of update op basis van Primary Key (Timestamp + SensorID)
+        rec = DhwRecord(timestamp=timestamp, sensor_id=sensor_id, value=value)
+        s.merge(rec)
+        s.commit()
+    except Exception:
+        s.rollback()
+    finally:
+        s.close()
+
+
+def fetch_dhw_history(sensor_id: str, days: int = 60):
+    """
+    Haalt DHW sensorhistorie op voor training van DhwAI.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = (
+        select(DhwRecord)
+        .where(DhwRecord.sensor_id == sensor_id, DhwRecord.timestamp >= cutoff)
+        .order_by(DhwRecord.timestamp.asc())
+    )
+
+    with engine.connect() as conn:
+        df = pd.read_sql(stmt, conn)
+
+    if not df.empty and "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+
+    return df
+
+
+def cleanup_old_data(days: int = 730):
     s: SASession = Session()
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -221,6 +283,7 @@ def cleanup_old_data(days: int = 365):
         s.query(SolarRecord).filter(SolarRecord.timestamp < cutoff).delete()
         s.query(HeatingCycle).filter(HeatingCycle.timestamp < cutoff).delete()
         s.query(PresenceRecord).filter(PresenceRecord.timestamp < cutoff).delete()
+        s.query(DhwRecord).filter(DhwRecord.timestamp < cutoff).delete()
         s.commit()
         s.execute(text("VACUUM"))
     finally:

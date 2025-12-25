@@ -2,6 +2,7 @@ import logging
 import joblib
 import pandas as pd
 
+from enum import Enum
 from ha_client import HAClient
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,11 @@ from db import fetch_sensor_history  # We moeten ruwe sensor data kunnen ophalen
 from utils import add_cyclic_time_features, safe_float
 
 logger = logging.getLogger(__name__)
+
+
+class SensorPosition(Enum):
+    TOP = "Boven"
+    BOTTOM = "Onder"
 
 
 class DhwAI:
@@ -237,4 +243,4 @@ class DhwAI:
         logger.info(f"DhwAI: Actie [{action}] -> {target}C ({reason})")
 
         # Stuur commando naar HA
-        self.ha.set_dhw_setpoint(target)  # Zelf implementeren in HAClient
+        self.ha.set_dhw_setpoint(target)
