@@ -47,7 +47,7 @@ class ClimateCoordinator:
         self.solar_ai = SolarAI(self.ha, opts)
         self.presence_ai = PresenceAI(opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
-        self.dhw_ai = DhwAI(opts)
+        self.dhw_ai = DhwAI(self.ha, opts)
 
         # Configuraties
         self.settings = {
@@ -96,6 +96,7 @@ class ClimateCoordinator:
             # We geven de specifieke mode mee zodat AI leert van SWW vs Heating
             self.thermal_ai.run_cycle(features, hvac_mode)
             self.presence_ai.log_current_state(features)
+            # self.dhw_ai.run_cycle(features)
 
             # 3. Context Bouwen & Override Check
             context = self._build_context(raw, features, cur_sp, hvac_mode)
@@ -351,11 +352,11 @@ class ClimateCoordinator:
         return {
             "Uit": "off",
             "Verwarmen": "heating",
-            "SWW": "hot_water",
+            "SWW": "dhw",
             "Koelen": "cooling",
-            "Legionellapreventie": "legionella_run",
-            "Vorstbescherming": "frost_protection",
+            "Legionellapreventie": "legionella",
+            "Vorstbescherming": "frost",
         }.get(raw_data.get("hvac_mode"), "off")
 
     def _is_compressor_active(self, hvac_mode):
-        return hvac_mode in ["heating", "hot_water", "legionella_run", "cooling"]
+        return hvac_mode in ["heating", "dhw", "legionella", "cooling"]

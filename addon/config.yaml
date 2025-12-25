@@ -40,6 +40,8 @@ options:
     pv_power: sensor.fuj7chn07b_pv_output_actual
     wind_speed: sensor.windkracht_1d
     wind_dir: sensor.windrichting_azimut_1d
+    dhw_top: sensor.ecodan_heatpump_ca09ec_sww_huidige_temp
+    dhw_bottom: sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor
 schema:
   thermostat_entity: "str?"
   solar_entity: "str?"
@@ -69,6 +71,8 @@ schema:
     pv_power: "str?"
     wind_speed: "str?"
     wind_dir: "str?"
+    dhw_top: "str?"
+    dhw_bottom: "str?"
 ports:
   8000/tcp: 8000
 map:

@@ -12,15 +12,15 @@ from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 # Project Imports
-from db import fetch_sensor_history, upsert_dhw_sensor_data
+from db import fetch_dhw_history, upsert_dhw_sensor_data
 from utils import add_cyclic_time_features, safe_float
 
 logger = logging.getLogger(__name__)
 
 
 class SensorPosition(Enum):
-    TOP = "Boven"
-    BOTTOM = "Onder"
+    TOP = 1
+    BOTTOM = 2
 
 
 class DhwAI:
@@ -40,10 +40,10 @@ class DhwAI:
         )
 
         self.sww_top = self.opts.get(
-            "sensor_top", "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
+            "sensor_top", "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
         )
         self.sww_btm = self.opts.get(
-            "sensor_bottom", "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
+            "sensor_bottom", "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
         )
 
         # Thermostat Entity voor SWW (Als je die apart kunt instellen)
@@ -63,7 +63,7 @@ class DhwAI:
 
         # Hoeveel minuten van tevoren moet het water warm zijn?
         self.lookahead_minutes = int(self.opts.get("dhw_lookahead_minutes", 90))
-        self.confidence_threshold = 0.65  # 65% zekerheid nodig om stroom te verbruiken
+        self.confidence_threshold = 0.65
 
         self.feature_columns = [
             "hour_sin",
@@ -107,18 +107,18 @@ class DhwAI:
 
         # 1. Haal ruwe data op (SWW Temp) van de afgelopen 60 dagen
         # We nemen aan dat je een helper hebt die raw sensor data als DataFrame geeft
-        df = fetch_sensor_history(sensor="sensor.sww_temp", days=60)
+        df = fetch_dhw_history(sensor=SensorPosition.TOP, days=60)
 
         if df is None or len(df) < 1000:
             logger.warning("DhwAI: Te weinig data.")
             return
 
         # 2. FILTER: Negeer data tijdens SWW-run (Destratificatie/Mixing)
-        # Als hvac_mode 'hot_water' is, is een temperatuurdaling GEEN gebruik.
+        # Als hvac_mode 'dhw' is, is een temperatuurdaling GEEN gebruik.
         # We filteren deze regels eruit.
         if "hvac_mode" in df.columns:
             # Behoud alleen rijen waar de WP NIET bezig is met warm water
-            df = df[df["hvac_mode"] != "hot_water"]
+            df = df[df["hvac_mode"] != "dhw"]
 
         # 3. Detecteer Events (Nu op schone data)
         df = df.set_index("timestamp").resample("5min").mean().dropna()
@@ -224,7 +224,9 @@ class DhwAI:
             return
 
         upsert_dhw_sensor_data(
-            sensor_id="top", value=self.sww_top, hvac_mode=current_hvac_mode
+            sensor_id=SensorPosition.TOP,
+            value=self.sww_top,
+            hvac_mode=current_hvac_mode,
         )
 
         # 2. Wat zegt SolarAI op dit moment?

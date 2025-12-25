@@ -10,7 +10,6 @@ from sqlalchemy import (
     Float,
     DateTime,
     Boolean,
-    String,
     text,
     select,
 )
@@ -98,11 +97,10 @@ class DhwRecord(Base):
     """
 
     __tablename__ = "dhw_history"
-    # Composite Primary Key: Tijdstip + SensorID (bijv. "top" of "bottom")
     timestamp = Column(DateTime, primary_key=True)
-    sensor_id = Column(String, primary_key=True)
+    sensor_id = Column(Integer, primary_key=True)
+    hvac_mode = Column(Integer, nullable=True)
     value = Column(Float)
-    hvac_mode = Column(String, nullable=True)
 
 
 Base.metadata.create_all(engine)
