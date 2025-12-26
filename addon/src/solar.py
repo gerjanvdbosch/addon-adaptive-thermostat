@@ -343,8 +343,7 @@ class SolarAI:
                 new_bias = median_pv / expected_now
 
                 # Veiligheid: Als current 0 is, mag de bias niet hard crashen (max 10% omlaag per keer)
-                # Dit voorkomt die vrije val van 0.80 -> 0.41 die je zag.
-                if median_pv < 0.01:
+                if median_pv < self.min_noise_kw:
                     # Als we 0 meten, straffen we de bias langzaam af, niet direct naar 0
                     current_bias = self.smoothed_bias
                     target_bias = 0.5  # We gaan richting slecht, maar rustig
