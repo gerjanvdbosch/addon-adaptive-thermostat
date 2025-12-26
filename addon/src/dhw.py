@@ -42,9 +42,6 @@ class DhwAI:
         self.sww_top = self.opts.get(
             "sensor_top", "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
         )
-        self.sww_btm = self.opts.get(
-            "sensor_bottom", "sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor"
-        )
 
         # Thermostat Entity voor SWW (Als je die apart kunt instellen)
         self.dhw_setpoint = self.opts.get("entity_dhw_setpoint", "climate.dhw_water")

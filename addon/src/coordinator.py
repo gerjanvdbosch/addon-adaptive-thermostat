@@ -95,7 +95,7 @@ class ClimateCoordinator:
             # 2. AI Modellen Updaten (Altijd!)
             # We geven de specifieke mode mee zodat AI leert van SWW vs Heating
             self.thermal_ai.run_cycle(features, hvac_mode)
-            self.presence_ai.log_current_state(features)
+            self.presence_ai.run_cycle(features)
             # self.dhw_ai.run_cycle(features)
 
             # 3. Context Bouwen & Override Check

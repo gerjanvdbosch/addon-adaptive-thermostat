@@ -80,7 +80,7 @@ class PresenceAI:
 
         return df_out
 
-    def log_current_state(self, features):
+    def run_cycle(self, features):
         """Verzamelt aanwezigheidsdata van Home Assistant."""
         now = datetime.now()
 

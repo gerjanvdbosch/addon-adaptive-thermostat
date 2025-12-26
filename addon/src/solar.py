@@ -69,8 +69,8 @@ class SolarAI:
             self.opts.get("min_viable_kw", 0.3)
         )  # Onder 300W = LOW_LIGHT
         self.min_noise_kw = float(
-            self.opts.get("min_noise_kw", 0.01)
-        )  # Onder 10W = NIGHT/Ruis
+            self.opts.get("min_noise_kw", 0.1)
+        )  # Onder 100W = NIGHT/Ruis
 
         self.interval = int(self.opts.get("solar_interval_seconds", 15))
 
@@ -338,10 +338,22 @@ class SolarAI:
         # Update Bias
         if df.loc[nearest_idx, "time_diff"] < pd.Timedelta(minutes=45):
             expected_now = df.loc[nearest_idx, "ai_power_raw"]
+
             if expected_now > self.min_noise_kw:
                 new_bias = median_pv / expected_now
-                # EWMA smoothing
-                self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
+
+                # Veiligheid: Als current 0 is, mag de bias niet hard crashen (max 10% omlaag per keer)
+                # Dit voorkomt die vrije val van 0.80 -> 0.41 die je zag.
+                if median_pv < 0.01:
+                    # Als we 0 meten, straffen we de bias langzaam af, niet direct naar 0
+                    current_bias = self.smoothed_bias
+                    target_bias = 0.5  # We gaan richting slecht, maar rustig
+                    self.smoothed_bias = (0.95 * current_bias) + (0.05 * target_bias)
+                else:
+                    # Normale snelle update als we metingen hebben
+                    self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
+
+                # Klemmen tussen 0.4 (slecht) en 1.6 (super)
                 self.smoothed_bias = np.clip(self.smoothed_bias, 0.4, 1.6)
 
         df["ai_power"] = (df["ai_power_raw"] * self.smoothed_bias).clip(
@@ -426,8 +438,19 @@ class SolarAI:
         # 6. BESLUITVORMING
         # ----------------------------------------------------------------------
 
-        best_idx = future["window_avg_power"].idxmax()
-        best_row = future.loc[best_idx]
+        max_peak_power = future["window_avg_power"].max()
+        threshold_planning = max(max_peak_power * self.early_start_threshold, 0.01)
+
+        # Vind alle tijdstippen die aan de eis voldoen
+        candidates = future[future["window_avg_power"] >= threshold_planning]
+
+        if not candidates.empty:
+            best_row = candidates.iloc[0]  # Pak de EERSTE (vroegste) optie
+        else:
+            # Fallback (zou theoretisch niet moeten kunnen als future niet empty is)
+            best_idx = future["window_avg_power"].idxmax()
+            best_row = future.loc[best_idx]
+
         best_power = best_row["window_avg_power"]
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
 
