@@ -316,35 +316,51 @@ class ClimateCoordinator:
         mins_since_change = (now - self.last_switch_time).total_seconds() / 60.0
         ai_cooldown_mins = float(self.opts.get("cooldown_hours", 2)) * 60
 
-        # Solar Boost mag cooldown negeren (GRATIS ENERGIE = PAKKEN)
+        # --- PRIORITEIT 1: HARDWARE BESCHERMING (Compressor Min-Off) ---
+        # Dit wint altijd. Je mag de warmtepomp niet te snel weer aanzetten.
+        if intended_action == "heating" and not context.is_compressor_active:
+            if mins_since_change < self.settings["min_off_min"]:
+                remaining = int(self.settings["min_off_min"] - mins_since_change)
+                return False, f"Compressor cooldown ({remaining}m)"
+
+        # --- PRIORITEIT 2: SOLAR BOOST (Gratis Energie) ---
+        # Als we zonne-energie hebben, mag dat de cooldown doorbreken.
+        # (Behalve de hardware protectie hierboven, die is al gecheckt).
         if state == HouseState.SOLAR_BOOST and intended_action == "heating":
-            if (
-                not context.is_compressor_active
-                and mins_since_change < self.settings["min_off_min"]
-            ):
-                return False, "Compressor cooldown"
             return True, "Zonneboost start"
 
+        # --- PRIORITEIT 3: ANTI-PENDEL (Tijdens bedrijf) ---
+        # Als hij draait, mag hij niet zomaar uit, tenzij we naar ECO gaan.
         if context.is_compressor_active and target_sp < context.current_setpoint:
             if state != HouseState.ECO and (context.current_setpoint - target_sp) < 2.0:
                 return False, f"Cyclus bezig ({context.hvac_mode})"
 
+        # --- PRIORITEIT 4: DE GEBRUIKERS COOLDOWN ---
         if mins_since_change < ai_cooldown_mins:
+
+            # UITZONDERING A: NOODGEVAL (Te Koud)
+            # Als het binnen kouder is dan Target - Hysteresis, MOET hij aan.
             comfort_threshold = target_sp - self.settings["comfort_hysteresis"]
             if (
                 context.current_temp is not None
                 and context.current_temp < comfort_threshold
             ):
-                return True, "Comfort prioriteit"
-            return False, f"In cooldown ({int(ai_cooldown_mins - mins_since_change)}m)"
+                # Alleen toestaan als we omhoog gaan (verwarmen)
+                if target_sp > context.current_setpoint:
+                    return True, "Comfort prioriteit (Te koud)"
 
-        if target_sp < context.current_setpoint:
-            return True, "Energiebesparing"
+            # UITZONDERING B: MODUS WISSEL NAAR ECO?
+            # Optioneel: Als je het huis verlaat (Comfort -> Eco), wil je misschien
+            # dat hij WEL direct omlaag gaat, ondanks dat je net aan de knop draaide.
+            # Als je dat wilt, uncomment de volgende regels:
+            # if state == HouseState.ECO and context.hvac_mode != 'off':
+            #    return True, "Vertrek gedetecteerd (Naar Eco)"
 
-        if intended_action == "heating" and not context.is_compressor_active:
-            if mins_since_change < self.settings["min_off_min"]:
-                return False, "Compressor cooldown"
+            # In alle andere gevallen: BLOKKEREN.
+            remaining = int(ai_cooldown_mins - mins_since_change)
+            return False, f"In AI cooldown ({remaining}m)"
 
+        # Als we hier komen is de cooldown voorbij en de hardware veilig.
         return True, "AI Advies"
 
     def _get_hvac_mode(self, raw_data):
