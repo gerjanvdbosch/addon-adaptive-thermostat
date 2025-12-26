@@ -520,9 +520,12 @@ class SolarAI:
             }
 
         # D. Wachten
+        wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
+        wait_msg = f"{wait_min} min" if wait_min > 0 else "NU"
+
         return {
             "action": SolarStatus.WAIT,
-            "reason": f"[{day_type}] Piek over {int(wait_minutes)} min ({best_power:.2f}kW)",
+            "reason": f"[{day_type}] Piek over {wait_msg} ({best_power:.2f}kW)",
             "plan_start": start_time_local,
         }
 
