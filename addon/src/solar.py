@@ -278,9 +278,17 @@ class SolarAI:
         Bepaalt de stabiliteit van het weer.
         Schaalt dynamisch mee met SYSTEM_MAX_KW.
         """
-        if len(self.pv_buffer) < 5:
+        # Situatie 1: Buffer is helemaal leeg (zou niet moeten kunnen na process_sample)
+        if not self.pv_buffer:
             return 0.0, True
 
+        # Situatie 2: Opstartfase (minder dan 5 metingen)
+        # Gebruik DIRECT de laatste meting (Huidige waarde) in plaats van 0.0
+        if len(self.pv_buffer) < 5:
+            current_val = float(self.pv_buffer[-1])
+            return current_val, True
+
+        # Situatie 3: Normaal bedrijf (Genoeg data voor mediaan)
         arr = np.array(self.pv_buffer)
         median = float(np.median(arr))
 
@@ -380,18 +388,23 @@ class SolarAI:
             df_today["window_avg_power"].max() if not df_today.empty else 0.0
         )
 
-        conservative_bias = min(self.smoothed_bias, 1.1)
+        # SPLIT BIAS:
+        # Historie mag niet kunstmatig verhoogd worden (max 1.0).
+        # Toekomst mag wel optimistisch zijn voor Peak Hunting (max 1.15).
+        history_bias = min(self.smoothed_bias, 1.0)
+        future_bias = min(self.smoothed_bias, 1.15)
+
+        # Toekomst Piek (Adjusted)
         future_max_raw = future["ai_power_raw"].rolling(window=indexer).mean().max()
         if pd.isna(future_max_raw):
             future_max_raw = 0.0
-        adjusted_future_max = future_max_raw * conservative_bias
+        adjusted_future_max = future_max_raw * future_bias
 
-        day_peak = max(
-            forecast_peak_day * conservative_bias, median_pv, adjusted_future_max
-        )
+        # Dag Piek (Het hoogste van: Voorspelling(safe), Actueel, Toekomst)
+        day_peak = max(forecast_peak_day * history_bias, median_pv, adjusted_future_max)
 
-        # B. Totale energie (kWh)
-        daily_kwh = df_today["ai_power_raw"].sum() * 0.5 * conservative_bias
+        # Totale energie (kWh) - Gebruik history_bias om overschatting te voorkomen
+        daily_kwh = df_today["ai_power_raw"].sum() * 0.5 * history_bias
 
         # ----------------------------------------------------------------------
         # 5. DYNAMISCHE DREMPEL (MET SEIZOENSCORRECTIE)
@@ -400,8 +413,7 @@ class SolarAI:
         # Bereken Seizoensfactor (0.35 in winter, 1.0 in zomer)
         doy = now_utc.timetuple().tm_yday
         # Cosinus golf: Piek op dag 172 (21 juni), Dal op dag 355 (21 dec)
-        # Formule: 0.675 - 0.325 * cos(...) zorgt voor bereik 0.35 - 1.0
-        # AANGEPAST: 0.75 - 0.25 (bereik 0.5 - 1.0)
+        # Formule: 0.75 - 0.25 (bereik 0.5 - 1.0) -> Zuiden
         season_factor = 0.75 - 0.25 * math.cos(2 * math.pi * (doy + 10) / 365)
         season_factor = max(0.50, min(season_factor, 1.0))
 
@@ -445,11 +457,14 @@ class SolarAI:
         future_threshold = adjusted_future_max * percentage
         day_floor_limit = day_peak * 0.25
 
-        # Definitieve trigger (minimaal de config waarde)
-        final_trigger_val = max(future_threshold, day_floor_limit, self.min_viable_kw)
+        # Effectieve min viable (nooit hoger dan 90% van de dagpiek)
+        effective_min_viable = min(self.min_viable_kw, day_peak * 0.90)
+        effective_min_viable = max(effective_min_viable, self.min_noise_kw * 2)
+
+        final_trigger_val = max(future_threshold, day_floor_limit, effective_min_viable)
 
         logger.info(
-            f"SolarAI: Piek: {day_peak:.2f}kW | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
+            f"SolarAI: Piek: {day_peak:.2f}kW (SeasonMax: {seasonal_max_kw:.2f}) | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
             f"Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
@@ -535,7 +550,7 @@ class SolarAI:
 
             return {
                 "action": SolarStatus.START,
-                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} > {final_trigger_val:.2f})",
+                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} >= {final_trigger_val:.2f})",
                 "plan_start": datetime.now(local_tz),
             }
 
