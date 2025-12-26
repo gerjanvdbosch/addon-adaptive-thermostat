@@ -303,7 +303,11 @@ class SolarAI:
     # ==============================================================================
 
     def get_solar_recommendation(self):
-        """Analyseert de forecast en de huidige bias om een start-advies te geven."""
+        """
+        Analyseert de forecast.
+        Drempels schalen mee met de Piek (kW) én de Totale Opbrengst (kWh).
+        Peak Hunting zorgt dat we niet te vroeg starten.
+        """
         if not self.cached_solcast_data:
             return {"action": SolarStatus.WAIT, "reason": "Geen Solcast data"}
 
@@ -363,40 +367,46 @@ class SolarAI:
             return {"action": SolarStatus.DONE, "reason": "Einde dag forecast"}
 
         # ----------------------------------------------------------------------
-        # 4. DAG & TOEKOMST ANALYSE
+        # 4. DAG ANALYSE (PIEK & TOTAAL)
         # ----------------------------------------------------------------------
 
         today_start = now_utc.normalize()
         today_end = today_start + timedelta(days=1)
         df_today = df[(df["timestamp"] >= today_start) & (df["timestamp"] < today_end)]
 
-        # Max forecast van de hele dag (historie + toekomst)
+        # A. Piek vermogen (kW)
         forecast_peak_day = (
             df_today["window_avg_power"].max() if not df_today.empty else 0.0
         )
 
-        # Wat verwachten we nog voor de toekomst?
         conservative_bias = min(self.smoothed_bias, 1.1)
         future_max_raw = future["ai_power_raw"].rolling(window=indexer).mean().max()
         if pd.isna(future_max_raw):
             future_max_raw = 0.0
         adjusted_future_max = future_max_raw * conservative_bias
 
-        # De 'Day Peak' bepaalt hoe goed deze dag is
         day_peak = max(
             forecast_peak_day * conservative_bias, median_pv, adjusted_future_max
         )
 
+        # B. Totale energie (kWh)
+        daily_kwh = df_today["ai_power_raw"].sum() * 0.5 * conservative_bias
+        full_load_hours = daily_kwh / max(1.0, self.system_max_kw)
+
         # ----------------------------------------------------------------------
-        # 5. DYNAMISCHE DREMPEL (INTERPOLATIE) - AANGEPAST
+        # 5. DYNAMISCHE DREMPEL (INTERPOLATIE)
         # ----------------------------------------------------------------------
 
-        # Bereken kwaliteit (0.0 tot 1.0)
+        # Basis Ratio op basis van Piek
         day_quality_ratio = day_peak / max(1.0, self.system_max_kw)
-        day_quality_ratio = min(day_quality_ratio, 1.0)  # Cap op 1.0
 
-        # Formule: Percentage start bij 0.55 en klimt naar 0.90
-        # Bij ratio 0.7 (jouw dag) wordt het: 0.55 + (0.7 * 0.35) = 0.795 (80%)
+        # Correctie op Totaal (voorkom overschatting bij flits-dagen)
+        if full_load_hours < 2.0:
+            day_quality_ratio = min(day_quality_ratio, 0.65)
+
+        day_quality_ratio = min(day_quality_ratio, 1.0)
+
+        # Interpolatie (0.55 tot 0.90)
         percentage = 0.55 + (day_quality_ratio * 0.35)
 
         day_quality_high = 0.75
@@ -410,16 +420,16 @@ class SolarAI:
         else:
             day_type = "Gloomy ☁️"
 
-        # Bereken de drempels
+        # Drempels
         future_threshold = adjusted_future_max * percentage
-        day_floor_limit = day_peak * 0.25  # Minimaal 25% van de dagpiek
+        day_floor_limit = day_peak * 0.25
 
-        # Definitieve trigger
+        # Definitieve trigger (minimaal de config waarde)
         final_trigger_val = max(future_threshold, day_floor_limit, self.min_viable_kw)
 
         logger.info(
-            f"SolarAI: Dag-Piek: {day_peak:.2f}kW (Ratio {day_quality_ratio:.2f}) -> Factor {percentage:.2f} | "
-            f"Ref-Future: {adjusted_future_max:.2f}kW | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
+            f"SolarAI: Piek: {day_peak:.2f}kW | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | "
+            f"Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
         # ----------------------------------------------------------------------
@@ -433,20 +443,18 @@ class SolarAI:
         # Vind alle tijdstippen die aan de eis voldoen voor planning
         candidates = future[future["window_avg_power"] >= threshold_planning]
 
+        # 95% Regeling: Pak het eerste moment dat bijna optimaal is
         if not candidates.empty:
-            best_row = candidates.iloc[0]  # Pak de EERSTE (vroegste) optie
+            best_row = candidates.iloc[0]
         else:
             best_idx = future["window_avg_power"].idxmax()
             best_row = future.loc[best_idx]
 
-        best_idx_raw = future["window_avg_power"].idxmax()
-        best_row_raw = future.loc[best_idx_raw]
-        best_power = best_row_raw["window_avg_power"]
+        # Gebruik de 'raw' index alleen voor de wachttijd berekening (optioneel, maar hier gebruiken we de candidates)
+        best_power = best_row["window_avg_power"]
 
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
-
-        # Bereken wachttijd voor Peak Hunting
-        wait_minutes = (best_row_raw["timestamp"] - now_utc).total_seconds() / 60
+        wait_minutes = (best_row["timestamp"] - now_utc).total_seconds() / 60
         wait_hours = wait_minutes / 60.0
 
         # A. Low Light (onder dag-vloer)
