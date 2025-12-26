@@ -69,8 +69,8 @@ class SolarAI:
             self.opts.get("min_viable_kw", 0.3)
         )  # Onder 300W = LOW_LIGHT
         self.min_noise_kw = float(
-            self.opts.get("min_noise_kw", 0.1)
-        )  # Onder 100W = NIGHT/Ruis
+            self.opts.get("min_noise_kw", 0.01)
+        )  # Onder 10W = NIGHT/Ruis
 
         self.interval = int(self.opts.get("solar_interval_seconds", 15))
 
@@ -338,21 +338,10 @@ class SolarAI:
         # Update Bias
         if df.loc[nearest_idx, "time_diff"] < pd.Timedelta(minutes=45):
             expected_now = df.loc[nearest_idx, "ai_power_raw"]
-
             if expected_now > self.min_noise_kw:
                 new_bias = median_pv / expected_now
-
-                # Veiligheid: Als current 0 is, mag de bias niet hard crashen (max 10% omlaag per keer)
-                if median_pv < self.min_noise_kw:
-                    # Als we 0 meten, straffen we de bias langzaam af, niet direct naar 0
-                    current_bias = self.smoothed_bias
-                    target_bias = 0.5  # We gaan richting slecht, maar rustig
-                    self.smoothed_bias = (0.95 * current_bias) + (0.05 * target_bias)
-                else:
-                    # Normale snelle update als we metingen hebben
-                    self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
-
-                # Klemmen tussen 0.4 (slecht) en 1.6 (super)
+                # EWMA smoothing
+                self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
                 self.smoothed_bias = np.clip(self.smoothed_bias, 0.4, 1.6)
 
         df["ai_power"] = (df["ai_power_raw"] * self.smoothed_bias).clip(
@@ -437,21 +426,28 @@ class SolarAI:
         # 6. BESLUITVORMING
         # ----------------------------------------------------------------------
 
+        # Peak Hunting instellingen
         max_peak_power = future["window_avg_power"].max()
         threshold_planning = max(max_peak_power * self.early_start_threshold, 0.01)
 
-        # Vind alle tijdstippen die aan de eis voldoen
+        # Vind alle tijdstippen die aan de eis voldoen voor planning
         candidates = future[future["window_avg_power"] >= threshold_planning]
 
         if not candidates.empty:
             best_row = candidates.iloc[0]  # Pak de EERSTE (vroegste) optie
         else:
-            # Fallback (zou theoretisch niet moeten kunnen als future niet empty is)
             best_idx = future["window_avg_power"].idxmax()
             best_row = future.loc[best_idx]
 
-        best_power = best_row["window_avg_power"]
+        best_idx_raw = future["window_avg_power"].idxmax()
+        best_row_raw = future.loc[best_idx_raw]
+        best_power = best_row_raw["window_avg_power"]
+
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
+
+        # Bereken wachttijd voor Peak Hunting
+        wait_minutes = (best_row_raw["timestamp"] - now_utc).total_seconds() / 60
+        wait_hours = wait_minutes / 60.0
 
         # A. Low Light (onder dag-vloer)
         if adjusted_future_max < day_floor_limit and median_pv < day_floor_limit:
@@ -461,12 +457,27 @@ class SolarAI:
                 "plan_start": start_time_local,
             }
 
+        # --- PEAK HUNTING ---
+        is_waiting_worth_it = False
+
+        if "Gloomy" not in day_type:
+            # REGEL 1: Zijn we er al bijna? (85%)
+            if median_pv >= (best_power * 0.85):
+                is_waiting_worth_it = False
+            else:
+                # REGEL 2: Time Decay
+                time_penalty_factor = max(0.5, 1.0 - (wait_hours * 0.10))
+                discounted_future_power = best_power * time_penalty_factor
+
+                if discounted_future_power > (median_pv * 1.10):
+                    is_waiting_worth_it = True
+
         # B. Opportunisme
         current_slot_forecast_raw = df.loc[nearest_idx, "ai_power_raw"]
         is_sunny_surprise = median_pv > (current_slot_forecast_raw * 1.20)
         is_viable_run = median_pv > day_floor_limit
 
-        if is_sunny_surprise and is_viable_run:
+        if is_sunny_surprise and is_viable_run and not is_waiting_worth_it:
             return {
                 "action": SolarStatus.START,
                 "reason": f"[{day_type}] Opportunisme: Feller dan forecast!",
@@ -475,8 +486,16 @@ class SolarAI:
 
         # C. Normale Drempel
         if median_pv >= final_trigger_val:
+
+            if is_waiting_worth_it:
+                return {
+                    "action": SolarStatus.WAIT,
+                    "reason": f"[{day_type}] Wacht op piek ({best_power:.2f}kW)",
+                    "plan_start": start_time_local,
+                }
+
             if (
-                day_quality_ratio > day_quality_average
+                "Gloomy" not in day_type
                 and not is_stable
                 and median_pv < (best_power * 0.9)
             ):
@@ -493,10 +512,9 @@ class SolarAI:
             }
 
         # D. Wachten
-        wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
         return {
             "action": SolarStatus.WAIT,
-            "reason": f"[{day_type}] Piek over {wait_min} min ({best_power:.2f}kW)",
+            "reason": f"[{day_type}] Piek over {int(wait_minutes)} min ({best_power:.2f}kW)",
             "plan_start": start_time_local,
         }
 
