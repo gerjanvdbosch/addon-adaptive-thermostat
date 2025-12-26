@@ -454,7 +454,7 @@ class SolarAI:
         best_power = best_row["window_avg_power"]
 
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
-        wait_minutes = (best_row["timestamp"] - now_utc).total_seconds() / 60
+        wait_minutes = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
         wait_hours = wait_minutes / 60.0
 
         # A. Low Light (onder dag-vloer)
@@ -468,7 +468,7 @@ class SolarAI:
         # --- PEAK HUNTING ---
         is_waiting_worth_it = False
 
-        if "Gloomy" not in day_type:
+        if day_quality_ratio > day_quality_average:
             # REGEL 1: Zijn we er al bijna? (85%)
             if median_pv >= (best_power * 0.85):
                 is_waiting_worth_it = False
@@ -494,7 +494,6 @@ class SolarAI:
 
         # C. Normale Drempel
         if median_pv >= final_trigger_val:
-
             if is_waiting_worth_it:
                 return {
                     "action": SolarStatus.WAIT,
@@ -503,7 +502,7 @@ class SolarAI:
                 }
 
             if (
-                "Gloomy" not in day_type
+                day_quality_ratio > day_quality_average
                 and not is_stable
                 and median_pv < (best_power * 0.9)
             ):
@@ -520,12 +519,16 @@ class SolarAI:
             }
 
         # D. Wachten
-        wait_min = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
-        wait_msg = f"{wait_min} min" if wait_min > 0 else "NU"
+        if wait_minutes > 0:
+            wait_msg = f"over {wait_minutes} min"
+        elif wait_minutes < 0:
+            wait_msg = f"{abs(wait_minutes)} min geleden"
+        else:
+            wait_msg = "NU"
 
         return {
             "action": SolarStatus.WAIT,
-            "reason": f"[{day_type}] Piek over {wait_msg} ({best_power:.2f}kW)",
+            "reason": f"[{day_type}] Piek {wait_msg} ({best_power:.2f}kW)",
             "plan_start": start_time_local,
         }
 
