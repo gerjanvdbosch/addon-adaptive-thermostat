@@ -494,7 +494,7 @@ class SolarAI:
         wait_hours = wait_minutes / 60.0
 
         # A. Low Light (onder dag-vloer)
-        if adjusted_future_max < day_floor_limit and median_pv < day_floor_limit:
+        if adjusted_future_max < day_floor_limit and median_pv < effective_min_viable:
             return {
                 "action": SolarStatus.LOW_LIGHT,
                 "reason": f"[{day_type}] Verwachting ({adjusted_future_max:.2f}kW) te laag",
@@ -519,9 +519,9 @@ class SolarAI:
         # B. Opportunisme
         current_slot_forecast_raw = df.loc[nearest_idx, "ai_power_raw"]
         is_sunny_surprise = median_pv > (current_slot_forecast_raw * 1.20)
-        is_viable_run = median_pv > day_floor_limit
+        is_viable_now = median_pv >= effective_min_viable
 
-        if is_sunny_surprise and is_viable_run and not is_waiting_worth_it:
+        if is_sunny_surprise and is_viable_now and not is_waiting_worth_it:
             return {
                 "action": SolarStatus.START,
                 "reason": f"[{day_type}] Opportunisme: Feller dan forecast!",
@@ -529,7 +529,9 @@ class SolarAI:
             }
 
         # C. Normale Drempel
-        if median_pv >= final_trigger_val:
+        if median_pv >= final_trigger_val or (
+            is_viable_now and adjusted_future_max < 0.1
+        ):
             if is_waiting_worth_it:
                 return {
                     "action": SolarStatus.WAIT,

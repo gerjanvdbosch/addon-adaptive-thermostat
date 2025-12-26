@@ -88,4 +88,6 @@ class Collector:
             "wind_dir_cos": wtd_cos,
             "pv_power": safe_float(sensor_dict.get("pv_power")),
             "supply_temp": safe_float(sensor_dict.get("supply_temp")),
+            "dhw_temp": safe_float(sensor_dict.get("dhw_temp")),
+            "dhw_temp2": safe_float(sensor_dict.get("dhw_temp2")),
         }
