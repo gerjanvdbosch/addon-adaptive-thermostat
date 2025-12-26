@@ -3,6 +3,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import shap
+import math
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -306,7 +307,7 @@ class SolarAI:
         """
         Analyseert de forecast.
         Drempels schalen mee met de Piek (kW) én de Totale Opbrengst (kWh).
-        Peak Hunting zorgt dat we niet te vroeg starten.
+        Inclusief VEILIGE seizoenscorrectie.
         """
         if not self.cached_solcast_data:
             return {"action": SolarStatus.WAIT, "reason": "Geen Solcast data"}
@@ -391,23 +392,43 @@ class SolarAI:
 
         # B. Totale energie (kWh)
         daily_kwh = df_today["ai_power_raw"].sum() * 0.5 * conservative_bias
+
+        # ----------------------------------------------------------------------
+        # 5. DYNAMISCHE DREMPEL (MET SEIZOENSCORRECTIE)
+        # ----------------------------------------------------------------------
+
+        # Bereken Seizoensfactor (0.35 in winter, 1.0 in zomer)
+        doy = now_utc.timetuple().tm_yday
+        # Cosinus golf: Piek op dag 172 (21 juni), Dal op dag 355 (21 dec)
+        # Formule: 0.675 - 0.325 * cos(...) zorgt voor bereik 0.35 - 1.0
+        # AANGEPAST: 0.75 - 0.25 (bereik 0.5 - 1.0)
+        season_factor = 0.75 - 0.25 * math.cos(2 * math.pi * (doy + 10) / 365)
+        season_factor = max(0.50, min(season_factor, 1.0))
+
+        # B. Wat is fysiek mogelijk VANDAAG?
+        seasonal_max_kw = self.system_max_kw * season_factor
+
+        # C. Bereken kwaliteit relatief aan het seizoen (Ratio 0.0 - 1.0)
+        day_quality_ratio = day_peak / max(0.1, seasonal_max_kw)
+
+        # Correctie: Flitsdagen (weinig totaal kWh) mogen geen top-ratio hebben
         full_load_hours = daily_kwh / max(1.0, self.system_max_kw)
-
-        # ----------------------------------------------------------------------
-        # 5. DYNAMISCHE DREMPEL (INTERPOLATIE)
-        # ----------------------------------------------------------------------
-
-        # Basis Ratio op basis van Piek
-        day_quality_ratio = day_peak / max(1.0, self.system_max_kw)
-
-        # Correctie op Totaal (voorkom overschatting bij flits-dagen)
         if full_load_hours < 2.0:
+            # Op flitsdagen straffen we de ratio af, zodat we niet te streng worden
             day_quality_ratio = min(day_quality_ratio, 0.65)
 
         day_quality_ratio = min(day_quality_ratio, 1.0)
 
-        # Interpolatie (0.55 tot 0.90)
+        # D. Interpolatie van de drempel (Percentage)
+        # Basis: 55% tot 90%
         percentage = 0.55 + (day_quality_ratio * 0.35)
+
+        # E. WINTER DEMPING (optioneel als de drempel te hoog ligt)
+        # Als het winter is (season_factor < 0.6), cappen we het percentage op 80%.
+        # Dit voorkomt dat we op een 'perfecte winterdag' (1.2kW) gaan wachten op
+        # die laatste 100 Watt die misschien net niet komt.
+        # if season_factor < 0.6:
+        #     percentage = min(percentage, 0.80)
 
         day_quality_high = 0.75
         day_quality_average = 0.4
@@ -428,7 +449,7 @@ class SolarAI:
         final_trigger_val = max(future_threshold, day_floor_limit, self.min_viable_kw)
 
         logger.info(
-            f"SolarAI: Piek: {day_peak:.2f}kW | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | "
+            f"SolarAI: Piek: {day_peak:.2f}kW | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
             f"Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
@@ -514,7 +535,7 @@ class SolarAI:
 
             return {
                 "action": SolarStatus.START,
-                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} >= {final_trigger_val:.2f})",
+                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} > {final_trigger_val:.2f})",
                 "plan_start": datetime.now(local_tz),
             }
 
