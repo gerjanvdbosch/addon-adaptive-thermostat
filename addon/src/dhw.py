@@ -279,20 +279,20 @@ class DhwAI:
         self.log_deque.append(current_temp)
 
         # A. Altijd loggen na een uur (heartbeat)
-        if (now - self.last_db_time).total_seconds() > 3600:
+        if (now - self.last_log_time).total_seconds() > 3600:
             should_log = True
 
         # B. Altijd loggen als HVAC modus verandert (bijv. WP gaat aan)
-        elif self.last_db_hvac != current_hvac:
+        elif self.last_logged_hvac != current_hvac:
             should_log = True
 
         # C. Temperatuur logica
-        elif self.last_db_temp is None:
+        elif self.last_logged_temp is None:
             should_log = True
 
-        elif current_temp != self.last_db_temp:
+        elif current_temp != self.last_logged_temp:
             # Situatie 1: Temperatuur daalt (DOUCHEN!)
-            if current_temp < self.last_db_temp:
+            if current_temp < self.last_logged_temp:
                 should_log = True
 
             # Situatie 2: Temperatuur stijgt of flappert (Ruis of Opwarmen)
