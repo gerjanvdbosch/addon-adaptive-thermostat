@@ -300,6 +300,9 @@ class ThermostatAI:
                 or len(set(self.prediction_buffer)) != 1
             ):
                 # Nog aan het twijfelen of buffer niet vol -> Doe niets.
+                logger.info(
+                    f"ThermostatAI: Aanbevolen setpoint {rounded_rec}°C  nog niet stabiel."
+                )
                 return current_sp
 
         except Exception:

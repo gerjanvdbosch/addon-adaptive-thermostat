@@ -126,8 +126,8 @@ class AIStatus(BaseModel):
     solar: dict
     presence: dict
     thermal: dict
-    system: dict
     dhw: dict
+    system: dict
 
 
 # ==============================================================================

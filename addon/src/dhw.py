@@ -266,7 +266,7 @@ class DhwAI:
         return {
             "action": "IDLE",
             "target": self.min_temp,
-            "reason": "Geen vraag, geen zon",
+            "reason": "Geen vraag",
         }
 
     # ==============================================================================
