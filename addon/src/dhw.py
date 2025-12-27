@@ -268,6 +268,8 @@ class DhwAI:
 
         hvac_mode = features.get("hvac_mode")
 
+        logger.info(f"DhwAI: Huidige temp: {temp:.1f}C")
+
         upsert_dhw_sensor_data(
             sensor_id=SensorPosition.TOP,
             value=temp,
