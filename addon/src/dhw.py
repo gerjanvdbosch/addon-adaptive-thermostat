@@ -111,7 +111,7 @@ class DhwAI:
 
         # 1. Haal ruwe data op (SWW Temp) van de afgelopen 60 dagen
         # We nemen aan dat je een helper hebt die raw sensor data als DataFrame geeft
-        df = fetch_dhw_history(sensor=SensorPosition.TOP, days=60)
+        df = fetch_dhw_history(sensor=SensorPosition.TOP.value, days=60)
 
         if df is None or len(df) < 100:
             logger.warning("DhwAI: Te weinig data.")
@@ -292,7 +292,7 @@ class DhwAI:
             logger.info(f"DhwAI: Logging temp {temp}, hvac {hvac_mode}")
 
             upsert_dhw_sensor_data(
-                sensor_id=SensorPosition.TOP,
+                sensor_id=SensorPosition.TOP.value,
                 value=temp,
                 hvac_mode=hvac_mode,
             )
