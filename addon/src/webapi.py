@@ -8,7 +8,14 @@ from utils import safe_bool
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, desc
-from db import Session, Setpoint, SolarRecord, PresenceRecord, HeatingCycle
+from db import (
+    Session,
+    Setpoint,
+    SolarRecord,
+    PresenceRecord,
+    HeatingCycle,
+    DhwSensorData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +97,19 @@ class ThermalOut(BaseModel):
         from_attributes = True
 
 
+class DhwOut(BaseModel):
+    timestamp: datetime
+    sensor_id: int
+    value: float
+    hvac_mode: Optional[float]
+
+    class Config:
+        from_attributes = True
+
+
+# ------------------------
+
+
 class TrainResponse(BaseModel):
     status: str
     target: str
@@ -107,6 +127,7 @@ class AIStatus(BaseModel):
     presence: dict
     thermal: dict
     system: dict
+    dhw: dict
 
 
 # ==============================================================================
@@ -253,7 +274,8 @@ def get_current_status():
 @app.post("/train", response_model=TrainResponse)
 def trigger_training(
     model: str = Query(
-        "all", description="Model to train: all, thermostat, solar, presence, thermal"
+        "all",
+        description="Model to train: all, thermostat, solar, presence, thermal, dhw",
     )
 ):
     """
@@ -279,6 +301,8 @@ def trigger_training(
                 GLOBAL_COORDINATOR.presence_ai.train()
             elif model == "thermal":
                 GLOBAL_COORDINATOR.thermal_ai.train()
+            elif model == "dhw":
+                GLOBAL_COORDINATOR.dhw_ai.train()
             else:
                 logger.warning(f"API: Unknown model type '{model}'")
         except Exception as e:
@@ -358,6 +382,25 @@ def get_thermal_history(limit: int = 100, offset: int = 0):
         return results
     finally:
         s.close()
+
+
+@app.get("/history/dhw", response_model=List[DhwOut])
+def get_dhw_history(limit: int = 100, offset: int = 0):
+    s = Session()
+    try:
+        stmt = (
+            select(DhwSensorData)
+            .order_by(desc(DhwSensorData.timestamp))
+            .limit(limit)
+            .offset(offset)
+        )
+        results = s.execute(stmt).scalars().all()
+        return results
+    finally:
+        s.close()
+
+
+# --------------------------
 
 
 # ==============================================================================
@@ -448,3 +491,33 @@ def delete_presence(timestamp: datetime):
         raise HTTPException(status_code=500, detail="Database error")
     finally:
         s.close()
+
+
+@app.delete("/history/dhw/{timestamp}/{sensor_id}", response_model=DeleteResponse)
+def delete_dhw(timestamp: datetime, sensor_id: int):
+    """
+    Verwijder een DHW record. Omdat de Primary Key waarschijnlijk samengesteld is
+    (timestamp + sensor_id), hebben we beide nodig.
+    """
+    s = Session()
+    try:
+        # We gebruiken s.get() met een tuple voor composite keys
+        record = s.get(DhwSensorData, (timestamp, sensor_id))
+        if not record:
+            raise HTTPException(status_code=404, detail="DHW record not found")
+
+        s.delete(record)
+        s.commit()
+        return {
+            "status": "success",
+            "deleted_key": f"{timestamp.isoformat()}_{sensor_id}",
+        }
+    except Exception as e:
+        s.rollback()
+        logger.error(f"Failed to delete dhw {timestamp} / {sensor_id}: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        s.close()
+
+
+# -------------------------
