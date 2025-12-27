@@ -218,7 +218,7 @@ class DhwAI:
 
         # 1. VEILIGHEID: Kritieke ondergrens (Lege boiler)
         if current_temp < self.min_temp:
-            logger.info(f"DhwAI: Temp kritiek laag {current_temp:.1f}C")
+            logger.info(f"DhwAI: Temp kritiek laag {current_temp:.1f}°C")
             return self.target_temp
 
         solar_status_enum = None  # Placeholder voor SolarAI status
@@ -289,7 +289,7 @@ class DhwAI:
             should_log = True
 
         if should_log:
-            logger.info(f"DhwAI: Logging temp {temp}, hvac {hvac_mode}")
+            logger.info(f"DhwAI: Logging temp {temp}°C")
 
             upsert_dhw_sensor_data(
                 sensor_id=SensorPosition.TOP.value,

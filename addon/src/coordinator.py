@@ -294,12 +294,12 @@ class ClimateCoordinator:
 
         if not is_safe:
             logger.info(
-                f"Coordinator: Wacht [{state.value}] Doel {target_temp:.1f}C geweigerd: {reason}"
+                f"Coordinator: Wacht [{state.value}] Doel {target_temp:.1f}°C geweigerd: {reason}"
             )
             return
 
         logger.info(
-            f"Coordinator: [{state.value}] Setpoint aanpassen {current_sp} -> {target_temp:.1f}C (Reden: {reason})"
+            f"Coordinator: [{state.value}] Setpoint aanpassen {current_sp} -> {target_temp:.1f}°C (Reden: {reason})"
         )
         self.ha.set_setpoint(target_temp)
 

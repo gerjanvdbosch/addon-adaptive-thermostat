@@ -178,7 +178,7 @@ class ThermalAI:
                     )
                 else:
                     logger.debug(
-                        f"ThermalAI: Cyclus genegeerd. Duur: {duration_min:.0f}m, Delta: {temp_delta:.2f}C"
+                        f"ThermalAI: Cyclus genegeerd. Duur: {duration_min:.0f}m, Delta: {temp_delta:.2f}°C"
                     )
 
             # Reset
