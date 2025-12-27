@@ -107,7 +107,7 @@ class SolarAI:
 
         self.last_stable_advice = {
             "action": SolarStatus.WAIT,
-            "reason": "Systeem opstart...",
+            "reason": "Systeem starten",
             "plan_start": None,
         }
 

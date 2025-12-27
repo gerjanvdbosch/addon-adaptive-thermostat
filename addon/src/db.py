@@ -252,7 +252,8 @@ def upsert_dhw_sensor_data(
         )
         s.merge(rec)
         s.commit()
-    except Exception:
+    except Exception as e:
+        logger.exception(f"DB: Fout bij opslaan DHW sensor data: {e}")
         s.rollback()
     finally:
         s.close()

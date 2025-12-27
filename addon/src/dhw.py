@@ -297,6 +297,10 @@ class DhwAI:
                 hvac_mode=hvac_mode,
             )
 
+            self.last_logged_temp = temp
+            self.last_logged_hvac = hvac_mode
+            self.last_log_time = now
+
         # 2. Wat zegt SolarAI op dit moment?
         # solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
 
