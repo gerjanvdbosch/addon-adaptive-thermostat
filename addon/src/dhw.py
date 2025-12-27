@@ -4,6 +4,7 @@ import pandas as pd
 import shap
 
 from enum import Enum
+from collections import deque
 from ha_client import HAClient
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,15 +42,16 @@ class DhwAI:
 
         # Instellingen
         self.min_temp = float(
-            self.opts.get("dhw_min_temp", 30.0)
-        )  # Absolute ondergrens (altijd aan)
+            self.opts.get("dhw_min_temp", 35.0)
+        )  # Absolute ondergrens
         self.target_temp = float(self.opts.get("dhw_target_temp", 50.0))  # Comfort doel
         self.boost_temp = float(
-            self.opts.get("dhw_boost_temp", 50.0)
+            self.opts.get("dhw_boost_temp", 55.0)
         )  # Solar boost doel
 
-        # Hoe snel moet temp dalen om als 'douchen' geteld te worden? (Graden per minuut)
-        self.usage_detection_threshold = 0.4
+        # 0.2 graden/minuut = 1.0 graad per 5 minuten.
+        # Dit is gevoelig genoeg voor douche, maar filtert stilstand (0.001/min).
+        self.usage_detection_threshold = 0.2
 
         # Hoeveel minuten van tevoren moet het water warm zijn?
         self.lookahead_minutes = int(self.opts.get("dhw_lookahead_minutes", 90))
@@ -66,6 +68,14 @@ class DhwAI:
 
         self.model = None
         self.is_fitted = False
+
+        # --- Runtime State ---
+        # Buffer voor live detectie (glijdende schaal over 5 min)
+        self.temp_buffer = deque(maxlen=5)
+
+        # Buffer voor output stabiliteit (voorkom pendelen WP)
+        self.action_buffer = deque(maxlen=3)
+        self.last_stable_setpoint = self.min_temp
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_model()
@@ -110,33 +120,45 @@ class DhwAI:
             # Behoud alleen rijen waar de WP NIET bezig is met warm water
             df = df[df["hvac_mode"] != 2]  # 2 = SWW modus
 
-        # 3. Detecteer Events (Nu op schone data)
-        df = df.set_index("timestamp").resample("5min").mean().dropna()
-        df["diff"] = df["value"].diff() * -1
+        # 3. Detecteer Events (Aangepast voor 0.5C steps)
+        # We resamplen naar 5 minuten en kijken naar het verschil.
+        df = df.set_index("timestamp").sort_index()
 
-        # Als temp meer dan X graden zakt in 5 min, is het gebruik
-        # We zetten 'is_usage' op 1.
-        threshold_5min = self.usage_detection_threshold * 5
-        df["is_usage"] = (df["diff"] > threshold_5min).astype(int)
+        # Interpoleren om gaten te vullen, daarna resamplen
+        df_resampled = df["value"].resample("5min").mean().interpolate()
 
-        usage_count = df["is_usage"].sum()
+        # Bereken het verschil met 5 minuten geleden (shift 1 op 5min data)
+        # diff is positief als temp daalt
+        diff_series = df_resampled.diff(periods=1) * -1
+
+        # Drempel: usage_threshold (0.2) * 5 minuten = 1.0 graad daling
+        threshold_total_drop = self.usage_detection_threshold * 5.0
+
+        # Labeling
+        usage_labels = (diff_series > threshold_total_drop).astype(int)
+
+        usage_count = usage_labels.sum()
         logger.info(f"DhwAI: {usage_count} tap-events gedetecteerd in data.")
 
         if usage_count < 10:
             logger.warning("DhwAI: Te weinig tap-events gevonden om te trainen.")
             return
 
-        # 3. Features maken
-        df = df.reset_index()
-        df = add_cyclic_time_features(df, col_name="timestamp")
+        # 4. Features maken
+        df_features = pd.DataFrame(index=df_resampled.index)
+        df_features = add_cyclic_time_features(
+            df_features, col_name=None
+        )  # Index is datetime
 
-        X = df.reindex(columns=self.feature_columns)
-        y = df["is_usage"]
+        X = df_features.reindex(columns=self.feature_columns)
+        y = usage_labels
 
-        # 4. Train Model
-        # We gebruiken class_weight='balanced' omdat douchen zeldzaam is tov 'niet douchen'
+        # 5. Train Model
         clf = HistGradientBoostingClassifier(
-            learning_rate=0.05, max_iter=500, class_weight="balanced", random_state=42
+            learning_rate=0.05,
+            max_iter=500,
+            class_weight="balanced",  # Belangrijk: douchen is zeldzaam
+            random_state=42,
         )
 
         try:
@@ -148,18 +170,54 @@ class DhwAI:
         except Exception:
             logger.exception("DhwAI: Training gefaald.")
 
+    # ==============================================================================
+    # 2. RUNTIME DETECTIE
+    # ==============================================================================
+
+    def _detect_current_usage(self, current_temp):
+        """
+        Bepaalt of er NU gedoucht wordt, rekening houdend met 0.5C sensors en traagheid.
+        """
+        self.temp_buffer.append(current_temp)
+
+        if len(self.temp_buffer) < 2:
+            return False
+
+        # Vergelijk oudste (5 min geleden) met nu
+        # Bijv: buffer is [50.0, 50.0, 50.0, 49.5, 49.5] -> drop 0.5
+        drop = self.temp_buffer[0] - self.temp_buffer[-1]
+
+        # Drempel: 0.5 graad in 5 minuten is voor een 200L vat al een indicatie
+        # Als je sensor stappen van 0.5 doet, is >= 0.5 de enige logische check.
+        if drop >= 0.5:
+            # Extra check: Is de temp echt aan het zakken? (voorkom ruis 50->49.5->50)
+            return True
+
+        return False
+
+    # ==============================================================================
+    # 3. BESLUITVORMING
+    # ==============================================================================
+
     def get_recommendation(self, current_temp):
         """
         Geeft advies: Welke temperatuur moet de boiler hebben?
         """
         now = datetime.now()
+        is_showering_now = self._detect_current_usage(current_temp)
+
+        if is_showering_now:
+            # Optioneel: Als er gedoucht wordt, zet setpoint tijdelijk laag
+            # zodat WP niet gaat stoken TIJDENS douchen (comfort/flow issue).
+            # Of juist hoog om buffer te houden. Afhankelijk van je systeem.
+            pass
 
         # 1. VEILIGHEID: Kritieke ondergrens (Lege boiler)
         if current_temp < self.min_temp:
             return {
                 "action": "CRITICAL_HEAT",
                 "target": self.target_temp,
-                "reason": f"Temp te laag ({current_temp:.1f}C < {self.min_temp}C)",
+                "reason": f"Temp kritiek laag ({current_temp:.1f}C)",
             }
 
         solar_status_enum = None  # Placeholder voor SolarAI status
@@ -201,17 +259,21 @@ class DhwAI:
                     return {
                         "action": "PREDICTIVE_HEAT",
                         "target": self.target_temp,
-                        "reason": f"Verwacht gebruik om {future_ts.strftime('%H:%M')} ({prob:.2f})",
+                        "reason": f"Verwacht gebruik {future_ts.strftime('%H:%M')} ({prob:.0%})",
                     }
 
-        # 4. RUST: Niets aan de hand
+        # 4. RUST
         return {
             "action": "IDLE",
-            "target": self.min_temp,  # Val terug op ondergrens
+            "target": self.min_temp,
             "reason": "Geen vraag, geen zon",
         }
 
-    def run_cycle(self, features, solar_advice):
+    # ==============================================================================
+    # 4. MAIN LOOP
+    # ==============================================================================
+
+    def run_cycle(self, features):
         temp = safe_float(features.get("dhw_temp"))
 
         if temp is None:
@@ -221,7 +283,7 @@ class DhwAI:
 
         upsert_dhw_sensor_data(
             sensor_id=SensorPosition.TOP,
-            value=self.sww_top,
+            value=temp,
             hvac_mode=hvac_mode,
         )
 
@@ -235,20 +297,31 @@ class DhwAI:
         target = advice["target"]
         reason = advice["reason"]
 
-        # 4. Uitvoeren
-        # Hier moet je weten hoe je jouw SWW aanstuurt.
-        # Vaak is dat een setpoint zetten op de warmtepomp.
+        # 4. STABILITEIT (Debounce)
+        # We voeren de actie pas uit als we 3x (3 minuten) hetzelfde setpoint willen
+        self.action_buffer.append(target)
 
-        current_dhw_sp = self.ha.get_dhw_setpoint()
+        if len(self.action_buffer) == 3:
+            # Check of ze alle 3 gelijk zijn (stabiele wens)
+            if len(set(self.action_buffer)) == 1:
+                stable_target = self.action_buffer[0]
 
-        # Deadband check (niet voor elke 0.1 graad sturen)
-        if current_dhw_sp is not None and abs(current_dhw_sp - target) < 1.0:
-            return
+                # Voer alleen uit als het afwijkt van wat we als laatst deden
+                current_dhw_sp = self.ha.get_dhw_setpoint()
 
-        logger.info(f"DhwAI: Actie [{action}] -> {target}C ({reason})")
+                # Deadband van 1 graad
+                if (
+                    current_dhw_sp is not None
+                    and abs(current_dhw_sp - stable_target) < 1.0
+                ):
+                    return  # Niks doen
 
-        # Stuur commando naar HA
-        self.ha.set_dhw_setpoint(target)
+                logger.info(f"DhwAI: Actie [{action}] -> {stable_target}C ({reason})")
+                self.ha.set_dhw_setpoint(stable_target)
+                self.last_stable_setpoint = stable_target
+            else:
+                # Flipperend advies (bijv net wel/niet solar), doe niets
+                pass
 
     def get_influence_factors(self, target_time):
         """
@@ -281,29 +354,24 @@ class DhwAI:
                 col: float(val) for col, val in zip(self.feature_columns, vals)
             }
 
-            # 3. Vertalen naar mensentaal
             influences = {}
 
             def format_impact(val):
                 if abs(val) < 0.1:
-                    return None  # Ruis filteren
-                return "Verhoogt kans" if val > 0 else "Verlaagt kans"
+                    return None
+                return "Hoog" if val > 0 else "Laag"
 
-            # Tijdstip (Ochtendspits / Avondritueel)
-            time_impact = raw_influences.get("hour_sin", 0) + raw_influences.get(
+            time_val = raw_influences.get("hour_sin", 0) + raw_influences.get(
                 "hour_cos", 0
             )
-            imp = format_impact(time_impact)
-            if imp:
-                influences["Tijdstip"] = f"{imp} ({time_impact:+.2f})"
+            if abs(time_val) > 0.1:
+                influences["Tijdstip"] = f"{format_impact(time_val)} ({time_val:+.2f})"
 
-            # Weekdag (Weekend vs Werkdag)
-            day_impact = raw_influences.get("day_sin", 0) + raw_influences.get(
+            day_val = raw_influences.get("day_sin", 0) + raw_influences.get(
                 "day_cos", 0
             )
-            imp = format_impact(day_impact)
-            if imp:
-                influences["Weekdag"] = f"{imp} ({day_impact:+.2f})"
+            if abs(day_val) > 0.1:
+                influences["Weekdag"] = f"{format_impact(day_val)} ({day_val:+.2f})"
 
             return influences
 
