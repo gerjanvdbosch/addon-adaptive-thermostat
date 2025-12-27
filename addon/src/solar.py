@@ -97,11 +97,19 @@ class SolarAI:
         # Solcast Cache
         self.cached_solcast_data = []
         self.last_solcast_poll_ts = None
+        self.solcast_just_updated = False
         self.last_midnight_reset_date = datetime.now().date()
 
         # Stabiliteits Buffer
-        self.history_len = int(600 / max(1, self.interval))
+        self.history_len = int(300 / max(1, self.interval))
         self.pv_buffer = deque(maxlen=self.history_len)
+        self.state_buffer = deque(maxlen=4)
+
+        self.last_stable_advice = {
+            "action": SolarStatus.WAIT,
+            "reason": "Systeem opstart...",
+            "plan_start": None,
+        }
 
         # Slot Aggregatie
         self.current_slot_start = None
@@ -208,6 +216,7 @@ class SolarAI:
             logger.info("SolarAI: Nieuwe dag. Cache reset.")
             self.cached_solcast_data = []
             self.last_solcast_poll_ts = None
+            self.solcast_just_updated = True
             self.last_midnight_reset_date = today
 
     def _update_solcast_cache(self):
@@ -247,6 +256,7 @@ class SolarAI:
                     )
 
                 self.last_solcast_poll_ts = current_poll_ts
+                self.solcast_just_updated = True
                 logger.info("SolarAI: Solcast cache vernieuwd")
             else:
                 logger.warning("SolarAI: Solcast sensor data onvolledig.")
@@ -353,9 +363,14 @@ class SolarAI:
             expected_now = df.loc[nearest_idx, "ai_power_raw"]
             if expected_now > self.min_noise_kw:
                 new_bias = median_pv / expected_now
+                alpha = 0.8 if self.solcast_just_updated else 0.2
+
                 # EWMA smoothing
-                self.smoothed_bias = (0.8 * self.smoothed_bias) + (0.2 * new_bias)
+                self.smoothed_bias = ((1.0 - alpha) * self.smoothed_bias) + (
+                    alpha * new_bias
+                )
                 self.smoothed_bias = np.clip(self.smoothed_bias, 0.4, 1.6)
+                self.solcast_just_updated = False
 
         df["ai_power"] = (df["ai_power_raw"] * self.smoothed_bias).clip(
             0, self.system_max_kw
@@ -589,21 +604,53 @@ class SolarAI:
         self._process_pv_sample(pv_kw)
         self._update_solcast_cache()
 
-        # 3. Krijg advies en log het
-        advice = self.get_solar_recommendation()
+        # 3. Krijg het RUWE advies (kan flipperen)
+        raw_advice = self.get_solar_recommendation()
+
+        # Voeg toe aan de buffer (oudste valt er automatisch af bij >4)
+        self.state_buffer.append(raw_advice)
+
+        # 4. BEPAAL STABIELE STATUS
+        # We kijken of de buffer vol is (4 items) én of de 'action' overal gelijk is
+        if len(self.state_buffer) == 4:
+            # Pak de 'action' van het nieuwste item
+            newest_action = self.state_buffer[-1]["action"]
+
+            # Check of alle items in de buffer dezelfde action hebben
+            is_stable = all(
+                item["action"] == newest_action for item in self.state_buffer
+            )
+
+            if is_stable:
+                # JAA: 4x hetzelfde! We accepteren dit als de nieuwe waarheid.
+                # We gebruiken het NIEUWSTE advies (zodat de timestamp/reden up-to-date is)
+                self.last_stable_advice = raw_advice
+            else:
+                # NEE: Nog aan het twijfelen/flipperen.
+                # We blijven bij wat we hiervoor hadden, maar updaten wel de 'last_update' tijd
+                pass
+
+        # Dit is wat we daadwerkelijk gaan uitvoeren/loggen
+        final_advice = self.last_stable_advice
+
+        # Logica voor logging: als we 'intern' al wel START zien maar nog wachten op stabiliteit
+        # is het handig dat in de logs te zien (optioneel)
+        pending_msg = ""
+        if raw_advice["action"] != final_advice["action"]:
+            pending_msg = f" (Pending: {raw_advice['action'].value})"
 
         # Haal de string waarde uit de Enum
-        res_enum = advice["action"]
+        res_enum = final_advice["action"]
         res_str = res_enum.value
-        reason = advice["reason"]
+        reason = final_advice["reason"]
         p_time = (
-            advice.get("plan_start").strftime("%H:%M")
-            if advice.get("plan_start")
+            final_advice.get("plan_start").strftime("%H:%M")
+            if final_advice.get("plan_start")
             else "--:--"
         )
 
         logger.info(
-            f"SolarAI: [{res_str}] {reason} | Plan: {p_time} | Bias: {self.smoothed_bias:.2f}"
+            f"SolarAI: [{res_str}]{pending_msg} {reason} | Plan: {p_time} | Bias: {self.smoothed_bias:.2f}"
         )
 
         self.ha.set_solar_prediction(
@@ -612,8 +659,8 @@ class SolarAI:
                 "status": res_str,
                 "reason": reason,
                 "planned_start": (
-                    advice.get("plan_start").isoformat()
-                    if advice.get("plan_start")
+                    final_advice.get("plan_start").isoformat()
+                    if final_advice.get("plan_start")
                     else None
                 ),
                 "bias_factor": round(self.smoothed_bias, 2),
