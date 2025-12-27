@@ -17,7 +17,7 @@ from sklearn.metrics import mean_absolute_error
 from db import fetch_training_setpoints_df, insert_setpoint
 from collector import Collector
 from ha_client import HAClient
-from utils import safe_float, add_cyclic_time_features, round_half
+from utils import safe_float, add_cyclic_time_features, round_half, safe_round
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class ThermostatAI:
         self.learning_blocked = False
 
         # Buffer voor de laatste 10 ticks
-        self.prediction_buffer = deque(maxlen=10)
+        self.prediction_buffer = deque(maxlen=5)
 
         # Initialisatie
         self._load_model()
@@ -292,9 +292,16 @@ class ThermostatAI:
             pred_delta = float(prediction[0])
             raw_rec = current_sp + pred_delta
 
-            # 2. Smoothing: Voeg toe aan buffer en pak het gemiddelde
-            self.prediction_buffer.append(raw_rec)
-            smoothed_rec = sum(self.prediction_buffer) / len(self.prediction_buffer)
+            rounded_rec = safe_round(raw_rec)
+            self.prediction_buffer.append(rounded_rec)
+
+            if (
+                len(self.prediction_buffer) != 5
+                or len(set(self.prediction_buffer)) != 1
+            ):
+                # Nog aan het twijfelen of buffer niet vol -> Doe niets.
+                return current_sp
+
         except Exception:
             logger.exception("ThermostatAI: Fout bij voorspelling setpoint.")
             return current_sp
@@ -303,7 +310,7 @@ class ThermostatAI:
         min_sp = float(self.opts.get("min_setpoint", 15.0))
         max_sp = float(self.opts.get("max_setpoint", 25.0))
 
-        return max(min(smoothed_rec, max_sp), min_sp)
+        return max(min(rounded_rec, max_sp), min_sp)
 
     def get_influence_factors(self, features, current_sp):
         """
