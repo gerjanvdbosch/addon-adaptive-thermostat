@@ -301,7 +301,7 @@ class ThermostatAI:
             ):
                 # Nog aan het twijfelen of buffer niet vol -> Doe niets.
                 logger.info(
-                    f"ThermostatAI: Aanbevolen setpoint {rounded_rec}°C  nog niet stabiel."
+                    f"ThermostatAI: Aanbevolen setpoint {rounded_rec}°C nog niet stabiel."
                 )
                 return current_sp
 
