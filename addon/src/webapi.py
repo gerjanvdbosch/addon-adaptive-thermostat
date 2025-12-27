@@ -253,9 +253,7 @@ def get_current_status():
             },
             "dhw": {
                 "current_temp": sww_temp,
-                "target_temp": dhw_rec.get("target"),
-                "action": dhw_rec.get("action"),
-                "reason": dhw_rec.get("reason"),
+                "target_temp": dhw_rec,
                 "explanation": dhw_influences,
             },
             "system": {

@@ -214,11 +214,8 @@ class DhwAI:
 
         # 1. VEILIGHEID: Kritieke ondergrens (Lege boiler)
         if current_temp < self.min_temp:
-            return {
-                "action": "CRITICAL_HEAT",
-                "target": self.target_temp,
-                "reason": f"Temp kritiek laag ({current_temp:.1f}C)",
-            }
+            logger.info(f"DhwAI: Temp kritiek laag {current_temp:.1f}C")
+            return self.target_temp
 
         solar_status_enum = None  # Placeholder voor SolarAI status
 
@@ -227,17 +224,11 @@ class DhwAI:
         if str(solar_status_enum) == "START":
             # Check of we nog ruimte hebben (bottom sensor is hier handig voor, maar top werkt ook)
             if current_temp < self.boost_temp:
-                return {
-                    "action": "SOLAR_BOOST",
-                    "target": self.boost_temp,
-                    "reason": "Zonne-energie benutten",
-                }
+                logger.info("DhwAI: Zonnebuffer actief.")
+                return self.boost_temp
             else:
-                return {
-                    "action": "IDLE",
-                    "target": self.min_temp,  # Terug naar min, buffer is vol
-                    "reason": "Zonnebuffer vol",
-                }
+                logger.info("DhwAI: Zonnebuffer vol")
+                return self.min_temp
 
         # 3. VOORSPELLING: Alleen als solar 'DONE', 'NIGHT' of 'LOW_LIGHT' is
         # Of als we gewoon zeker willen zijn.
@@ -256,18 +247,13 @@ class DhwAI:
             if prob > self.confidence_threshold:
                 # Moeten we nog stoken?
                 if current_temp < self.target_temp:
-                    return {
-                        "action": "PREDICTIVE_HEAT",
-                        "target": self.target_temp,
-                        "reason": f"Verwacht gebruik {future_ts.strftime('%H:%M')} ({prob:.0%})",
-                    }
+                    logger.info(
+                        f"DhwAI: Verwacht gebruik om {future_ts.strftime('%H:%M')} ({prob:.0%})"
+                    )
+                    return self.target_temp
 
         # 4. RUST
-        return {
-            "action": "IDLE",
-            "target": self.min_temp,
-            "reason": "Geen vraag",
-        }
+        return self.min_temp
 
     # ==============================================================================
     # 4. MAIN LOOP
@@ -291,11 +277,7 @@ class DhwAI:
         # solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
 
         # 3. Vraag DhwAI om advies
-        advice = self.get_recommendation(temp)  # solar_status
-
-        action = advice["action"]
-        target = advice["target"]
-        reason = advice["reason"]
+        target = self.get_recommendation(temp)  # solar_status
 
         # 4. STABILITEIT (Debounce)
         # We voeren de actie pas uit als we 3x (3 minuten) hetzelfde setpoint willen
@@ -316,7 +298,6 @@ class DhwAI:
                 ):
                     return  # Niks doen
 
-                logger.info(f"DhwAI: Actie [{action}] -> {stable_target}C ({reason})")
                 self.ha.set_dhw_setpoint(stable_target)
                 self.last_stable_setpoint = stable_target
             else:
