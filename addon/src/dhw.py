@@ -263,6 +263,7 @@ class DhwAI:
         temp = safe_float(features.get("dhw_temp"))
 
         if temp is None:
+            logger.info("DhwAI: geen temp beschikbaar")
             return
 
         hvac_mode = features.get("hvac_mode")
