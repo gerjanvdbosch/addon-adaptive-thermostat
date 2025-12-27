@@ -69,6 +69,7 @@ class DhwAI:
         self.last_logged_temp = None
         self.last_logged_hvac = None
         self.last_log_time = datetime.min
+        self.log_deque = deque(maxlen=2)
 
         self.model = None
         self.is_fitted = False
@@ -113,7 +114,7 @@ class DhwAI:
         # We nemen aan dat je een helper hebt die raw sensor data als DataFrame geeft
         df = fetch_dhw_history(sensor=SensorPosition.TOP.value, days=60)
 
-        if df is None or len(df) < 100:
+        if df is None or len(df) < 2000:
             logger.warning("DhwAI: Te weinig data.")
             return
 
@@ -264,48 +265,61 @@ class DhwAI:
     # ==============================================================================
 
     def run_cycle(self, features):
-        temp = safe_float(features.get("dhw_temp"))
+        current_temp = safe_float(features.get("dhw_temp"))
 
-        if temp is None:
+        if current_temp is None:
             logger.warning("DhwAI: geen temp beschikbaar")
             return
 
-        hvac_mode = features.get("hvac_mode")
+        current_hvac = features.get("hvac_mode")
 
         should_log = False
         now = datetime.now()
 
-        # 1. Is de temperatuur veranderd? (Sensor stap is 0.5, dus elke != is relevant)
-        if self.last_logged_temp is None or temp != self.last_logged_temp:
+        self.log_deque.append(current_temp)
+
+        # A. Altijd loggen na een uur (heartbeat)
+        if (now - self.last_db_time).total_seconds() > 3600:
             should_log = True
 
-        # 2. Is de warmtepomp modus veranderd? (Belangrijk voor je training data filter!)
-        elif self.last_logged_hvac is None or hvac_mode != self.last_logged_hvac:
+        # B. Altijd loggen als HVAC modus verandert (bijv. WP gaat aan)
+        elif self.last_db_hvac != current_hvac:
             should_log = True
 
-        # 3. Heartbeat: Log sowieso elke 60 minuten, ook als er niets gebeurt
-        #    Dit voorkomt gaten in je grafieken en laat zien dat het systeem nog leeft.
-        elif (now - self.last_log_time).total_seconds() > 3600:
+        # C. Temperatuur logica
+        elif self.last_db_temp is None:
             should_log = True
+
+        elif current_temp != self.last_db_temp:
+            # Situatie 1: Temperatuur daalt (DOUCHEN!)
+            if current_temp < self.last_db_temp:
+                should_log = True
+
+            # Situatie 2: Temperatuur stijgt of flappert (Ruis of Opwarmen)
+            elif (
+                len(self.log_deque) == self.log_deque.maxlen
+                and len(set(self.log_deque)) == 1
+            ):
+                should_log = True
 
         if should_log:
-            logger.info(f"DhwAI: Logging temp {temp}°C")
+            logger.info(f"DhwAI: Logging temp {current_temp}°C")
 
             upsert_dhw_sensor_data(
                 sensor_id=SensorPosition.TOP.value,
-                value=temp,
-                hvac_mode=hvac_mode,
+                value=current_temp,
+                hvac_mode=current_hvac,
             )
 
-            self.last_logged_temp = temp
-            self.last_logged_hvac = hvac_mode
+            self.last_logged_temp = current_temp
+            self.last_logged_hvac = current_hvac
             self.last_log_time = now
 
         # 2. Wat zegt SolarAI op dit moment?
         # solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
 
         # 3. Vraag DhwAI om advies
-        target = self.get_recommendation(temp)  # solar_status
+        target = self.get_recommendation(current_temp)  # solar_status
 
         # 4. STABILITEIT (Debounce)
         # We voeren de actie pas uit als we 3x (3 minuten) hetzelfde setpoint willen
