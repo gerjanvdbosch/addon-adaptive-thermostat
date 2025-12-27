@@ -39,13 +39,6 @@ class DhwAI:
             self.opts.get("dhw_model_path", "/config/models/dhw_model.joblib")
         )
 
-        self.sww_top = self.opts.get(
-            "sensor_top", "sensor.ecodan_heatpump_ca09ec_sww_huidige_temp"
-        )
-
-        # Thermostat Entity voor SWW (Als je die apart kunt instellen)
-        self.dhw_setpoint = self.opts.get("entity_dhw_setpoint", "climate.dhw_water")
-
         # Instellingen
         self.min_temp = float(
             self.opts.get("dhw_min_temp", 30.0)
@@ -106,7 +99,7 @@ class DhwAI:
         # We nemen aan dat je een helper hebt die raw sensor data als DataFrame geeft
         df = fetch_dhw_history(sensor=SensorPosition.TOP, days=60)
 
-        if df is None or len(df) < 1000:
+        if df is None or len(df) < 100:
             logger.warning("DhwAI: Te weinig data.")
             return
 
@@ -115,7 +108,7 @@ class DhwAI:
         # We filteren deze regels eruit.
         if "hvac_mode" in df.columns:
             # Behoud alleen rijen waar de WP NIET bezig is met warm water
-            df = df[df["hvac_mode"] != "dhw"]
+            df = df[df["hvac_mode"] != 2]  # 2 = SWW modus
 
         # 3. Detecteer Events (Nu op schone data)
         df = df.set_index("timestamp").resample("5min").mean().dropna()
@@ -155,7 +148,7 @@ class DhwAI:
         except Exception:
             logger.exception("DhwAI: Training gefaald.")
 
-    def get_recommendation(self, current_temp, solar_status_enum):
+    def get_recommendation(self, current_temp):
         """
         Geeft advies: Welke temperatuur moet de boiler hebben?
         """
@@ -168,6 +161,8 @@ class DhwAI:
                 "target": self.target_temp,
                 "reason": f"Temp te laag ({current_temp:.1f}C < {self.min_temp}C)",
             }
+
+        solar_status_enum = None  # Placeholder voor SolarAI status
 
         # 2. SOLAR: Als SolarAI zegt 'START', gaan we boosten
         # (We luisteren hier naar de status van SolarAI die de coordinator doorgeeft)
@@ -216,21 +211,25 @@ class DhwAI:
             "reason": "Geen vraag, geen zon",
         }
 
-    def run_cycle(self, features, solar_advice, current_hvac_mode):
-        if self.sww_top is None:
+    def run_cycle(self, features, solar_advice):
+        temp = safe_float(features.get("dhw_temp"))
+
+        if temp is None:
             return
+
+        hvac_mode = features.get("hvac_mode")
 
         upsert_dhw_sensor_data(
             sensor_id=SensorPosition.TOP,
             value=self.sww_top,
-            hvac_mode=current_hvac_mode,
+            hvac_mode=hvac_mode,
         )
 
         # 2. Wat zegt SolarAI op dit moment?
-        solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
+        # solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
 
         # 3. Vraag DhwAI om advies
-        advice = self.get_recommendation(self.sww_top, solar_status)
+        advice = self.get_recommendation(temp)  # solar_status
 
         action = advice["action"]
         target = advice["target"]
@@ -240,9 +239,7 @@ class DhwAI:
         # Hier moet je weten hoe je jouw SWW aanstuurt.
         # Vaak is dat een setpoint zetten op de warmtepomp.
 
-        current_dhw_sp = safe_float(
-            self.ha.get_state(self.entity_dhw_setpoint, attribute="temperature")
-        )
+        current_dhw_sp = self.ha.get_dhw_setpoint()
 
         # Deadband check (niet voor elke 0.1 graad sturen)
         if current_dhw_sp is not None and abs(current_dhw_sp - target) < 1.0:

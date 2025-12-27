@@ -84,6 +84,9 @@ class HAClient:
         self._set_state(entity_id, value, attrs, "Adaptive Solar Prediction")
         logger.debug(f"Solar prediction updated: {value} with attrs {attrs}")
 
+    def get_dhw_setpoint(self):
+        return safe_float(self.get_state(self.opts.get("dhw_entity")))
+
     def set_dhw_setpoint(self, value):
         setpoint = safe_round(float(value))
         entity_id = self.opts.get("dhw_entity")

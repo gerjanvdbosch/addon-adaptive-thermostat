@@ -544,7 +544,7 @@ class SolarAI:
             }
 
         # C. Normale Drempel
-        if median_pv >= final_trigger_val:
+        if median_pv > final_trigger_val:
             if is_waiting_worth_it:
                 return {
                     "action": SolarStatus.WAIT,
@@ -565,7 +565,7 @@ class SolarAI:
 
             return {
                 "action": SolarStatus.START,
-                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} >= {final_trigger_val:.2f})",
+                "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} > {final_trigger_val:.2f})",
                 "plan_start": datetime.now(local_tz),
             }
 

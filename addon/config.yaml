@@ -16,6 +16,7 @@ options:
   solar_entity: sensor.adaptive_thermostat_solar_forecast
   presence_entity: input_number.kans_thuis_aanwezig
   thermal_entity: input_number.warmtepomp_voorverwarming_tijd_minuten
+  dhw_entity: input_number.adaptive_dhw_setpoint
   thermostat_interval_seconds: 60
   solar_interval_seconds: 15
   cooldown_hours: 2.0
@@ -47,6 +48,7 @@ schema:
   solar_entity: "str?"
   presence_entity: "str?"
   thermal_entity: "str?"
+  dhw_entity: "str?"
   thermostat_interval_seconds: "int?"
   solar_interval_seconds: "int?"
   cooldown_hours: "float?"
