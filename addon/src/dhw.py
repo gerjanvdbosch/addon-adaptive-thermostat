@@ -42,7 +42,7 @@ class DhwAI:
 
         # Instellingen
         self.min_temp = float(
-            self.opts.get("dhw_min_temp", 35.0)
+            self.opts.get("dhw_min_temp", 30.0)
         )  # Absolute ondergrens
         self.target_temp = float(self.opts.get("dhw_target_temp", 50.0))  # Comfort doel
         self.boost_temp = float(
