@@ -36,6 +36,7 @@ def _load_options():
         "thermostat_interval_seconds": int(
             os.getenv("THERMOSTAT_INTERVAL_SECONDS", 60)
         ),
+        "dhw_entity": os.getenv("DHW_ENTITY"),
         "solar_interval_seconds": int(os.getenv("SOLAR_INTERVAL_SECONDS", 15)),
         "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 2)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
