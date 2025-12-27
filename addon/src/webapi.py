@@ -14,7 +14,7 @@ from db import (
     SolarRecord,
     PresenceRecord,
     HeatingCycle,
-    DhwSensorData,
+    DhwRecord,
 )
 
 logger = logging.getLogger(__name__)
@@ -389,8 +389,8 @@ def get_dhw_history(limit: int = 100, offset: int = 0):
     s = Session()
     try:
         stmt = (
-            select(DhwSensorData)
-            .order_by(desc(DhwSensorData.timestamp))
+            select(DhwRecord)
+            .order_by(desc(DhwRecord.timestamp))
             .limit(limit)
             .offset(offset)
         )
@@ -502,7 +502,7 @@ def delete_dhw(timestamp: datetime, sensor_id: int):
     s = Session()
     try:
         # We gebruiken s.get() met een tuple voor composite keys
-        record = s.get(DhwSensorData, (timestamp, sensor_id))
+        record = s.get(DhwRecord, (timestamp, sensor_id))
         if not record:
             raise HTTPException(status_code=404, detail="DHW record not found")
 
