@@ -216,7 +216,7 @@ class DhwAI:
             "reason": "Geen vraag, geen zon",
         }
 
-    def run_cycle(self, solar_advice, current_hvac_mode):
+    def run_cycle(self, features, solar_advice, current_hvac_mode):
         if self.sww_top is None:
             return
 
