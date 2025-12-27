@@ -66,6 +66,10 @@ class DhwAI:
             "doy_cos",
         ]
 
+        self.last_logged_temp = None
+        self.last_logged_hvac = None
+        self.last_log_time = datetime.min
+
         self.model = None
         self.is_fitted = False
 
@@ -263,18 +267,35 @@ class DhwAI:
         temp = safe_float(features.get("dhw_temp"))
 
         if temp is None:
-            logger.info("DhwAI: geen temp beschikbaar")
+            logger.warning("DhwAI: geen temp beschikbaar")
             return
 
         hvac_mode = features.get("hvac_mode")
 
-        logger.info(f"DhwAI: Huidige temp: {temp:.1f}C")
+        should_log = False
+        now = datetime.now()
 
-        upsert_dhw_sensor_data(
-            sensor_id=SensorPosition.TOP,
-            value=temp,
-            hvac_mode=hvac_mode,
-        )
+        # 1. Is de temperatuur veranderd? (Sensor stap is 0.5, dus elke != is relevant)
+        if self.last_logged_temp is None or temp != self.last_logged_temp:
+            should_log = True
+
+        # 2. Is de warmtepomp modus veranderd? (Belangrijk voor je training data filter!)
+        elif self.last_logged_hvac is None or hvac_mode != self.last_logged_hvac:
+            should_log = True
+
+        # 3. Heartbeat: Log sowieso elke 60 minuten, ook als er niets gebeurt
+        #    Dit voorkomt gaten in je grafieken en laat zien dat het systeem nog leeft.
+        elif (now - self.last_log_time).total_seconds() > 3600:
+            should_log = True
+
+        if should_log:
+            logger.info(f"DhwAI: Logging temp {temp}, hvac {hvac_mode}")
+
+            upsert_dhw_sensor_data(
+                sensor_id=SensorPosition.TOP,
+                value=temp,
+                hvac_mode=hvac_mode,
+            )
 
         # 2. Wat zegt SolarAI op dit moment?
         # solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
