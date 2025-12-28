@@ -248,7 +248,7 @@ class DhwAI:
                 )
 
                 duration = (now - self.session_start_time).total_seconds() / 60.0
-                drop = self.session_start_tem - self.lowest_temp_seen
+                drop = self.session_start_temp - self.lowest_temp_seen
                 logger.info(
                     f"DhwAI: Douche sessie opgeslagen! (-{drop:.1f}°C in {duration:.1f} min)"
                 )

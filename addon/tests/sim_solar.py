@@ -127,8 +127,9 @@ def run_simulation():
 
     results = []
 
-    print(f"{'Tijd':<8} | {'PV Act':<8} | {'Drempel':<8} | {'Bias':<5} | {'Status':<12}")
-    print("-" * 55)
+    # Header uitlijning
+    print(f"{'Tijd':<8} | {'PV Act':<8} | {'Drempel':<8} | {'Bias':<4} | {'Status':<12} | {'Drempel %':<8}")
+    print("-" * 72)
 
     for i, t in enumerate(times):
         with freeze_time(t):
@@ -138,14 +139,20 @@ def run_simulation():
             res = ai.last_stable_advice
             ctx = res["context"]
 
-            results.append({
-                "time": t, "pv": actual_pv_values[i], "status": res["action"].value,
-                "threshold": ctx.trigger_threshold_kw if ctx else 0,
-                "bias": ctx.bias_factor if ctx else 1.0
-            })
+            # Data opslaan voor plot en logging
+            row = {
+                "time": t,
+                "pv": actual_pv_values[i],
+                "status": res["action"].value,
+                "threshold": ctx.trigger_threshold_kw if ctx else 0.0,
+                "bias": ctx.bias_factor if ctx else 1.0,
+                "pct": (ctx.threshold_percentage * 100) if ctx else 0.0,
+            }
+            results.append(row)
 
+            # Log elke 10 minuten
             if t.minute % 10 == 0:
-                print(f"{t.strftime('%H:%M'):<8} | {actual_pv_values[i]:>6.2f}k | {results[-1]['threshold']:>6.2f}k | {results[-1]['bias']:>4.2f} | {results[-1]['status']:<12}")
+                print(f"{t.strftime('%H:%M'):<8} | {row['pv']:>6.2f}kW | {row['threshold']:>6.2f}kW | {row['bias']:>4.2f} | {row['status']:<12} | {row['pct']:>6.1f}%")
 
     # --- PLOT ---
     df = pd.DataFrame(results)
