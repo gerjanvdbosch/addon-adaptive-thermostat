@@ -467,12 +467,12 @@ class SolarAI:
         # A. Bereken hoeveel 'brandstof' we nog hebben vandaag
         # We tellen de verwachte kW's op in de 'future' dataset.
         # (x 0.5 omdat data vaak per half uur is, of als benadering van kWh)
-        remaining_kwh = future["ai_power_raw"].sum() * 0.5
+        remaining_kwh_raw = future["ai_power_raw"].sum() * 0.5
+        total_kwh_raw = df_today["ai_power_raw"].sum() * 0.5
 
         remaining_ratio = 0.0
-        if daily_kwh > 0.1:
-            remaining_ratio = remaining_kwh / daily_kwh
-            # Begrens tussen 0.0 en 1.0
+        if total_kwh_raw > 0.1:
+            remaining_ratio = remaining_kwh_raw / total_kwh_raw
             remaining_ratio = max(0.0, min(remaining_ratio, 1.0))
 
         # B. De Nieuwe Formule
