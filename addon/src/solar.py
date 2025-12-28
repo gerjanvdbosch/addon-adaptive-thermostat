@@ -103,7 +103,7 @@ class SolarAI:
         # Stabiliteits Buffer
         self.history_len = int(300 / max(1, self.interval))
         self.pv_buffer = deque(maxlen=self.history_len)
-        self.state_buffer = deque(maxlen=4)
+        self.state_buffer = deque(maxlen=10)
 
         self.last_stable_advice = {
             "action": SolarStatus.WAIT,
@@ -479,19 +479,11 @@ class SolarAI:
         # Basis: 0.60
         # Kwaliteit: Max +0.20 (Zonnige dag = strenger)
         # Resterend: Max +0.15 (Ochtend = strenger, Middag = soepeler)
-
         percentage = 0.60 + (day_quality_ratio * 0.20) + (remaining_ratio * 0.15)
 
         # Veiligheid: Begrens het totaal tussen 65% en 92%
         # 92% is de max om te voorkomen dat we in de zomer nooit starten.
         percentage = max(0.65, min(percentage, 0.92))
-
-        # E. WINTER DEMPING (optioneel als de drempel te hoog ligt)
-        # Als het winter is (season_factor < 0.6), cappen we het percentage op 80%.
-        # Dit voorkomt dat we op een 'perfecte winterdag' (1.2kW) gaan wachten op
-        # die laatste 100 Watt die misschien net niet komt.
-        # if season_factor < 0.6:
-        #     percentage = min(percentage, 0.80)
 
         day_quality_high = 0.75
         day_quality_average = 0.4
@@ -516,7 +508,7 @@ class SolarAI:
 
         logger.info(
             f"SolarAI: Piek: {day_peak:.2f}kW (SeasonMax: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
-            f"Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
+            f"DayRatio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW | Percentage: {percentage:.2%}"
         )
 
         # ----------------------------------------------------------------------
@@ -700,7 +692,7 @@ class SolarAI:
         )
 
         self.ha.set_solar_prediction(
-            f"{res_str}: {p_time}",
+            final_advice.get("plan_start"),
             {
                 "status": res_str,
                 "reason": reason,
