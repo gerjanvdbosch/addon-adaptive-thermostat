@@ -94,11 +94,13 @@ def generate_scenario():
     # 3. Genereer actuele PV waarden (Simulatie van de werkelijkheid)
     times = pd.date_range(f"{simulation_date} 07:00", f"{simulation_date} 17:00", freq="1min", tz=timezone.utc)
     actual_pv = []
+    forecast_pv = [] # Nieuwe lijst voor de grafiek
 
 
     actual_pv = []
     for t in times:
         theoretical = df_fc.loc[t, 'pv_estimate'] if t in df_fc.index else 0.0
+        forecast_pv.append(theoretical)
         # Bias curve: 0.35 -> 0.95
         if t.hour < 9: bias = 0.35
         elif 9 <= t.hour < 11: bias = 0.35 + ((t.hour-9)*60 + t.minute)/120 * 0.60
@@ -107,7 +109,7 @@ def generate_scenario():
 
 
 
-    return times, forecast_payload, actual_pv
+    return times, forecast_payload, actual_pv, forecast_pv
 
 # --- STAP 4: SIMULATIE RUNNER ---
 def run_simulation():
@@ -119,7 +121,7 @@ def run_simulation():
     opts = {"system_max_kw": 2.0, "duration_hours": 1.0, "min_viable_kw": 0.3, "state_length": 1}
     ai = SolarAI(mock_ha, opts)
 
-    times, forecast_payload, actual_pv_values = generate_scenario()
+    times, forecast_payload, actual_pv_values, forecast_values = generate_scenario()
 
     # Zet de initiele forecast in de mock
     mock_ha.get_payload.return_value = {"attributes": {"detailedForecast": forecast_payload}}
@@ -127,9 +129,9 @@ def run_simulation():
 
     results = []
 
-    # Header uitlijning
-    print(f"{'Tijd':<8} | {'PV Act':<8} | {'Drempel':<8} | {'Bias':<4} | {'Status':<12} | {'Drempel %':<8}")
-    print("-" * 72)
+    # Header uitlijning met alle kolommen
+    print(f"{'Tijd':<8} | {'PV Act':<8} | {'Forecast':<8} | {'Drempel':<8} | {'Bias':<4} | {'Status':<12} | {'Drempel %':<8}")
+    print("-" * 75)
 
     for i, t in enumerate(times):
         with freeze_time(t):
@@ -143,6 +145,7 @@ def run_simulation():
             row = {
                 "time": t,
                 "pv": actual_pv_values[i],
+                "forecast": forecast_values[i],
                 "status": res["action"].value,
                 "threshold": ctx.trigger_threshold_kw if ctx else 0.0,
                 "bias": ctx.bias_factor if ctx else 1.0,
@@ -152,21 +155,25 @@ def run_simulation():
 
             # Log elke 10 minuten
             if t.minute % 10 == 0:
-                print(f"{t.strftime('%H:%M'):<8} | {row['pv']:>6.2f}kW | {row['threshold']:>6.2f}kW | {row['bias']:>4.2f} | {row['status']:<12} | {row['pct']:>6.1f}%")
+                print(f"{t.strftime('%H:%M'):<8} | {row['pv']:>6.2f}kW | {row['forecast']:>6.2f}kW | {row['threshold']:>6.2f}kW | {row['bias']:>4.2f} | {row['status']:<12} | {row['pct']:>6.1f}%")
 
     # --- PLOT ---
     df = pd.DataFrame(results)
     plt.figure(figsize=(12, 6))
+
+    # Lijnen
+    plt.plot(df['time'], df['forecast'], label='Solcast Forecast (kW)', color='blue', linestyle=':', alpha=0.7, lw=1.5)
     plt.plot(df['time'], df['pv'], label='Actueel PV (kW)', color='orange', lw=2)
     plt.plot(df['time'], df['threshold'], label='Trigger Drempel (kW)', color='red', linestyle='--')
 
-    # Highlight de START zones
-    plt.fill_between(df['time'], 0, df['pv'].max(), where=(df['status'] == 'START'), color='green', alpha=0.1, label='START Signaal')
+    # START zones inkleuren
+    plt.fill_between(df['time'], 0, df['forecast'].max(), where=(df['status'] == 'START'), color='green', alpha=0.1, label='START Signaal')
 
-    plt.title("Simulatie met Jouw Solcast Data")
+    plt.title("Simulatie: Forecast vs Werkelijkheid")
     plt.ylabel("kW")
-    plt.legend()
+    plt.legend(loc='upper left')
     plt.grid(alpha=0.3)
+    plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
