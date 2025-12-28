@@ -97,7 +97,7 @@ class SolarAI:
             "sensor_solcast_poll", "sensor.solcast_pv_forecast_api_last_polled"
         )
 
-        self.model_path.parent.mkdir(parents=True, exist_ok=True)
+        # self.model_path.parent.mkdir(parents=True, exist_ok=True)
 
         # --- State ---
         self.model = None
@@ -344,6 +344,8 @@ class SolarAI:
         if not self.cached_solcast_data:
             return {"action": SolarStatus.WAIT, "reason": "Geen Solcast data"}
 
+        median_pv, is_stable = self._get_stability_stats()
+
         # 1. DataFrame Voorbereiden
         df = pd.DataFrame(self.cached_solcast_data)
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
@@ -351,12 +353,18 @@ class SolarAI:
 
         now_utc = pd.Timestamp.now(tz="UTC")
         now_floor = now_utc.replace(second=0, microsecond=0)
+        local_tz = datetime.now().astimezone().tzinfo
         future = df[df["timestamp"] >= now_floor].copy()
 
-        # Check of er in de TOEKOMST nog zon komt
-        if future[future["pv_estimate"] > self.min_noise_kw].empty:
-            # Als er vandaag al wel zon is geweest, noemen we het DONE.
-            # Als er nog helemaal geen zon is geweest (vroege ochtend), noemen we het NIGHT.
+        # 1. Check of de forecast zegt dat het over is
+        forecast_says_dark = future[future["pv_estimate"] > self.min_noise_kw].empty
+
+        # 2. Check of de panelen zeggen dat het over is
+        actual_is_dark = median_pv <= self.min_noise_kw
+
+        # We gaan pas naar de eind-statussen als BEIDE waar zijn
+        if forecast_says_dark and actual_is_dark:
+            # Check of er vandaag al zon is geweest voor het onderscheid DONE/NIGHT
             past_sun = df[
                 (df["timestamp"] < now_floor) & (df["pv_estimate"] > self.min_noise_kw)
             ]
@@ -364,9 +372,7 @@ class SolarAI:
             if not past_sun.empty:
                 return self._make_result(SolarStatus.DONE, "Zon is onder", None, None)
             else:
-                return self._make_result(
-                    SolarStatus.NIGHT, "Zon is nog niet op", None, None
-                )
+                return self._make_result(SolarStatus.NIGHT, "Nacht", None, None)
 
         # 2. AI Predictie op de ruwe blokken (30 min)
         # We voorspellen EERST, daarna interpoleren we.
@@ -389,9 +395,6 @@ class SolarAI:
 
         # 3. Resample en Interpoleren
         df = df_numeric.resample("1min").interpolate(method="linear").reset_index()
-
-        local_tz = datetime.now().astimezone().tzinfo
-        median_pv, is_stable = self._get_stability_stats()
 
         # 3. BIAS BEREKENING (Op exacte minuut)
         # Zoek de rij die overeenkomt met de huidige minuut
