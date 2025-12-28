@@ -13,7 +13,7 @@ from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 # Project Imports
-from db import fetch_dhw_history, upsert_dhw_sensor_data
+from db import fetch_dhw_sessions, insert_dhw_session
 from utils import add_cyclic_time_features, safe_float
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,9 @@ class SensorPosition(Enum):
 class DhwAI:
     """
     Domestic Hot Water AI.
-    - Leert tapgedrag (wanneer wordt er gedoucht?)
-    - Voorspelt noodzaak voor verwarmen als de zon niet schijnt.
+    - Event-based Logging: Slaat alleen complete douche-sessies op.
+    - Session-based Training: Leert van de sessie-tabel.
+    - Solar Aware.
     """
 
     def __init__(self, ha_client: HAClient, opts: dict):
@@ -41,19 +42,10 @@ class DhwAI:
         )
 
         # Instellingen
-        self.min_temp = float(
-            self.opts.get("dhw_min_temp", 30.0)
-        )  # Absolute ondergrens
-        self.target_temp = float(self.opts.get("dhw_target_temp", 50.0))  # Comfort doel
-        self.boost_temp = float(
-            self.opts.get("dhw_boost_temp", 55.0)
-        )  # Solar boost doel
+        self.min_temp = float(self.opts.get("dhw_min_temp", 30.0))
+        self.target_temp = float(self.opts.get("dhw_target_temp", 50.0))
+        self.boost_temp = float(self.opts.get("dhw_boost_temp", 55.0))
 
-        # 0.2 graden/minuut = 1.0 graad per 5 minuten.
-        # Dit is gevoelig genoeg voor douche, maar filtert stilstand (0.001/min).
-        self.usage_detection_threshold = 0.2
-
-        # Hoeveel minuten van tevoren moet het water warm zijn?
         self.lookahead_minutes = int(self.opts.get("dhw_lookahead_minutes", 90))
         self.confidence_threshold = 0.65
 
@@ -66,21 +58,26 @@ class DhwAI:
             "doy_cos",
         ]
 
-        self.last_logged_temp = None
-        self.last_logged_hvac = None
-        self.last_log_time = datetime.min
-        self.log_deque = deque(maxlen=2)
+        # --- SESSION DETECTION STATE (In Memory) ---
+        # We kijken 15 minuten terug om een start te detecteren
+        self.temp_history = deque(maxlen=16)  # 15 min historie + 1 huidig
 
+        self.in_session = False
+        self.session_start_time = None
+        self.session_start_temp = None
+        self.lowest_temp_seen = None
+        self.stable_counter = 0
+
+        # --- Model State ---
         self.model = None
         self.is_fitted = False
-
-        # --- Runtime State ---
-        # Buffer voor live detectie (glijdende schaal over 5 min)
-        self.temp_buffer = deque(maxlen=5)
 
         # Buffer voor output stabiliteit (voorkom pendelen WP)
         self.action_buffer = deque(maxlen=3)
         self.last_stable_setpoint = self.min_temp
+
+        # Buffer voor snelle detectie (alleen voor 'is_showering_now' vlaggetje)
+        self.temp_buffer = deque(maxlen=5)
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_model()
@@ -105,60 +102,48 @@ class DhwAI:
 
     def train(self):
         """
-        Analyseert historische temperatuurdata om douche-momenten te vinden
-        en traint daarop een classifier.
+        Traint het model op basis van de DHW Sessions tabel.
+        Dit is veel schoner en sneller dan ruwe data.
         """
-        logger.info("DhwAI: Training start (Analyseren tapgedrag)...")
+        logger.info("DhwAI: Training start (Session Table)...")
 
-        # 1. Haal ruwe data op (SWW Temp) van de afgelopen 60 dagen
-        # We nemen aan dat je een helper hebt die raw sensor data als DataFrame geeft
-        df = fetch_dhw_history(sensor=SensorPosition.TOP.value, days=60)
+        # 1. Haal de sessies op (Events)
+        df_sessions = fetch_dhw_sessions(days=60)
 
-        if df is None or len(df) < 2000:
-            logger.warning("DhwAI: Te weinig data.")
+        if df_sessions is None or len(df_sessions) < 5:
+            logger.warning("DhwAI: Te weinig sessies in DB om te trainen.")
             return
 
-        # 2. FILTER: Negeer data tijdens SWW-run (Destratificatie/Mixing)
-        # Als hvac_mode 'dhw' is, is een temperatuurdaling GEEN gebruik.
-        # We filteren deze regels eruit.
-        if "hvac_mode" in df.columns:
-            # Behoud alleen rijen waar de WP NIET bezig is met warm water
-            df = df[df["hvac_mode"] != 2]  # 2 = SWW modus
+        logger.info(f"DhwAI: {len(df_sessions)} sessies opgehaald.")
 
-        # 3. Detecteer Events (Aangepast voor 0.5C steps)
-        # We resamplen naar 5 minuten en kijken naar het verschil.
-        df = df.set_index("timestamp").sort_index()
+        # 2. Maak een lege tijdlijn (Grid) voor de afgelopen 60 dagen (15 min steps)
+        #    Gebruik lokale tijd, aangezien fetch_dhw_sessions dat ook doet.
+        end_date = datetime.now().replace(minute=0, second=0, microsecond=0)
+        start_date = end_date - timedelta(days=60)
 
-        # Interpoleren om gaten te vullen, daarna resamplen
-        df_resampled = df["value"].resample("5min").mean().interpolate()
+        grid_index = pd.date_range(start=start_date, end=end_date, freq="15min")
+        df_grid = pd.DataFrame(index=grid_index)
+        df_grid["is_showering"] = 0
 
-        # Bereken het verschil met 5 minuten geleden (shift 1 op 5min data)
-        # diff is positief als temp daalt
-        diff_series = df_resampled.diff(periods=1) * -1
+        # 3. Map de sessies op de tijdlijn
+        for _, row in df_sessions.iterrows():
+            # Rond starttijd af op kwartier
+            start = row["start_time"].round("15min")
 
-        # Drempel: usage_threshold (0.2) * 5 minuten = 1.0 graad daling
-        threshold_total_drop = self.usage_detection_threshold * 5.0
+            if start in df_grid.index:
+                df_grid.at[start, "is_showering"] = 1
 
-        # Labeling
-        usage_labels = (diff_series > threshold_total_drop).astype(int)
+                # Optioneel: Als sessie > 15 min duurde, markeer ook het volgende blok
+                if row["duration_minutes"] > 15:
+                    nxt = start + timedelta(minutes=15)
+                    if nxt in df_grid.index:
+                        df_grid.at[nxt, "is_showering"] = 1
 
-        usage_count = usage_labels.sum()
-        logger.info(f"DhwAI: {usage_count} tap-events gedetecteerd in data.")
-
-        if usage_count < 10:
-            logger.warning("DhwAI: Te weinig tap-events gevonden om te trainen.")
-            return
-
-        # 4. Features maken
-        df_features = pd.DataFrame(index=df_resampled.index)
-        df_features = add_cyclic_time_features(
-            df_features, col_name=None
-        )  # Index is datetime
-
+        # 4. Trainen
+        df_features = add_cyclic_time_features(df_grid, col_name=None)
         X = df_features.reindex(columns=self.feature_columns)
-        y = usage_labels
+        y = df_grid["is_showering"]
 
-        # 5. Train Model
         clf = HistGradientBoostingClassifier(
             learning_rate=0.05,
             max_iter=500,
@@ -176,58 +161,148 @@ class DhwAI:
             logger.exception("DhwAI: Training gefaald.")
 
     # ==============================================================================
-    # 2. RUNTIME DETECTIE
+    # 2. SESSION DETECTOR (Event Loop)
     # ==============================================================================
 
-    def _detect_current_usage(self, current_temp):
+    def run_cycle(self, features, current_hvac):
         """
-        Bepaalt of er NU gedoucht wordt, rekening houdend met 0.5C sensors en traagheid.
+        Draait elke minuut.
+        1. Detecteert of er gedoucht wordt.
+        2. Slaat sessie op in DB bij einde.
+        3. Bepaalt boiler setpoint.
         """
+        current_temp = safe_float(features.get("dhw_temp"))
+        solar_action = features.get("solar_action")
+
+        if current_temp is None:
+            return
+
+        now = datetime.now()
+
+        # ----------------------------------------------------------------------
+        # A. SESSION DETECTION LOGIC
+        # ----------------------------------------------------------------------
+
+        # Voeg huidige meting toe aan historie (bewaart tijd en temp)
+        self.temp_history.append((now, current_temp))
+
+        # Buffer voor realtime gebruik (korte termijn)
         self.temp_buffer.append(current_temp)
 
-        if len(self.temp_buffer) < 2:
-            return False
+        if not self.in_session:
+            # --- STATUS: RUST ---
+            # We zoeken naar een 'Start Event'
 
-        # Vergelijk oudste (5 min geleden) met nu
-        # Bijv: buffer is [50.0, 50.0, 50.0, 49.5, 49.5] -> drop 0.5
-        drop = self.temp_buffer[0] - self.temp_buffer[-1]
+            # We hebben minimaal 10 minuten historie nodig
+            if len(self.temp_history) == self.temp_history.maxlen:
+                # Kijk naar 15 min geleden (index 0) vs Nu (laatste)
+                past_time, past_temp = self.temp_history[0]
 
-        # Drempel: 0.5 graad in 5 minuten is voor een 200L vat al een indicatie
-        # Als je sensor stappen van 0.5 doet, is >= 0.5 de enige logische check.
-        if drop >= 0.5:
-            # Extra check: Is de temp echt aan het zakken? (voorkom ruis 50->49.5->50)
-            return True
+                diff = past_temp - current_temp
 
-        return False
+                # TRIGGER: > 1.5 graad gedaald in 15 minuten EN WP staat niet op SWW
+                # (Als WP op SWW staat, kan temp dippen door mixing, dat is geen douche)
+                is_dhw_running = current_hvac == "dhw"
 
-    # ==============================================================================
-    # 3. BESLUITVORMING
-    # ==============================================================================
+                if diff > 1.5 and not is_dhw_running:
+                    logger.info(
+                        f"DhwAI: Start sessie! (Gedaald van {past_temp} naar {current_temp})"
+                    )
+                    self.in_session = True
+                    self.session_start_time = (
+                        past_time  # Starttijd corrigeren naar begin daling
+                    )
+                    self.session_start_temp = past_temp
+                    self.lowest_temp_seen = current_temp
+                    self.stable_counter = 0
 
-    def get_recommendation(self, current_temp):
+        else:
+            # --- STATUS: SESSIE BEZIG ---
+
+            # Update dieptepunt
+            if current_temp < self.lowest_temp_seen:
+                self.lowest_temp_seen = current_temp
+                self.stable_counter = 0
+            else:
+                # Temp daalt niet meer (of stijgt). Tel hoe lang.
+                self.stable_counter += 1
+
+            # Check EINDE condities
+            stop_reason = None
+
+            # 1. Verwarming springt aan (Sessie kapot/voorbij)
+            if current_hvac is not None and current_hvac != 0:
+                stop_reason = "Heating started"
+
+            # 2. Temp is al 5 minuten stabiel (of stijgend)
+            elif self.stable_counter >= 5:
+                stop_reason = "Temp stable"
+
+            if stop_reason:
+                # Opslaan!
+                insert_dhw_session(
+                    start_time=self.session_start_time,
+                    end_time=now,
+                    start_temp=self.session_start_temp,
+                    end_temp=self.lowest_temp_seen,
+                )
+
+                duration = (now - self.session_start_time).total_seconds() / 60.0
+                drop = self.session_start_tem - self.lowest_temp_seen
+                logger.info(
+                    f"DhwAI: Douche sessie opgeslagen! (-{drop:.1f}°C in {duration:.1f} min)"
+                )
+
+                # Reset
+                self.in_session = False
+                self.session_start_time = None
+                self.session_start_temp = None
+                self.lowest_temp_seen = None
+                self.stable_counter = 0
+
+        # ----------------------------------------------------------------------
+        # B. BESLUITVORMING & ACTIE
+        # ----------------------------------------------------------------------
+        target = self.get_recommendation(current_temp, solar_action)
+
+        self.action_buffer.append(target)
+        if len(self.action_buffer) == 3 and len(set(self.action_buffer)) == 1:
+            stable_target = self.action_buffer[0]
+            current_dhw_sp = self.ha.get_dhw_setpoint()
+
+            if current_dhw_sp is not None and abs(current_dhw_sp - stable_target) < 1.0:
+                return
+
+            self.ha.set_dhw_setpoint(stable_target)
+            self.last_stable_setpoint = stable_target
+
+    def get_recommendation(self, current_temp, solar_action=None):
         """
-        Geeft advies: Welke temperatuur moet de boiler hebben?
+        Bepaalt setpoint op basis van:
+        1. Live Gebruik (snel detecteren via buffer)
+        2. Veiligheid
+        3. Solar
+        4. AI Voorspelling
         """
         now = datetime.now()
-        is_showering_now = self._detect_current_usage(current_temp)
+
+        # Korte termijn detectie (voor directe reactie tijdens douchen)
+        is_showering_now = False
+        if len(self.temp_buffer) >= 2:
+            if (self.temp_buffer[0] - self.temp_buffer[-1]) >= 0.5:
+                is_showering_now = True
 
         if is_showering_now:
-            # Optioneel: Als er gedoucht wordt, zet setpoint tijdelijk laag
-            # zodat WP niet gaat stoken TIJDENS douchen (comfort/flow issue).
-            # Of juist hoog om buffer te houden. Afhankelijk van je systeem.
+            # Tijdens douchen passief blijven
             pass
 
-        # 1. VEILIGHEID: Kritieke ondergrens (Lege boiler)
+        # 1. VEILIGHEID
         if current_temp < self.min_temp:
             logger.info(f"DhwAI: Temp kritiek laag {current_temp:.1f}°C")
             return self.target_temp
 
-        solar_status_enum = None  # Placeholder voor SolarAI status
-
-        # 2. SOLAR: Als SolarAI zegt 'START', gaan we boosten
-        # (We luisteren hier naar de status van SolarAI die de coordinator doorgeeft)
-        if str(solar_status_enum) == "START":
-            # Check of we nog ruimte hebben (bottom sensor is hier handig voor, maar top werkt ook)
+        # 2. SOLAR BOOST
+        if str(solar_action) == "START":
             if current_temp < self.boost_temp:
                 logger.info("DhwAI: Zonnebuffer actief.")
                 return self.boost_temp
@@ -235,116 +310,26 @@ class DhwAI:
                 logger.info("DhwAI: Zonnebuffer vol")
                 return self.min_temp
 
-        # 3. VOORSPELLING: Alleen als solar 'DONE', 'NIGHT' of 'LOW_LIGHT' is
-        # Of als we gewoon zeker willen zijn.
+        # 3. VOORSPELLING (AI)
         if self.is_fitted:
-            # Kijk vooruit in de tijd
             future_ts = now + timedelta(minutes=self.lookahead_minutes)
 
-            # Maak features voor dat toekomstige moment
             df_fut = pd.DataFrame([{"timestamp": future_ts}])
             df_fut = add_cyclic_time_features(df_fut)
-            X_fut = df_fut.reindex(columns=self.feature_columns)
+            X_fut = df_fut.reindex(columns=self.feature_columns).apply(
+                pd.to_numeric, errors="coerce"
+            )
 
-            # Voorspel kans
-            prob = self.model.predict_proba(X_fut)[0][1]  # Kans op klasse 1
+            prob = self.model.predict_proba(X_fut)[0][1]
 
             if prob > self.confidence_threshold:
-                # Moeten we nog stoken?
                 if current_temp < self.target_temp:
                     logger.info(
                         f"DhwAI: Verwacht gebruik om {future_ts.strftime('%H:%M')} ({prob:.0%})"
                     )
                     return self.target_temp
 
-        # 4. RUST
         return self.min_temp
-
-    # ==============================================================================
-    # 4. MAIN LOOP
-    # ==============================================================================
-
-    def run_cycle(self, features):
-        current_temp = safe_float(features.get("dhw_temp"))
-
-        if current_temp is None:
-            logger.warning("DhwAI: geen temp beschikbaar")
-            return
-
-        current_hvac = features.get("hvac_mode")
-
-        should_log = False
-        now = datetime.now()
-
-        self.log_deque.append(current_temp)
-
-        # A. Altijd loggen na een uur (heartbeat)
-        if (now - self.last_log_time).total_seconds() > 3600:
-            should_log = True
-
-        # B. Altijd loggen als HVAC modus verandert (bijv. WP gaat aan)
-        elif self.last_logged_hvac != current_hvac:
-            should_log = True
-
-        # C. Temperatuur logica
-        elif self.last_logged_temp is None:
-            should_log = True
-
-        elif current_temp != self.last_logged_temp:
-            # Situatie 1: Temperatuur daalt (DOUCHEN!)
-            if current_temp < self.last_logged_temp:
-                should_log = True
-
-            # Situatie 2: Temperatuur stijgt of flappert (Ruis of Opwarmen)
-            elif (
-                len(self.log_deque) == self.log_deque.maxlen
-                and len(set(self.log_deque)) == 1
-            ):
-                should_log = True
-
-        if should_log:
-            logger.info(f"DhwAI: Logging temp {current_temp}°C")
-
-            upsert_dhw_sensor_data(
-                sensor_id=SensorPosition.TOP.value,
-                value=current_temp,
-                hvac_mode=current_hvac,
-            )
-
-            self.last_logged_temp = current_temp
-            self.last_logged_hvac = current_hvac
-            self.last_log_time = now
-
-        # 2. Wat zegt SolarAI op dit moment?
-        # solar_status = solar_advice.get("action")  # Enum: START, WAIT, NIGHT, etc.
-
-        # 3. Vraag DhwAI om advies
-        target = self.get_recommendation(current_temp)  # solar_status
-
-        # 4. STABILITEIT (Debounce)
-        # We voeren de actie pas uit als we 3x (3 minuten) hetzelfde setpoint willen
-        self.action_buffer.append(target)
-
-        if len(self.action_buffer) == 3:
-            # Check of ze alle 3 gelijk zijn (stabiele wens)
-            if len(set(self.action_buffer)) == 1:
-                stable_target = self.action_buffer[0]
-
-                # Voer alleen uit als het afwijkt van wat we als laatst deden
-                current_dhw_sp = self.ha.get_dhw_setpoint()
-
-                # Deadband van 1 graad
-                if (
-                    current_dhw_sp is not None
-                    and abs(current_dhw_sp - stable_target) < 1.0
-                ):
-                    return  # Niks doen
-
-                self.ha.set_dhw_setpoint(stable_target)
-                self.last_stable_setpoint = stable_target
-            else:
-                # Flipperend advies (bijv net wel/niet solar), doe niets
-                pass
 
     def get_influence_factors(self, target_time):
         """

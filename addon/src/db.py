@@ -90,17 +90,15 @@ class PresenceRecord(Base):
     is_home = Column(Boolean, index=True)
 
 
-class DhwRecord(Base):
-    """
-    Specifieke opslag voor DHW (SWW) sensorhistorie.
-    Gebruikt door DhwAI om douchegedrag en tapwatergebruik te leren.
-    """
-
-    __tablename__ = "dhw_history"
-    timestamp = Column(DateTime, primary_key=True)
-    sensor_id = Column(Integer, primary_key=True)
-    hvac_mode = Column(Integer, nullable=True)
-    value = Column(Float)
+class DhwSession(Base):
+    __tablename__ = "dhw_sessions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    start_time = Column(DateTime, index=True)
+    end_time = Column(DateTime)
+    start_temp = Column(Float)
+    end_temp = Column(Float)
+    total_drop = Column(Float)
+    duration_minutes = Column(Float)
 
 
 Base.metadata.create_all(engine)
@@ -231,50 +229,43 @@ def fetch_presence_history(days: int = 60):
 # ==============================================================================
 
 
-def upsert_dhw_sensor_data(
-    sensor_id: str, value: float, hvac_mode: str, timestamp=None
-):
-    """
-    Slaat een DHW sensorwaarde op in de dhw_history tabel.
-    Wordt gebruikt door DhwAI.
-    """
-    if timestamp is None:
-        timestamp = datetime.now(timezone.utc)
-
-    # Rond af op seconden
-    timestamp = timestamp.replace(microsecond=0)
-
+def insert_dhw_session(start_time, end_time, start_temp, end_temp):
+    """Slaat 1 douchebeurt op."""
     s: SASession = Session()
     try:
-        # Merge doet een insert of update op basis van Primary Key (Timestamp + SensorID)
-        rec = DhwRecord(
-            timestamp=timestamp, sensor_id=sensor_id, value=value, hvac_mode=hvac_mode
+        # Bereken statistieken
+        duration = (end_time - start_time).total_seconds() / 60.0
+        drop = start_temp - end_temp
+
+        rec = DhwSession(
+            start_time=start_time,
+            end_time=end_time,
+            start_temp=start_temp,
+            end_temp=end_temp,
+            total_drop=drop,
+            duration_minutes=duration,
         )
-        s.merge(rec)
+        s.add(rec)
         s.commit()
     except Exception as e:
-        logger.exception(f"DB: Fout bij opslaan DHW sensor data: {e}")
+        logger.error(f"DB: Fout bij opslaan sessie: {e}")
         s.rollback()
     finally:
         s.close()
 
 
-def fetch_dhw_history(sensor_id: str, days: int = 60):
-    """
-    Haalt DHW sensorhistorie op voor training van DhwAI.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    stmt = (
-        select(DhwRecord)
-        .where(DhwRecord.sensor_id == sensor_id, DhwRecord.timestamp >= cutoff)
-        .order_by(DhwRecord.timestamp.asc())
-    )
+def fetch_dhw_sessions(days: int = 60):
+    """Haalt de sessies op voor AI training."""
+    cutoff = datetime.now() - timedelta(days=days)  # Lokale tijd
+    stmt = select(DhwSession).where(DhwSession.start_time >= cutoff)
 
     with engine.connect() as conn:
         df = pd.read_sql(stmt, conn)
 
-    if not df.empty and "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    # Zorg dat datum kolommen datetime objecten zijn
+    if not df.empty:
+        df["start_time"] = pd.to_datetime(df["start_time"])
+        df["end_time"] = pd.to_datetime(df["end_time"])
 
     return df
 
@@ -287,7 +278,7 @@ def cleanup_old_data(days: int = 730):
         s.query(SolarRecord).filter(SolarRecord.timestamp < cutoff).delete()
         s.query(HeatingCycle).filter(HeatingCycle.timestamp < cutoff).delete()
         s.query(PresenceRecord).filter(PresenceRecord.timestamp < cutoff).delete()
-        s.query(DhwRecord).filter(DhwRecord.timestamp < cutoff).delete()
+        s.query(DhwSession).filter(DhwSession.timestamp < cutoff).delete()
         s.commit()
         s.execute(text("VACUUM"))
     finally:

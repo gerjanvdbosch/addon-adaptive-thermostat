@@ -96,7 +96,7 @@ class ClimateCoordinator:
             # We geven de specifieke mode mee zodat AI leert van SWW vs Heating
             self.thermal_ai.run_cycle(features, hvac_mode)
             self.presence_ai.run_cycle(features)
-            self.dhw_ai.run_cycle(features)
+            self.dhw_ai.run_cycle(features, hvac_mode)
 
             # 3. Context Bouwen & Override Check
             context = self._build_context(raw, features, cur_sp, hvac_mode)

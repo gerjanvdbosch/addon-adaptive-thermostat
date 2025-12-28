@@ -448,7 +448,8 @@ class SolarAI:
 
         # D. Interpolatie van de drempel (Percentage)
         # Basis: 55% tot 90%
-        percentage = 0.55 + (day_quality_ratio * 0.35)
+        # percentage = 0.55 + (day_quality_ratio * 0.35) -> ruim
+        percentage = 0.70 + (day_quality_ratio * 0.20)
 
         # E. WINTER DEMPING (optioneel als de drempel te hoog ligt)
         # Als het winter is (season_factor < 0.6), cappen we het percentage op 80%.
@@ -519,7 +520,17 @@ class SolarAI:
         # --- PEAK HUNTING ---
         is_waiting_worth_it = False
 
-        if day_quality_ratio > day_quality_average:
+        # Bereken potentiële winst
+        potential_gain_pct = (best_power - median_pv) / max(median_pv, 0.01)
+
+        # We checken de wacht-logica als:
+        # 1. De dagkwaliteit goed is (> average)
+        # 2. OF: Als er nog een flinke stijging (bijv >20%) aan komt, ongeacht de dagkwaliteit
+        check_waiting = (day_quality_ratio > day_quality_average) or (
+            potential_gain_pct > 0.20
+        )
+
+        if check_waiting:
             # REGEL 1: Zijn we er al bijna? (85%)
             if median_pv >= (best_power * 0.85):
                 is_waiting_worth_it = False
@@ -654,7 +665,7 @@ class SolarAI:
         )
 
         self.ha.set_solar_prediction(
-            f"{res_str}: {reason}",
+            f"{res_str}: {p_time}",
             {
                 "status": res_str,
                 "reason": reason,

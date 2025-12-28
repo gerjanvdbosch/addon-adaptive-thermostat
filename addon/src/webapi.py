@@ -217,8 +217,8 @@ def get_current_status():
         sww_temp = features.get("dhw_temp", 45.0)
 
         dhw_rec = GLOBAL_COORDINATOR.dhw_ai.get_recommendation(
-            sww_temp
-        )  # solar_rec.get("action")
+            sww_temp, solar_rec.get("action")
+        )
 
         # Vraag invloeden op (voor het lookahead moment)
         lookahead = GLOBAL_COORDINATOR.dhw_ai.lookahead_minutes
