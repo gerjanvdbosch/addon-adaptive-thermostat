@@ -362,9 +362,7 @@ class SolarAI:
             ]
 
             if not past_sun.empty:
-                return self._make_result(
-                    SolarStatus.DONE, "Zon is onder voor vandaag", None, None
-                )
+                return self._make_result(SolarStatus.DONE, "Zon is onder", None, None)
             else:
                 return self._make_result(
                     SolarStatus.NIGHT, "Zon is nog niet op", None, None
