@@ -407,7 +407,25 @@ class SolarAI:
         # Historie mag niet kunstmatig verhoogd worden (max 1.0).
         # Toekomst mag wel optimistisch zijn voor Peak Hunting (max 1.15).
         history_bias = min(self.smoothed_bias, 1.0)
-        future_bias = min(self.smoothed_bias, 1.15)
+        # Voor de toekomst: begin met de huidige bias
+        future_bias_raw = self.smoothed_bias
+
+        # Bereken hoeveel dag er nog over is (deze variabele maakten we in de vorige stap)
+        # Als je die variabele hierboven nog niet hebt, zet dan even:
+        remaining_kwh_temp = df_today[df_today["timestamp"] > now_utc][
+            "pv_estimate"
+        ].sum()
+        total_kwh_temp = df_today["pv_estimate"].sum()
+        rem_ratio = remaining_kwh_temp / total_kwh_temp if total_kwh_temp > 0 else 0
+
+        # LOGICA: Als het nog ochtend is (>50% energie over), mag de bias niet
+        # volledig instorten. We mixen de harde werkelijkheid met een beetje 'hoop' (0.85).
+        # Hoe vroeger op de dag, hoe meer 'hoop' we toelaten.
+        if rem_ratio > 0.50:
+            # Mix factor: 70% realiteit, 30% hoop
+            future_bias_raw = (future_bias_raw * 0.70) + (0.85 * 0.30)
+
+        future_bias = min(future_bias_raw, 1.15)
 
         # Toekomst Piek (Adjusted)
         future_max_raw = future["ai_power_raw"].rolling(window=indexer).mean().max()
@@ -497,7 +515,7 @@ class SolarAI:
         final_trigger_val = max(future_threshold, day_floor_limit, effective_min_viable)
 
         logger.info(
-            f"SolarAI: Piek: {day_peak:.2f}kW (SeasonMax: {seasonal_max_kw:.2f}) | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
+            f"SolarAI: Piek: {day_peak:.2f}kW (SeasonMax: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
             f"Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW"
         )
 
