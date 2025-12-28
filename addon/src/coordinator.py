@@ -150,6 +150,8 @@ class ClimateCoordinator:
         Bepaalt op basis van de P1 meter of er OVERTOLLIGE zonne-energie is.
         Bevat een 'Wolken-buffer' om te voorkomen dat hij direct uitvalt.
         """
+        return False
+
         p1_state = self.ha.get_state(self.p1_power)
         # Conversie naar kW en injectie positief maken
         val = float(p1_state)
