@@ -731,7 +731,7 @@ class SolarAI:
             else "--:--"
         )
         iso_date = (
-            final_advice.get("plan_start").isoformat()
+            final_advice.get("plan_start").replace(second=0, microsecond=0).isoformat()
             if final_advice.get("plan_start")
             else "unknown"
         )

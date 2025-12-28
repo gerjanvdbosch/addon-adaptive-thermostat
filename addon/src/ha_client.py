@@ -81,7 +81,7 @@ class HAClient:
 
     def set_solar_prediction(self, value, attrs):
         entity_id = self.opts.get("solar_entity")
-        self._set_state(entity_id, value, attrs, "Adaptive Solar Prediction")
+        self._set_state(entity_id, value, attrs, "Meeste zon")
         logger.debug(f"Solar prediction updated: {value} with attrs {attrs}")
 
     def get_dhw_setpoint(self):
