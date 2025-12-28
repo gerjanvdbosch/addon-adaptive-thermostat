@@ -483,7 +483,9 @@ class SolarAI:
 
         # Veiligheid: Begrens het totaal tussen 65% en 92%
         # 92% is de max om te voorkomen dat we in de zomer nooit starten.
-        percentage = max(0.65, min(percentage, 0.92))
+        percentage = max(
+            0.65, min(percentage, 0.92)
+        )  # 92 -> lager als in de zomer niet optijd gestart wordt!!
 
         day_quality_high = 0.75
         day_quality_average = 0.4
@@ -689,7 +691,7 @@ class SolarAI:
         iso_date = (
             final_advice.get("plan_start").isoformat()
             if final_advice.get("plan_start")
-            else None
+            else "unknown"
         )
 
         logger.info(
@@ -704,6 +706,7 @@ class SolarAI:
                 "planned_start": iso_date,
                 "bias_factor": round(self.smoothed_bias, 2),
                 "last_update": now.isoformat(),
+                "device_class": "timestamp",
             },
         )
 
