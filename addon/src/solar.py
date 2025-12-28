@@ -349,11 +349,26 @@ class SolarAI:
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
         df.sort_values("timestamp", inplace=True)
 
-        # Nacht detectie obv data (ipv Astro)
-        # We kijken of er in de HELE forecast nog iets > noise zit
-        valid_power_df = df[df["pv_estimate"] > self.min_noise_kw]
-        if valid_power_df.empty:
-            return {"action": SolarStatus.NIGHT, "reason": "Zon onder"}
+        now_utc = pd.Timestamp.now(tz="UTC")
+        now_floor = now_utc.replace(second=0, microsecond=0)
+        future = df[df["timestamp"] >= now_floor].copy()
+
+        # Check of er in de TOEKOMST nog zon komt
+        if future[future["pv_estimate"] > self.min_noise_kw].empty:
+            # Als er vandaag al wel zon is geweest, noemen we het DONE.
+            # Als er nog helemaal geen zon is geweest (vroege ochtend), noemen we het NIGHT.
+            past_sun = df[
+                (df["timestamp"] < now_floor) & (df["pv_estimate"] > self.min_noise_kw)
+            ]
+
+            if not past_sun.empty:
+                return self._make_result(
+                    SolarStatus.DONE, "Zon is onder voor vandaag", None, None
+                )
+            else:
+                return self._make_result(
+                    SolarStatus.NIGHT, "Zon is nog niet op", None, None
+                )
 
         # 2. AI Predictie op de ruwe blokken (30 min)
         # We voorspellen EERST, daarna interpoleren we.
@@ -377,13 +392,11 @@ class SolarAI:
         # 3. Resample en Interpoleren
         df = df_numeric.resample("1min").interpolate(method="linear").reset_index()
 
-        now_utc = pd.Timestamp.now(tz="UTC")
         local_tz = datetime.now().astimezone().tzinfo
         median_pv, is_stable = self._get_stability_stats()
 
         # 3. BIAS BEREKENING (Op exacte minuut)
         # Zoek de rij die overeenkomt met de huidige minuut
-        now_floor = now_utc.replace(second=0, microsecond=0)
         current_row = df[df["timestamp"] == now_floor]
 
         expected_now = 0.0
@@ -543,9 +556,6 @@ class SolarAI:
 
         # A. Low Light
         if adjusted_future_max < day_floor_limit and median_pv < day_floor_limit:
-            if adjusted_future_max <= self.min_noise_kw:
-                return self._make_result(SolarStatus.DONE, "Einde dag", None, context)
-
             return self._make_result(
                 SolarStatus.LOW_LIGHT,
                 f"[{day_type}] Te laag vermogen ({adjusted_future_max:.2f}kW)",
