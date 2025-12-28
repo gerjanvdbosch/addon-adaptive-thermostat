@@ -686,21 +686,22 @@ class SolarAI:
             if final_advice.get("plan_start")
             else "--:--"
         )
+        iso_date = (
+            final_advice.get("plan_start").isoformat()
+            if final_advice.get("plan_start")
+            else None
+        )
 
         logger.info(
             f"SolarAI: [{res_str}]{pending_msg} {reason} | Plan: {p_time} | Bias: {self.smoothed_bias:.2f}"
         )
 
         self.ha.set_solar_prediction(
-            final_advice.get("plan_start"),
+            iso_date,
             {
                 "status": res_str,
                 "reason": reason,
-                "planned_start": (
-                    final_advice.get("plan_start").isoformat()
-                    if final_advice.get("plan_start")
-                    else None
-                ),
+                "planned_start": iso_date,
                 "bias_factor": round(self.smoothed_bias, 2),
                 "last_update": now.isoformat(),
             },
