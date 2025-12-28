@@ -10,6 +10,7 @@ from pathlib import Path
 from collections import deque
 from enum import Enum
 from utils import add_cyclic_time_features
+from dataclasses import dataclass
 
 # Machine Learning
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -30,6 +31,24 @@ class SolarStatus(Enum):
     NIGHT = "NIGHT"
     DONE = "DONE"  # Dag is voorbij, geen forecast meer
     LOW_LIGHT = "LOW_LIGHT"  # Wel dag, maar te weinig licht om iets te doen
+
+
+@dataclass
+class SolarContext:
+    day_peak_kw: float
+    seasonal_max_kw: float
+    remaining_day_ratio: float
+    total_daily_kwh: float
+    full_load_hours: float
+    future_peak_kw: float
+    day_quality_ratio: float
+    trigger_threshold_kw: float
+    current_pv_kw: float
+    threshold_percentage: float
+    bias_factor: float
+    # action: str
+    # reason: str
+    # planned_start: str
 
 
 class SolarAI:
@@ -103,7 +122,8 @@ class SolarAI:
         # Stabiliteits Buffer
         self.history_len = int(300 / max(1, self.interval))
         self.pv_buffer = deque(maxlen=self.history_len)
-        self.state_buffer = deque(maxlen=10)
+        self.state_len = 10
+        self.state_buffer = deque(maxlen=self.state_len)
 
         self.last_stable_advice = {
             "action": SolarStatus.WAIT,
@@ -479,7 +499,9 @@ class SolarAI:
         # Basis: 0.60
         # Kwaliteit: Max +0.20 (Zonnige dag = strenger)
         # Resterend: Max +0.15 (Ochtend = strenger, Middag = soepeler)
-        percentage = 0.60 + (day_quality_ratio * 0.20) + (remaining_ratio * 0.15)
+        percentage = (
+            0.60 + (day_quality_ratio * 0.20) + (remaining_ratio * 0.15)
+        )  # strenger maken als de drempel hoger moet zijn
 
         # Veiligheid: Begrens het totaal tussen 65% en 92%
         # 92% is de max om te voorkomen dat we in de zomer nooit starten.
@@ -508,9 +530,23 @@ class SolarAI:
 
         final_trigger_val = max(future_threshold, day_floor_limit, effective_min_viable)
 
+        context = SolarContext(
+            day_peak_kw=day_peak,
+            seasonal_max_kw=seasonal_max_kw,
+            remaining_day_ratio=remaining_ratio,
+            total_daily_kwh=daily_kwh,
+            full_load_hours=full_load_hours,
+            future_peak_kw=adjusted_future_max,
+            day_quality_ratio=day_quality_ratio,
+            trigger_threshold_kw=final_trigger_val,
+            current_pv_kw=median_pv,
+            threshold_percentage=percentage,
+            bias_factor=self.smoothed_bias,
+        )
+
         logger.info(
-            f"SolarAI: Piek: {day_peak:.2f}kW (SeasonMax: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
-            f"DayRatio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW | Percentage: {percentage:.2%}"
+            f"SolarAI: Piek: {day_peak:.2f}kW (Season-Max: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
+            f"Day-Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | Actueel: {median_pv:.2f}kW | Percentage: {percentage:.2%}"
         )
 
         # ----------------------------------------------------------------------
@@ -544,6 +580,7 @@ class SolarAI:
                 "action": SolarStatus.LOW_LIGHT,
                 "reason": f"[{day_type}] Verwachting ({adjusted_future_max:.2f}kW) te laag",
                 "plan_start": start_time_local,
+                "context": context,
             }
 
         # --- PEAK HUNTING ---
@@ -581,6 +618,7 @@ class SolarAI:
                 "action": SolarStatus.START,
                 "reason": f"[{day_type}] Opportunisme: Feller dan forecast!",
                 "plan_start": datetime.now(local_tz),
+                "context": context,
             }
 
         # C. Normale Drempel
@@ -590,6 +628,7 @@ class SolarAI:
                     "action": SolarStatus.WAIT,
                     "reason": f"[{day_type}] Wacht op piek ({best_power:.2f}kW)",
                     "plan_start": start_time_local,
+                    "context": context,
                 }
 
             if (
@@ -601,12 +640,14 @@ class SolarAI:
                     "action": SolarStatus.WAIT_STABLE,
                     "reason": f"[{day_type}] Wachten op stabiel licht",
                     "plan_start": start_time_local,
+                    "context": context,
                 }
 
             return {
                 "action": SolarStatus.START,
                 "reason": f"[{day_type}] Drempel bereikt ({median_pv:.2f} > {final_trigger_val:.2f})",
                 "plan_start": datetime.now(local_tz),
+                "context": context,
             }
 
         # D. Wachten
@@ -621,6 +662,7 @@ class SolarAI:
             "action": SolarStatus.WAIT,
             "reason": f"[{day_type}] Piek {wait_msg} ({best_power:.2f}kW)",
             "plan_start": start_time_local,
+            "context": context,
         }
 
     def run_cycle(self):
@@ -652,7 +694,7 @@ class SolarAI:
 
         # 4. BEPAAL STABIELE STATUS
         # We kijken of de buffer vol is (4 items) én of de 'action' overal gelijk is
-        if len(self.state_buffer) == 4:
+        if len(self.state_buffer) == self.state_len:
             # Pak de 'action' van het nieuwste item
             newest_action = self.state_buffer[-1]["action"]
 
