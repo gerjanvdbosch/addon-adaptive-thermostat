@@ -543,6 +543,9 @@ class SolarAI:
 
         # A. Low Light
         if adjusted_future_max < day_floor_limit and median_pv < day_floor_limit:
+            if adjusted_future_max <= self.min_noise_kw:
+                return self._make_result(SolarStatus.DONE, "Einde dag", None, context)
+
             return self._make_result(
                 SolarStatus.LOW_LIGHT,
                 f"[{day_type}] Te laag vermogen ({adjusted_future_max:.2f}kW)",
