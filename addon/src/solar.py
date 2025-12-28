@@ -446,10 +446,27 @@ class SolarAI:
 
         day_quality_ratio = min(day_quality_ratio, 1.0)
 
-        # D. Interpolatie van de drempel (Percentage)
-        # Basis: 55% tot 90%
-        # percentage = 0.55 + (day_quality_ratio * 0.35) -> ruim
-        percentage = 0.70 + (day_quality_ratio * 0.20)
+        # A. Bereken hoeveel 'brandstof' we nog hebben vandaag
+        # We tellen de verwachte kW's op in de 'future' dataset.
+        # (x 0.5 omdat data vaak per half uur is, of als benadering van kWh)
+        remaining_kwh = future["ai_power_raw"].sum() * 0.5
+
+        remaining_ratio = 0.0
+        if daily_kwh > 0.1:
+            remaining_ratio = remaining_kwh / daily_kwh
+            # Begrens tussen 0.0 en 1.0
+            remaining_ratio = max(0.0, min(remaining_ratio, 1.0))
+
+        # B. De Nieuwe Formule
+        # Basis: 0.60
+        # Kwaliteit: Max +0.20 (Zonnige dag = strenger)
+        # Resterend: Max +0.15 (Ochtend = strenger, Middag = soepeler)
+
+        percentage = 0.60 + (day_quality_ratio * 0.20) + (remaining_ratio * 0.15)
+
+        # Veiligheid: Begrens het totaal tussen 65% en 92%
+        # 92% is de max om te voorkomen dat we in de zomer nooit starten.
+        percentage = max(0.65, min(percentage, 0.92))
 
         # E. WINTER DEMPING (optioneel als de drempel te hoog ligt)
         # Als het winter is (season_factor < 0.6), cappen we het percentage op 80%.
