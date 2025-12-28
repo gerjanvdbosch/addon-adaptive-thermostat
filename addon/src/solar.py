@@ -368,13 +368,14 @@ class SolarAI:
 
         # FIX 3: INTERPOLATIE NAAR 1 MINUUT
         # We resamplen naar 1 minuut om bias-oscillatie te voorkomen.
-        df = (
-            df.set_index("timestamp")
-            .infer_objects(copy=False)
-            .resample("1min")
-            .interpolate(method="linear")
-            .reset_index()
-        )
+        df = df.set_index("timestamp")
+
+        # 1. Zorg dat Pandas begrijpt welke kolommen getallen zijn
+        # 2. Selecteer alleen de numerieke kolommen om de waarschuwing te voorkomen
+        df_numeric = df.select_dtypes(include=[np.number]).infer_objects(copy=False)
+
+        # 3. Resample en Interpoleren
+        df = df_numeric.resample("1min").interpolate(method="linear").reset_index()
 
         now_utc = pd.Timestamp.now(tz="UTC")
         local_tz = datetime.now().astimezone().tzinfo
