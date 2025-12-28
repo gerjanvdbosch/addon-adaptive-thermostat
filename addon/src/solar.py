@@ -113,8 +113,8 @@ class SolarAI:
         # Stabiliteits Buffer
         self.history_len = int(300 / max(1, self.interval))
         self.pv_buffer = deque(maxlen=self.history_len)
-        self.state_len = 10
-        self.state_buffer = deque(maxlen=self.state_len)
+        self.state_length = int(self.opts.get("state_length", 10))
+        self.state_buffer = deque(maxlen=self.state_length)
 
         self.last_stable_advice = {
             "action": SolarStatus.WAIT,
@@ -672,7 +672,7 @@ class SolarAI:
         self.state_buffer.append(raw_advice)
 
         # Buffer Logica (Fix: Altijd updaten bij stabiliteit)
-        if len(self.state_buffer) == self.state_len:
+        if len(self.state_buffer) == self.state_length:
             newest_action = self.state_buffer[-1]["action"]
             is_stable = all(
                 item["action"] == newest_action for item in self.state_buffer
