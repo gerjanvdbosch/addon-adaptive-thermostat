@@ -81,7 +81,6 @@ class SolarAI:
         self.aggregation_minutes = int(self.opts.get("aggregation_minutes", 30))
 
         # Logica drempels
-        self.early_start_threshold = float(self.opts.get("early_start_threshold", 0.95))
         self.min_viable_kw = float(self.opts.get("min_viable_kw", 0.3))
         self.min_noise_kw = float(self.opts.get("min_noise_kw", 0.01))
 
@@ -327,7 +326,7 @@ class SolarAI:
 
         return median, is_stable
 
-    def _make_result(status, reason, plan_time=None, context=None):
+    def _make_result(self, status, reason, plan_time=None, context=None):
         return {
             "action": status,
             "reason": reason,
@@ -371,6 +370,7 @@ class SolarAI:
         # We resamplen naar 1 minuut om bias-oscillatie te voorkomen.
         df = (
             df.set_index("timestamp")
+            .infer_objects(copy=False)
             .resample("1min")
             .interpolate(method="linear")
             .reset_index()
@@ -521,12 +521,12 @@ class SolarAI:
             f"SolarAI: Piek: {day_peak:.2f}kW (Season-Max: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | "
             f"Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
             f"Day-Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | "
-            f"Actueel: {median_pv:.2f}kW | Percentage: {percentage:.1%}"
+            f"Actueel: {median_pv:.2f}kW | Percentage: {percentage:.1%} | Bias: {self.smoothed_bias:.2f}"
         )
 
         # 7. BESLUITVORMING
         max_peak_power = future["window_avg_power"].max()
-        threshold_planning = max(max_peak_power * self.early_start_threshold, 0.01)
+        threshold_planning = max(max_peak_power * percentage, 0.01)
         candidates = future[future["window_avg_power"] >= threshold_planning]
 
         if not candidates.empty:
