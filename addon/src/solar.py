@@ -105,6 +105,8 @@ class SolarAI:
         self.model = None
         self.is_fitted = False
         self.smoothed_bias = 1.0
+        self.ml_weight = 0.6
+        self.solcast_weight = 0.4
 
         # Solcast Cache
         self.cached_solcast_data = []
@@ -374,7 +376,9 @@ class SolarAI:
             X_pred = self._create_features(df)
             pred_ai = self.model.predict(X_pred)
             # Blending: 60% AI, 40% Solcast
-            df["ai_power_raw"] = (0.6 * pred_ai) + (0.4 * df["pv_estimate"])
+            df["ai_power_raw"] = (self.ml_weight * pred_ai) + (
+                self.solcast_weight * df["pv_estimate"]
+            )
             df["ai_power_raw"] = df["ai_power_raw"].clip(0, self.system_max_kw)
         else:
             df["ai_power_raw"] = df.get("pv_estimate", 0.0)
@@ -399,7 +403,7 @@ class SolarAI:
             expected_now = current_row.iloc[0]["ai_power_raw"]
 
             # Alleen updaten als er significant licht verwacht wordt
-            if expected_now > self.min_noise_kw:
+            if expected_now > self.min_viable_kw:
                 new_bias = median_pv / expected_now
                 # Als Solcast net update, vertrouwen we bias iets minder (0.8), anders traag (0.2)
                 alpha = 0.8 if self.solcast_just_updated else 0.2
@@ -586,13 +590,13 @@ class SolarAI:
             f"Should-Wait: {should_check_waiting} | Waiting-Worth: {is_waiting_worth_it}"
         )
 
-       # A. Low Light
+        # A. Low Light
         if adjusted_future_max < self.min_viable_kw and median_pv < self.min_viable_kw:
             return self._make_result(
                 SolarStatus.LOW_LIGHT,
                 f"[{day_type}] Te laag vermogen ({adjusted_future_max:.2f}kW)",
                 start_time_local,
-                context
+                context,
             )
 
         # B. Opportunisme
@@ -750,24 +754,23 @@ class SolarAI:
             }
 
             solcast_raw = df_row.iloc[0].get("pv_estimate", 0.0)
-            factor = 0.6
 
-            direct_impact = solcast_raw * 0.4
-            model_impact = raw_influences.get("pv_estimate", 0) * factor
+            direct_impact = solcast_raw * self.solcast_weight
+            model_impact = raw_influences.get("pv_estimate", 0) * self.ml_weight
             uncertainty_impact = (
                 raw_influences.get("pv_estimate10", 0)
                 + raw_influences.get("pv_estimate90", 0)
                 + raw_influences.get("uncertainty", 0)
-            ) * factor
+            ) * self.ml_weight
             time_impact = (
                 raw_influences.get("hour_sin", 0)
                 + raw_influences.get("hour_cos", 0)
                 + raw_influences.get("doy_sin", 0)
                 + raw_influences.get("doy_cos", 0)
-            ) * factor
+            ) * self.ml_weight
 
             influences = {
-                "Model Basis": f"{base_value * factor:.2f}",
+                "Model Basis": f"{base_value * self.ml_weight:.2f}",
                 "Solcast (Direct 40%)": f"{'+' if direct_impact > 0 else ''}{direct_impact:.2f}",
                 "Solcast (Model 60%)": f"{'+' if model_impact > 0 else ''}{model_impact:.2f}",
             }
@@ -782,7 +785,9 @@ class SolarAI:
                 )
 
             ai_part = base_value + sum(vals)
-            ai_power_blended = (0.6 * ai_part) + (0.4 * solcast_raw)
+            ai_power_blended = (self.ml_weight * ai_part) + (
+                self.solcast_weight * solcast_raw
+            )
             final_power = ai_power_blended * self.smoothed_bias
             bias_kw_effect = final_power - ai_power_blended
 
