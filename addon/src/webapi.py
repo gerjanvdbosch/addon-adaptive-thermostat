@@ -632,7 +632,7 @@ def get_solar_simulation_plot(
     # upsert patchen we om te voorkomen dat de simulatie naar de echte DB schrijft!
     with patch("solar.datetime") as mock_datetime, patch(
         "solar.pd.Timestamp.now"
-    ) as mock_pd_now, patch("solar.upsert_solar_record"):
+    ) as mock_pd_now, patch("solar.upsert_solar_record"), patch("pandas.Timestamp.now"):
 
         # Zet forecast poll tijd één keer goed
         sim_states["sensor.mock_poll"] = start_ts.isoformat()
@@ -805,7 +805,7 @@ def get_solar_simulation_plot(
 
     # Opslaan
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=120)
+    plt.savefig(buf, format="png", dpi=300)
     plt.close(fig)
     buf.seek(0)
 
