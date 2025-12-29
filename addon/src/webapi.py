@@ -709,6 +709,15 @@ def get_solar_simulation_plot(
     # 6. PLOTTEN (Exact jouw code)
     res_df = pd.DataFrame(results)
 
+    # Filter de nacht weg, maar houd 1 punt padding over
+    is_active = (res_df["forecast"] > 0.001) | (res_df["pv"] > 0.001)
+
+    if is_active.any():
+        active_indices = res_df.index[is_active]
+        start_pos = max(0, active_indices[0] - 1)
+        end_pos = min(len(res_df), active_indices[-1] + 2)
+        res_df = res_df.iloc[start_pos:end_pos]
+
     fig, ax = plt.subplots(figsize=(12, 6))
 
     # Solcast Onzekerheidsbanden (Blauw)
@@ -757,7 +766,7 @@ def get_solar_simulation_plot(
     # De SolarAI Lijn (Gebruik de recalculated real-time value)
     ax.plot(
         res_df["time"],
-        res_df["ai_pred_recalc"],
+        res_df["ai_pred"],
         label="SolarAI Prediction",
         color="#004080",
         lw=1.5,
