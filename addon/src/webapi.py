@@ -652,35 +652,40 @@ def get_solar_simulation_plot(
             input_pv = actual_val if pd.notna(actual_val) else 0.0
             sim_states["sensor.mock_pv"] = str(input_pv * 1000)
 
-            # B. RUN CYCLE
+            # --- FIX: BEREKEN PREDICTIE VOORDAT JE DE BIAS UPDATE ---
+            # We willen weten wat de AI dacht dat er zou gebeuren,
+            # voordat hij de meting van NU zag.
+
+            # 1. Huidige bias ophalen (gebaseerd op verleden)
+            bias_before_update = sim_ai.smoothed_bias
+
+            # 2. Features en Raw Power bepalen
+            row_df = pd.DataFrame([df_sim.loc[current_sim_time]])
+            raw_power = row_df["pv_estimate"].iloc[0]  # Default Solcast
+
+            if sim_ai.is_fitted and sim_ai.model:
+                try:
+                    feat = sim_ai._create_features(row_df)
+                    pred_ml = sim_ai.model.predict(feat)[0]
+                    # Blending
+                    raw_power = (0.6 * pred_ml) + (0.4 * row_df["pv_estimate"].iloc[0])
+                except Exception:
+                    pass
+
+            # 3. Predictie uitrekenen met de bias van VOOR de meting
+            ai_pred_val = max(
+                0.0, min((raw_power * bias_before_update), sim_ai.system_max_kw)
+            )
+            # -------------------------------------------------------
+
+            # B. NU PAS RUN CYCLE (Dit update de bias voor de VOLGENDE minuut)
             sim_ai.run_cycle()
 
             # C. Resultaat Vangen
             res = sim_ai.last_stable_advice
             ctx = res.get("context")
 
-            # --- HIER IS DE FIX: Inline berekening van de AI Prediction ---
-            # Omdat we 'predict_power' niet hebben, doen we het hier handmatig
-            # zodat we de blauwe lijn kunnen tekenen.
-
-            # 1. Features maken voor dit moment
-            row_df = pd.DataFrame([df_sim.loc[current_sim_time]])
-
-            if sim_ai.is_fitted and sim_ai.model:
-                # Let op: _create_features verwacht meestal een DataFrame
-                feat = sim_ai._create_features(row_df)
-                pred_ml = sim_ai.model.predict(feat)[0]
-
-                raw_power = (sim_ai.ml_weight * pred_ml) + (
-                    sim_ai.solcast_weight * row_df["pv_estimate"].iloc[0]
-                )
-            else:
-                raw_power = row_df["pv_estimate"].iloc[0]
-
-            ai_pred_val = max(
-                0.0, min((raw_power * sim_ai.smoothed_bias), sim_ai.system_max_kw)
-            )
-
+            # Opslaan
             results.append(
                 {
                     "time": current_sim_time,
@@ -688,10 +693,10 @@ def get_solar_simulation_plot(
                     "forecast": df_sim.loc[current_sim_time, "pv_estimate"],
                     "p10": df_sim.loc[current_sim_time, "pv_estimate10"],
                     "p90": df_sim.loc[current_sim_time, "pv_estimate90"],
-                    "ai_pred": ai_pred_val,  # <--- De berekende waarde
+                    "ai_pred": ai_pred_val,  # <--- De waarde berekend met de oude bias
                     "threshold": ctx.trigger_threshold_kw if ctx else 0.0,
                     "status": res["action"].value,
-                    "bias": sim_ai.smoothed_bias,
+                    "bias": bias_before_update,  # <--- Ook leuk om de gebruikte bias te loggen
                 }
             )
 
