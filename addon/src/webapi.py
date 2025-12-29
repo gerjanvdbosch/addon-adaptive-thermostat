@@ -641,10 +641,18 @@ def get_solar_simulation_plot(
 
         # Loop minuut voor minuut
         for current_sim_time in df_sim.index:
-            # A. Update sensoren
+            # FIX: Converteer Pandas Timestamp naar Native Python Datetime
+            # Dit voorkomt de "tz_convert" crash in solar.py
+            sim_dt_native = current_sim_time.to_pydatetime()
+
+            # Update de Mock voor deze iteratie
+            # Als solar.py datetime.now() aanroept, krijgt het nu een echt python object
+            mock_datetime.now.side_effect = lambda tz=None: (
+                sim_dt_native.astimezone(tz) if tz else sim_dt_native
+            )
+
+            # A. Update sensoren (Mock)
             actual_val = df_sim.loc[current_sim_time, "actual_pv_yield"]
-            # Als actual NaN is (toekomst), maken we er 0 van voor de input,
-            # maar we onthouden dat het NaN was voor de plot
             input_pv = actual_val if pd.notna(actual_val) else 0.0
 
             sim_states["sensor.mock_pv"] = str(
