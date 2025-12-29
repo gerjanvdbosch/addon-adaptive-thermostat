@@ -5,9 +5,12 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime as real_datetime
+import json
+
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 from freezegun import freeze_time
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.abspath(os.path.join(current_dir, '..', 'src'))
 if src_path not in sys.path:
@@ -48,66 +51,49 @@ solar.pd.Timestamp.now = patched_timestamp_now
 
 # --- STAP 3: SCENARIO GENERATOR ---
 def generate_scenario():
-    # De volledige Solcast dataset van de gebruiker
-    raw_solcast_input = [
-        ('00:00', 0, 0, 0), ('00:30', 0, 0, 0), ('01:00', 0, 0, 0), ('01:30', 0, 0, 0),
-        ('02:00', 0, 0, 0), ('02:30', 0, 0, 0), ('03:00', 0, 0, 0), ('03:30', 0, 0, 0),
-        ('04:00', 0, 0, 0), ('04:30', 0, 0, 0), ('05:00', 0, 0, 0), ('05:30', 0, 0, 0),
-        ('06:00', 0, 0, 0), ('06:30', 0, 0, 0), ('07:00', 0, 0, 0), ('07:30', 0, 0, 0),
-        ('08:00', 0, 0, 0), ('08:30', 0, 0, 0),
-        ('09:00', 0.1656, 0.0665, 0.2336), ('09:30', 0.5298, 0.4606, 0.5551),
-        ('10:00', 1.1404, 1.1404, 1.1404), ('10:30', 1.2884, 1.263, 1.3102),
-        ('11:00', 1.359, 1.359, 1.359), ('11:30', 1.4001, 1.4001, 1.4001),
-        ('12:00', 1.3473, 1.3299, 1.3609), ('12:30', 1.2953, 1.2305, 1.2953),
-        ('13:00', 1.1715, 1.1715, 1.1715), ('13:30', 1.0324, 1.0236, 1.0356),
-        ('14:00', 0.9023, 0.9023, 0.9023), ('14:30', 0.7277, 0.7277, 0.7277),
-        ('15:00', 0.4729, 0.4555, 0.4768), ('15:30', 0.2565, 0.2565, 0.2565),
-        ('16:00', 0.02, 0.02, 0.02), ('16:30', 0, 0, 0), ('17:00', 0, 0, 0),
-        ('17:30', 0, 0, 0), ('18:00', 0, 0, 0), ('18:30', 0, 0, 0), ('19:00', 0, 0, 0),
-        ('19:30', 0, 0, 0), ('20:00', 0, 0, 0), ('20:30', 0, 0, 0), ('21:00', 0, 0, 0),
-        ('21:30', 0, 0, 0), ('22:00', 0, 0, 0), ('22:30', 0, 0, 0), ('23:00', 0, 0, 0),
-        ('23:30', 0, 0, 0)
-    ]
-
-    forecast_payload = []
     simulation_date = "2025-12-28"
 
-    for time_str, est, p10, p90 in raw_solcast_input:
-        ts = datetime.strptime(f"{simulation_date} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(current_dir, "solar.json")
+
+    with open(json_path, "r") as f:
+        solar_data = json.load(f)
+
+    # 1. Inladen in DataFrame en index zetten op timestamp
+    df_source = pd.DataFrame(solar_data)
+    df_source['timestamp'] = pd.to_datetime(df_source['timestamp'], utc=True)
+    df_source = df_source.set_index('timestamp').sort_index()
+
+    # 2. Definieer de nieuwe tijdreeks (1 minuut interval)
+    start_time = pd.to_datetime(f"{simulation_date} 07:00").tz_localize(timezone.utc)
+    end_time = pd.to_datetime(f"{simulation_date} 17:00").tz_localize(timezone.utc)
+    new_times = pd.date_range(start=start_time, end=end_time, freq="1min", tz=timezone.utc)
+
+    # 3. Reindex en Interpoleren
+    # We combineren de oude index met de nieuwe index om gaten op te vullen
+    combined_index = df_source.index.union(new_times)
+    df_resampled = df_source.reindex(combined_index)
+
+    # Lineaire interpolatie om de minuten tussen de bekende meetpunten te vullen
+    df_resampled = df_resampled.interpolate(method='linear')
+
+    # Selecteer nu alleen de minuten die we daadwerkelijk nodig hebben
+    df_final = df_resampled.loc[new_times]
+
+    # 4. Data omzetten naar de gewenste formaten
+    times = df_final.index
+    actual_pv = df_final['actual_pv_yield'].tolist()
+    forecast_pv = df_final['pv_estimate'].tolist()
+
+    # Payload voor SolarAI
+    forecast_payload = []
+    for ts, row in df_final.iterrows():
         forecast_payload.append({
             "period_start": ts.isoformat(),
-            "pv_estimate": est,
-            "pv_estimate10": p10,
-            "pv_estimate90": p90
+            "pv_estimate": row['pv_estimate'],
+            "pv_estimate10": row.get('pv_estimate10', row['pv_estimate'] * 0.9),
+            "pv_estimate90": row.get('pv_estimate90', row['pv_estimate'] * 1.1)
         })
-
-
-    # 2. Maak 1-minuut resolutie DataFrame (ZONDER waarschuwingen)
-    df_fc = pd.DataFrame(forecast_payload)
-    df_fc['timestamp'] = pd.to_datetime(df_fc['period_start'], utc=True)
-    df_fc = df_fc.set_index('timestamp')
-
-    # CRUCIALE FIX: Verwijder tekstkolommen voor interpolatie
-    df_fc = df_fc.select_dtypes(include=[np.number])
-    df_fc = df_fc.resample('1min').interpolate(method='linear')
-
-    # 3. Genereer actuele PV waarden (Simulatie van de werkelijkheid)
-    times = pd.date_range(f"{simulation_date} 07:00", f"{simulation_date} 17:00", freq="1min", tz=timezone.utc)
-    actual_pv = []
-    forecast_pv = [] # Nieuwe lijst voor de grafiek
-
-
-    actual_pv = []
-    for t in times:
-        theoretical = df_fc.loc[t, 'pv_estimate'] if t in df_fc.index else 0.0
-        forecast_pv.append(theoretical)
-        # Bias curve: 0.35 -> 0.95
-        if t.hour < 9: bias = 0.35
-        elif 9 <= t.hour < 11: bias = 0.35 + ((t.hour-9)*60 + t.minute)/120 * 0.60
-        else: bias = 0.95
-        actual_pv.append(max(0, theoretical * bias + np.random.normal(0, 0.002)))
-
-
 
     return times, forecast_payload, actual_pv, forecast_pv
 
@@ -158,20 +144,27 @@ def run_simulation():
                 print(f"{t.strftime('%H:%M'):<8} | {row['pv']:>6.2f}kW | {row['forecast']:>6.2f}kW | {row['threshold']:>6.2f}kW | {row['bias']:>4.2f} | {row['status']:<12} | {row['pct']:>6.1f}%")
 
     # --- PLOT ---
+    p10 = [d['pv_estimate10'] for d in forecast_payload]
+    p90 = [d['pv_estimate90'] for d in forecast_payload]
+
     df = pd.DataFrame(results)
     plt.figure(figsize=(12, 6))
 
     # Lijnen
-    plt.plot(df['time'], df['forecast'], label='Solcast Forecast (kW)', color='blue', linestyle=':', alpha=0.7, lw=1.5)
+    plt.plot(df['time'], p10, label='Solcast Forecast p10 (kW)', color='#B3D9FF', linestyle=':', alpha=0.6)
+    plt.plot(df['time'], p90, label='Solcast Forecast p90 (kW)', color='#3399FF', linestyle=':', alpha=0.6)
+
     plt.plot(df['time'], df['pv'], label='Actueel PV (kW)', color='orange', lw=2)
+    plt.plot(df['time'], df['forecast'], label='Solcast Forecast (kW)', color='#004080', linestyle='--', alpha=0.7, lw=1.5)
     plt.plot(df['time'], df['threshold'], label='Trigger Drempel (kW)', color='red', linestyle='--')
 
     # START zones inkleuren
     plt.fill_between(df['time'], 0, df['forecast'].max(), where=(df['status'] == 'START'), color='green', alpha=0.1, label='START Signaal')
+    plt.fill_between(times, p10, p90, color='#3399FF', alpha=0.1, label='Onzekerheidsmarge')
 
     plt.title("Simulatie: Forecast vs Werkelijkheid")
     plt.ylabel("kW")
-    plt.legend(loc='upper left')
+    plt.legend(loc='upper right')
     plt.grid(alpha=0.3)
     plt.tight_layout()
     plt.show()

@@ -11,6 +11,9 @@ arch:
   - i386
 init: false
 homeassistant_api: true
+#ingress: true
+#ingress_port: 0
+#ingress_stream: true
 options:
   thermostat_entity: input_number.adaptive_thermostat_setpoint
   solar_entity: sensor.adaptive_thermostat_solar_forecast

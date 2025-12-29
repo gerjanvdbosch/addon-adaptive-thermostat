@@ -45,6 +45,10 @@ class SolarContext:
     current_pv_kw: float
     threshold_percentage: float
     bias_factor: float
+    has_time_left: bool
+    is_substantial_gain: bool
+    should_check_waiting: bool
+    is_waiting_worth_it: bool
 
 
 class SolarAI:
@@ -438,9 +442,6 @@ class SolarAI:
         history_bias = min(self.smoothed_bias, 1.0)
         future_bias_raw = self.smoothed_bias
 
-        # FIX 1: DYNAMISCHE TIJDRESOLUTIE
-        # Omdat we geresampled hebben naar 1 minuut, is elke rij 1/60e uur.
-
         # Totale energie: Som van kW / 60 minuten
         remaining_kwh_raw = future["ai_power_raw"].sum() / 60.0
         total_kwh_raw = df_today["ai_power_raw"].sum() / 60.0
@@ -492,24 +493,7 @@ class SolarAI:
         # Triggers
         future_threshold = adjusted_future_max * self.early_start_threshold
         day_floor_limit = day_peak * 0.25
-        effective_min_viable = min(self.min_viable_kw, day_peak * 0.90)
-        effective_min_viable = max(effective_min_viable, self.min_noise_kw * 2)
-
-        final_trigger_val = max(future_threshold, day_floor_limit, effective_min_viable)
-
-        context = SolarContext(
-            day_peak_kw=day_peak,
-            seasonal_max_kw=seasonal_max_kw,
-            remaining_day_ratio=remaining_ratio,
-            total_daily_kwh=daily_kwh,
-            full_load_hours=full_load_hours,
-            future_peak_kw=adjusted_future_max,
-            day_quality_ratio=day_quality_ratio,
-            trigger_threshold_kw=final_trigger_val,
-            current_pv_kw=median_pv,
-            threshold_percentage=percentage,
-            bias_factor=self.smoothed_bias,
-        )
+        final_trigger_val = max(future_threshold, day_floor_limit, self.min_viable_kw)
 
         # Log labels & DEFINITIES
         day_quality_high = 0.75
@@ -521,13 +505,6 @@ class SolarAI:
             day_type = "Average ⛅"
         else:
             day_type = "Gloomy ☁️"
-
-        logger.info(
-            f"SolarAI: Piek: {day_peak:.2f}kW (Season-Max: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | "
-            f"Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
-            f"Day-Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | "
-            f"Actueel: {median_pv:.2f}kW | Percentage: {percentage:.1%} | Bias: {self.smoothed_bias:.2f}"
-        )
 
         # 7. BESLUITVORMING
         max_peak_power = future["window_avg_power"].max()
@@ -544,15 +521,6 @@ class SolarAI:
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
         wait_minutes = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
         wait_hours = wait_minutes / 60.0
-
-        # A. Low Light
-        if adjusted_future_max < day_floor_limit and median_pv < day_floor_limit:
-            return self._make_result(
-                SolarStatus.LOW_LIGHT,
-                f"[{day_type}] Te laag vermogen ({adjusted_future_max:.2f}kW)",
-                start_time_local,
-                context,
-            )
 
         # --- PEAK HUNTING (FIX 4: Absolute Check) ---
         is_waiting_worth_it = False
@@ -587,12 +555,47 @@ class SolarAI:
                 if potential_gain_pct > 0.30:
                     is_waiting_worth_it = True
 
-        # B. Opportunisme
         current_slot_forecast_raw = expected_now if "expected_now" in locals() else 0.0
 
         is_sunny_surprise = median_pv > (current_slot_forecast_raw * 1.20)
         is_viable_run = median_pv > day_floor_limit
 
+        context = SolarContext(
+            day_peak_kw=day_peak,
+            seasonal_max_kw=seasonal_max_kw,
+            remaining_day_ratio=remaining_ratio,
+            total_daily_kwh=daily_kwh,
+            full_load_hours=full_load_hours,
+            future_peak_kw=adjusted_future_max,
+            day_quality_ratio=day_quality_ratio,
+            trigger_threshold_kw=final_trigger_val,
+            current_pv_kw=median_pv,
+            threshold_percentage=percentage,
+            bias_factor=self.smoothed_bias,
+            has_time_left=has_time_left,
+            is_substantial_gain=is_substantial_gain,
+            should_check_waiting=should_check_waiting,
+            is_waiting_worth_it=is_waiting_worth_it,
+        )
+
+        logger.info(
+            f"SolarAI: Piek: {day_peak:.2f}kW (Season-Max: {seasonal_max_kw:.2f}) | Rest: {remaining_ratio:.0%} | "
+            f"Totaal: {daily_kwh:.1f}kWh ({full_load_hours:.1f}h) | Ref-Future: {adjusted_future_max:.2f}kW | "
+            f"Day-Ratio: {day_quality_ratio:.2f} | Drempel: {final_trigger_val:.2f}kW | "
+            f"Actueel: {median_pv:.2f}kW | Percentage: {percentage:.1%} | Bias: {self.smoothed_bias:.2f} | "
+            f"Should-Wait: {should_check_waiting} | Waiting-Worth: {is_waiting_worth_it}"
+        )
+
+       # A. Low Light
+        if adjusted_future_max < self.min_viable_kw and median_pv < self.min_viable_kw:
+            return self._make_result(
+                SolarStatus.LOW_LIGHT,
+                f"[{day_type}] Te laag vermogen ({adjusted_future_max:.2f}kW)",
+                start_time_local,
+                context
+            )
+
+        # B. Opportunisme
         if is_sunny_surprise and is_viable_run and not is_waiting_worth_it:
             return self._make_result(
                 SolarStatus.START,
@@ -680,6 +683,7 @@ class SolarAI:
 
         res_str = final_advice["action"].value
         reason = final_advice["reason"]
+        context = final_advice.get("context", None)
 
         p_time = (
             final_advice.get("plan_start").strftime("%H:%M")
@@ -704,6 +708,22 @@ class SolarAI:
             "last_update": now.isoformat(),
             "device_class": "timestamp",
         }
+
+        if context:
+            attributes.update(
+                {
+                    "day_peak_kw": round(context.day_peak_kw, 2),
+                    "seasonal_max_kw": round(context.seasonal_max_kw, 2),
+                    "remaining_day_ratio": round(context.remaining_day_ratio, 2),
+                    "total_daily_kwh": round(context.total_daily_kwh, 2),
+                    "full_load_hours": round(context.full_load_hours, 2),
+                    "future_peak_kw": round(context.future_peak_kw, 2),
+                    "day_quality_ratio": round(context.day_quality_ratio, 2),
+                    "trigger_threshold_kw": round(context.trigger_threshold_kw, 2),
+                    "current_pv_kw": round(context.current_pv_kw, 2),
+                    "threshold_percentage": round(context.threshold_percentage, 2),
+                }
+            )
 
         self.ha.set_solar_prediction(iso_date, attributes)
 
