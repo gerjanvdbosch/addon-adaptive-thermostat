@@ -652,6 +652,9 @@ def get_solar_simulation_plot(
 
         # Loop minuut voor minuut
         for current_sim_time in df_sim.index:
+            time_ref["current"] = current_sim_time
+
+            # Update ook de standaard datetime mock
             sim_dt_native = current_sim_time.to_pydatetime()
             mock_datetime.now.side_effect = lambda tz=None: (
                 sim_dt_native.astimezone(tz) if tz else sim_dt_native
@@ -662,9 +665,6 @@ def get_solar_simulation_plot(
             input_pv = actual_val if pd.notna(actual_val) else 0.0
             sim_states["sensor.mock_pv"] = str(input_pv * 1000)
 
-            # --- FIX: BEREKEN PREDICTIE VOORDAT JE DE BIAS UPDATE ---
-            # We willen weten wat de AI dacht dat er zou gebeuren,
-            # voordat hij de meting van NU zag.
 
             # 1. Huidige bias ophalen (gebaseerd op verleden)
             bias_before_update = sim_ai.smoothed_bias
