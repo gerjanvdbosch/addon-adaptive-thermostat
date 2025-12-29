@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 # Importeer je classes
 from solar import SolarAI
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from utils import safe_bool
 from fastapi import FastAPI, HTTPException, Query
@@ -628,11 +628,21 @@ def get_solar_simulation_plot(
     # 5. DE SIMULATIE LOOP (RUN_CYCLE)
     results = []
 
+    time_ref = {"current": start_ts.replace(tzinfo=timezone.utc)}
+
+    def fake_timestamp_now(tz=None):
+        t = time_ref["current"]
+        if tz:
+            return t.tz_convert(tz)
+        return t
+
     # We patchen 'solar.datetime' en 'solar.upsert_solar_record'
     # upsert patchen we om te voorkomen dat de simulatie naar de echte DB schrijft!
     with patch("solar.datetime") as mock_datetime, patch(
         "solar.pd.Timestamp.now"
-    ) as mock_pd_now, patch("solar.upsert_solar_record"), patch("pandas.Timestamp.now"):
+    ) as mock_pd_now, patch("solar.upsert_solar_record"), patch(
+        "solar.pd.Timestamp.now", new=fake_timestamp_now
+    ):
 
         # Zet forecast poll tijd één keer goed
         sim_states["sensor.mock_poll"] = start_ts.isoformat()
