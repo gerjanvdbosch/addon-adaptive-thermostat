@@ -630,35 +630,27 @@ def get_solar_simulation_plot(
 
     # We patchen 'solar.datetime' en 'solar.upsert_solar_record'
     # upsert patchen we om te voorkomen dat de simulatie naar de echte DB schrijft!
-    with patch("solar.datetime") as mock_datetime, patch("solar.upsert_solar_record"):
-
-        # Zorg dat datetime.now() onze gesimuleerde tijd teruggeeft
-        mock_datetime.now.side_effect = lambda tz=None: (
-            current_sim_time.astimezone(tz) if tz else current_sim_time
-        )
+    with patch("solar.datetime") as mock_datetime, patch(
+        "solar.pd.Timestamp.now"
+    ) as mock_pd_now, patch("solar.upsert_solar_record"):
 
         # Zet forecast poll tijd één keer goed
         sim_states["sensor.mock_poll"] = start_ts.isoformat()
 
         # Loop minuut voor minuut
         for current_sim_time in df_sim.index:
-            # FIX: Converteer Pandas Timestamp naar Native Python Datetime
-            # Dit voorkomt de "tz_convert" crash in solar.py
             sim_dt_native = current_sim_time.to_pydatetime()
-
-            # Update de Mock voor deze iteratie
-            # Als solar.py datetime.now() aanroept, krijgt het nu een echt python object
             mock_datetime.now.side_effect = lambda tz=None: (
                 sim_dt_native.astimezone(tz) if tz else sim_dt_native
             )
+            mock_pd_now.side_effect = lambda tz=None: (
+                current_sim_time.tz_convert(tz) if tz else current_sim_time
+            )
 
-            # A. Update sensoren (Mock)
+            # A. Update sensoren
             actual_val = df_sim.loc[current_sim_time, "actual_pv_yield"]
             input_pv = actual_val if pd.notna(actual_val) else 0.0
-
-            sim_states["sensor.mock_pv"] = str(
-                input_pv * 1000
-            )  # SolarAI verwacht Watt string
+            sim_states["sensor.mock_pv"] = str(input_pv * 1000)
 
             # B. RUN CYCLE
             sim_ai.run_cycle()
@@ -685,14 +677,10 @@ def get_solar_simulation_plot(
             else:
                 raw_power = row_df["pv_estimate"].iloc[0]
 
-            # 2. Huidige Bias van de simulatie toepassen
-            ai_pred_val = raw_power * sim_ai.smoothed_bias
+            ai_pred_val = max(
+                0.0, min((raw_power * sim_ai.smoothed_bias), sim_ai.system_max_kw)
+            )
 
-            # 3. Clippen
-            ai_pred_val = max(0.0, min(ai_pred_val, sim_ai.system_max_kw))
-            # -----------------------------------------------------------
-
-            # Waarden opslaan
             results.append(
                 {
                     "time": current_sim_time,
@@ -710,13 +698,12 @@ def get_solar_simulation_plot(
     # 6. PLOTTEN (Exact jouw code)
     res_df = pd.DataFrame(results)
 
-    # Filter de nacht weg, maar houd 1 punt padding over
     is_active = (res_df["forecast"] > 0.001) | (res_df["pv"] > 0.001)
 
     if is_active.any():
         active_indices = res_df.index[is_active]
-        start_pos = max(0, active_indices[0] - 1)
-        end_pos = min(len(res_df), active_indices[-1] + 2)
+        start_pos = max(0, active_indices[0])
+        end_pos = min(len(res_df), active_indices[-1] + 1)
         res_df = res_df.iloc[start_pos:end_pos]
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -782,15 +769,18 @@ def get_solar_simulation_plot(
         linestyle="--",
     )
 
-    # START zones inkleuren
-    # Check: Status is START én er is daadwerkelijk PV data
+    # START zones
     is_start = res_df["status"] == "START"
     has_data = res_df["pv"].notna()
+
+    y_max = res_df["ai_pred"].max() if not res_df.empty else 1.0
+    if y_max < 0.1 and not res_df.empty:
+        y_max = res_df["pv"].max()  # Fallback
 
     ax.fill_between(
         res_df["time"],
         0,
-        res_df["pv"].max(),
+        y_max,
         where=(is_start & has_data),
         color="green",
         alpha=0.1,
@@ -810,7 +800,7 @@ def get_solar_simulation_plot(
 
     # Opslaan
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=100)
+    plt.savefig(buf, format="png", dpi=120)
     plt.close(fig)
     buf.seek(0)
 
