@@ -81,6 +81,7 @@ class SolarAI:
         self.aggregation_minutes = int(self.opts.get("aggregation_minutes", 30))
 
         # Logica drempels
+        self.early_start_threshold = float(self.opts.get("early_start_threshold", 0.95))
         self.min_viable_kw = float(self.opts.get("min_viable_kw", 0.3))
         self.min_noise_kw = float(self.opts.get("min_noise_kw", 0.01))
 
@@ -500,7 +501,7 @@ class SolarAI:
         percentage = max(0.65, min(percentage, 0.90))
 
         # Triggers
-        future_threshold = adjusted_future_max * percentage
+        future_threshold = adjusted_future_max * self.early_start_threshold
         day_floor_limit = day_peak * 0.25
         effective_min_viable = min(self.min_viable_kw, day_peak * 0.90)
         effective_min_viable = max(effective_min_viable, self.min_noise_kw * 2)
