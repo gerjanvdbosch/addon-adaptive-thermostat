@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 # Importeer je classes
 from solar import SolarAI
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Optional
 from utils import safe_bool
 from fastapi import FastAPI, HTTPException, Query
@@ -628,10 +628,15 @@ def get_solar_simulation_plot(
     # 5. DE SIMULATIE LOOP (RUN_CYCLE)
     results = []
 
-    time_ref = {"current": start_ts.replace(tzinfo=timezone.utc)}
+    initial_time = pd.Timestamp(start_ts).tz_localize("UTC")
+    time_ref = {"current": initial_time}
 
     def fake_timestamp_now(tz=None):
         t = time_ref["current"]
+        # Zorg voor zekerheid dat t een Timestamp is
+        if not isinstance(t, pd.Timestamp):
+            t = pd.Timestamp(t)
+
         if tz:
             return t.tz_convert(tz)
         return t
