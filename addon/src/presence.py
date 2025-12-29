@@ -46,7 +46,6 @@ class PresenceAI:
         self.is_fitted = False
         self.last_log_ts = None
 
-        self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_model()
 
     def _load_model(self):

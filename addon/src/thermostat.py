@@ -65,8 +65,6 @@ class ThermostatAI:
             "wind_dir_cos",
         ]
 
-        self.model_path.parent.mkdir(parents=True, exist_ok=True)
-
         # Runtime State
         self.model = None
         self.is_fitted = False

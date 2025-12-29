@@ -79,7 +79,6 @@ class DhwAI:
         # Buffer voor snelle detectie (alleen voor 'is_showering_now' vlaggetje)
         self.temp_buffer = deque(maxlen=5)
 
-        self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_model()
 
     def _load_model(self):

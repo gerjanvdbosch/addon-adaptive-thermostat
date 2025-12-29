@@ -61,7 +61,6 @@ class ThermalAI:
         self.min_cycle_minutes = 45  # Vloerverwarming is traag
         self.dead_time_minutes = 20  # Transporttijd
 
-        self.model_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_model()
 
     def _load_model(self):

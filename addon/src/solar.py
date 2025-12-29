@@ -28,7 +28,6 @@ class SolarStatus(Enum):
     START = "START"
     WAIT = "WAIT"
     WAIT_STABLE = "WAIT_STABLE"
-    NIGHT = "NIGHT"
     DONE = "DONE"
     LOW_LIGHT = "LOW_LIGHT"
 
@@ -97,8 +96,6 @@ class SolarAI:
         self.entity_solcast_poll = self.opts.get(
             "sensor_solcast_poll", "sensor.solcast_pv_forecast_api_last_polled"
         )
-
-        # self.model_path.parent.mkdir(parents=True, exist_ok=True)
 
         # --- State ---
         self.model = None
@@ -365,15 +362,7 @@ class SolarAI:
 
         # We gaan pas naar de eind-statussen als BEIDE waar zijn
         if forecast_says_dark and actual_is_dark:
-            # Check of er vandaag al zon is geweest voor het onderscheid DONE/NIGHT
-            past_sun = df[
-                (df["timestamp"] < now_floor) & (df["pv_estimate"] > self.min_noise_kw)
-            ]
-
-            if not past_sun.empty:
-                return self._make_result(SolarStatus.DONE, "Zon is onder", None, None)
-            else:
-                return self._make_result(SolarStatus.NIGHT, "Nacht", None, None)
+            return self._make_result(SolarStatus.DONE, "Zon is onder", None, None)
 
         # 2. AI Predictie op de ruwe blokken (30 min)
         # We voorspellen EERST, daarna interpoleren we.
