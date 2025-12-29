@@ -644,10 +644,8 @@ def get_solar_simulation_plot(
     # We patchen 'solar.datetime' en 'solar.upsert_solar_record'
     # upsert patchen we om te voorkomen dat de simulatie naar de echte DB schrijft!
     with patch("solar.datetime") as mock_datetime, patch(
-        "solar.pd.Timestamp.now"
-    ) as mock_pd_now, patch("solar.upsert_solar_record"), patch(
         "solar.pd.Timestamp.now", new=fake_timestamp_now
-    ):
+    ), patch("solar.upsert_solar_record"):
 
         # Zet forecast poll tijd één keer goed
         sim_states["sensor.mock_poll"] = start_ts.isoformat()
@@ -657,9 +655,6 @@ def get_solar_simulation_plot(
             sim_dt_native = current_sim_time.to_pydatetime()
             mock_datetime.now.side_effect = lambda tz=None: (
                 sim_dt_native.astimezone(tz) if tz else sim_dt_native
-            )
-            mock_pd_now.side_effect = lambda tz=None: (
-                current_sim_time.tz_convert(tz) if tz else current_sim_time
             )
 
             # A. Update sensoren
@@ -675,8 +670,10 @@ def get_solar_simulation_plot(
             bias_before_update = sim_ai.smoothed_bias
 
             # 2. Features en Raw Power bepalen
-            row_df = pd.DataFrame([df_sim.loc[current_sim_time]])
-            raw_power = row_df["pv_estimate"].iloc[0]  # Default Solcast
+            row_df = df_sim.loc[[current_sim_time]].copy()
+            row_df["timestamp"] = row_df.index
+
+            raw_power = row_df["pv_estimate"].iloc[0]
 
             if sim_ai.is_fitted and sim_ai.model:
                 try:
@@ -820,7 +817,7 @@ def get_solar_simulation_plot(
 
     # Opslaan
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=300)
+    plt.savefig(buf, format="png", dpi=100)
     plt.close(fig)
     buf.seek(0)
 
