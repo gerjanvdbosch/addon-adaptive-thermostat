@@ -665,13 +665,14 @@ def get_solar_simulation_plot(
             input_pv = actual_val if pd.notna(actual_val) else 0.0
             sim_states["sensor.mock_pv"] = str(input_pv * 1000)
 
-
             # 1. Huidige bias ophalen (gebaseerd op verleden)
             bias_before_update = sim_ai.smoothed_bias
 
             # 2. Features en Raw Power bepalen
             row_df = df_sim.loc[[current_sim_time]].copy()
             row_df["timestamp"] = row_df.index
+
+            row_df["actual_pv_yield"] = None
 
             raw_power = row_df["pv_estimate"].iloc[0]
 
