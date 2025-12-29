@@ -612,6 +612,7 @@ def get_solar_simulation_plot(
         "duration_hours": GLOBAL_COORDINATOR.solar_ai.duration_hours,
         "min_viable_kw": GLOBAL_COORDINATOR.solar_ai.min_viable_kw,
         "state_length": 1,  # Kortere buffer voor simulatie responsiviteit
+        "solar_interval_seconds": 60,
         "sensor_pv_power": "sensor.mock_pv",
         "sensor_solcast_poll": "sensor.mock_poll",
     }
