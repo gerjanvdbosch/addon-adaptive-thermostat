@@ -535,7 +535,13 @@ def get_solar_plot(
 
     # 1. Datum bepalen
     target_date = date if date else datetime.now().strftime("%Y-%m-%d")
-    start_ts = datetime.strptime(target_date, "%Y-%m-%d").replace(hour=0, minute=0)
+    try:
+        start_ts = datetime.strptime(target_date, "%Y-%m-%d").replace(hour=0, minute=0)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Ongeldig datumformaat. Gebruik YYYY-MM-DD."
+        )
+
     end_ts = start_ts + timedelta(days=1)
 
     # 2. Data ophalen uit DB
@@ -548,17 +554,16 @@ def get_solar_plot(
             .order_by(SolarRecord.timestamp)
         )
         records = s.execute(stmt).scalars().all()
-        if not records:
-            raise HTTPException(
-                status_code=404, detail="Geen data gevonden voor deze dag."
-            )
 
-        # 3. Omzetten naar DataFrame en Interpoleren (voor gladde lijnen)
+        if not records:
+            raise HTTPException(status_code=404, detail="Geen data.")
+
+        # 2. DataFrame Maken
         df = pd.DataFrame(
             [
                 {
                     "timestamp": r.timestamp,
-                    "pv_estimate": r.pv_estimate,
+                    "pv_estimate": r.pv_estimate,  # P50
                     "pv_estimate10": r.pv_estimate10,
                     "pv_estimate90": r.pv_estimate90,
                     "actual_pv_yield": r.actual_pv_yield,
@@ -567,84 +572,115 @@ def get_solar_plot(
             ]
         )
 
-        # 3. DE ECHTE SOLAR AI LOGICA AANROEPEN
-        solar_ai = GLOBAL_COORDINATOR.solar_ai
-
-        # Maak features voor het ML model (uren, sin/cos, etc.)
-        X_features = solar_ai._create_features(df)
-
-        # Predictie met het ML model (indien getraind)
-        if solar_ai.is_fitted and solar_ai.model:
-            pred_ai = solar_ai.model.predict(X_features)
-            # Blending: 60% ML model, 40% Solcast P50 (zoals in je klasse)
-            df["ai_power_blended"] = (solar_ai.ml_weight * pred_ai) + (
-                solar_ai.solcast_weight * df["pv_estimate"]
-            )
-        else:
-            # Als model niet getraind is, vallen we terug op alleen Solcast
-            df["ai_power_blended"] = df["pv_estimate"]
-
-        # Pas de actuele Bias-factor en clipping toe
-        current_bias = solar_ai.smoothed_bias
-        df["ai_final_prediction"] = (df["ai_power_blended"] * current_bias).clip(
-            0, solar_ai.system_max_kw
-        )
-
-        # 4. Interpolatie naar 1 minuut voor een vloeiende grafiek
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df.set_index("timestamp", inplace=True)
-        df_smooth = df.resample("1min").interpolate(method="linear")
 
-        # 5. Teken de grafiek
+        # -----------------------------------------------------------
+        # 3. INTERPOLATIE & AI BEREKENING
+        # -----------------------------------------------------------
+        # Eerst resamplen naar 1 minuut (zodat de AI loops kloppen)
+        df_resampled = df.resample("1min").interpolate(method="linear")
+
+        # HIERO: We roepen de SolarAI logica aan!
+        # Dit vult 'ai_pred', 'threshold' en 'status' in.
+        solar_ai = GLOBAL_COORDINATOR.solar_ai
+        df_analyzed = solar_ai.calculate_scenario(df_resampled)
+
+        # -----------------------------------------------------------
+        # 4. PLOTTEN (Exact zoals in je simulatie)
+        # -----------------------------------------------------------
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        # Lijnen tekenen
-        ax.fill_between(
-            df_smooth.index,
-            df_smooth["pv_estimate10"],
-            df_smooth["pv_estimate90"],
-            color="#3399FF",
-            alpha=0.1,
-            label="Solcast Range (P10-P90)",
-        )
-
+        # A. Solcast Range
         ax.plot(
-            df_smooth.index,
-            df_smooth["pv_estimate"],
+            df_analyzed.index,
+            df_analyzed["pv_estimate10"],
+            color="#B3D9FF",
+            linestyle=":",
+            alpha=0.6,
+        )
+        ax.plot(
+            df_analyzed.index,
+            df_analyzed["pv_estimate90"],
             color="#3399FF",
-            linestyle="--",
-            alpha=0.5,
-            label="Ruwe Solcast P50",
+            linestyle=":",
+            alpha=0.6,
+        )
+        ax.fill_between(
+            df_analyzed.index,
+            df_analyzed["pv_estimate10"],
+            df_analyzed["pv_estimate90"],
+            color="#3399FF",
+            alpha=0.05,
+            label="Onzekerheidsmarge",
         )
 
-        if df_smooth["actual_pv_yield"].notna().any():
+        # B. Hoofdlijnen
+        if df_analyzed["actual_pv_yield"].notna().any():
             ax.plot(
-                df_smooth.index,
-                df_smooth["actual_pv_yield"],
+                df_analyzed.index,
+                df_analyzed["actual_pv_yield"],
+                label="Actueel PV (kW)",
                 color="orange",
                 lw=2,
-                label="Werkelijke Opbrengst (Sensor)",
             )
 
         ax.plot(
-            df_smooth.index,
-            df_smooth["ai_final_prediction"],
-            color="red",
-            lw=2.5,
-            label=f"SolarAI Prediction (Bias {current_bias:.2f})",
+            df_analyzed.index,
+            df_analyzed["pv_estimate"],
+            label="Solcast Forecast (kW)",
+            color="#004080",
+            linestyle="--",
+            alpha=0.7,
+            lw=1.5,
         )
 
-        # Opmaak
+        # C. SolarAI Lijn (Blauw, zoals gevraagd)
+        ax.plot(
+            df_analyzed.index,
+            df_analyzed["ai_pred"],
+            label="SolarAI Prediction",
+            color="#004080",
+            lw=1.5,
+        )
+
+        # D. Drempel (Rood gestreept)
+        ax.plot(
+            df_analyzed.index,
+            df_analyzed["threshold"],
+            label="Trigger Drempel",
+            color="red",
+            linestyle="--",
+        )
+
+        # E. Zones (START)
+        # Omdat 'status' uit calculate_scenario komt, klopt dit nu exact!
+        is_start = df_analyzed["status"] == "START"
+        # Filter op momenten waar ook echt data was (optioneel, voor netheid)
+        has_data = df_analyzed["actual_pv_yield"].notna()
+
+        ax.fill_between(
+            df_analyzed.index,
+            0,
+            df_analyzed["ai_pred"].max(),
+            where=(is_start & has_data),
+            color="green",
+            alpha=0.1,
+            label="Signaal: START",
+        )
+
+        # F. Opmaak
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
 
         plt.title(f"Solar Analyse: {target_date}")
         plt.ylabel("Vermogen (kW)")
-        plt.legend(loc="upper right")
+        plt.xlabel("Tijd")
+        plt.legend(loc="upper right", frameon=True)
         plt.grid(alpha=0.2)
         plt.tight_layout()
 
-        # 6. Afbeelding opslaan in geheugen en terugsturen
+        # Opslaan
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=100)
         plt.close(fig)
