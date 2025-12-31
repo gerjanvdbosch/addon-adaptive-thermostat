@@ -22,7 +22,6 @@ from utils import add_cyclic_time_features
 from ha_client import HAClient
 # from weather import WeatherClient
 from db import fetch_solar_training_data_orm, upsert_solar_record
-from utils import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +395,7 @@ class Solar:
         val = self.ha.get_state(
             self.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")
         )
-        current_pv = safe_float(val) / 1000.0 if val else 0.0
+        current_pv = float(val) / 1000.0 if val not in ["unknown", "unavailable", None] else 0.0
 
         self.pv_buffer.append(current_pv)
         stable_pv = np.median(self.pv_buffer)
@@ -405,7 +404,7 @@ class Solar:
         val_load = self.ha.get_state(
             self.opts.get("sensor_power_load", "sensor.stroomverbruik")
         )
-        current_load = safe_float(val_load) / 1000.0 if val_load else self.avg_baseload
+        current_load = float(val_load) / 1000.0 if val_load else self.avg_baseload
 
 #         # Filter HVAC load (indien van toepassing)
 #         hvac_mode = 'off'
