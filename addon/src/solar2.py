@@ -388,7 +388,7 @@ class SolarAI2:
 
         payload = self.ha.get_payload(
             self.opts.get(
-                "sensor_solcast", "sensor.solcast_pv_forecast_api_last_polled"
+                "sensor_solcast", "sensor.solcast_pv_forecast_forecast_today"
             )
         )
         if payload:
