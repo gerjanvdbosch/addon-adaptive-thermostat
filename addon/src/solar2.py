@@ -481,16 +481,16 @@ class SolarAI2:
         )
 
         attrs = {
-            "status": ctx.action.value,
-            "reason": ctx.reason,
+            "status": str(ctx.action.value),
+            "reason": str(ctx.reason),
             "planned_start": plan_iso,
-            "current_bias_ratio": round(self.nowcaster.current_ratio, 2),
-            "current_pv_kw": round(current_pv, 2),
-            "current_load_kw": ctx.load_now,
-            "energy_now_kwh": ctx.energy_now,
-            "energy_best_kwh": ctx.energy_best,
-            "opportunity_cost": ctx.opportunity_cost,
-            "confidence": ctx.confidence,
+            "current_bias_ratio": float(round(self.nowcaster.current_ratio, 2)),
+            "current_pv_kw": float(round(current_pv, 2)),
+            "current_load_kw": float(round(ctx.load_now, 2)),
+            "energy_now_kwh": float(ctx.energy_now),
+            "energy_best_kwh": float(ctx.energy_best),
+            "opportunity_cost": float(ctx.opportunity_cost),
+            "confidence": float(ctx.confidence),
             "device_class": "timestamp",
         }
         self.ha.set_solar_prediction(plan_iso, attrs)

@@ -122,7 +122,6 @@ def run_simulation():
     for i, t in enumerate(times):
         with freeze_time(t):
             states[ai.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")] = str(actual_pv_values[i] * 1000)
-            states[ai.opts.get("sensor_power_load", "sensor.fuj7chn07b_pv_output_actual")] = str(actual_pv_values[i] * 1000)
             ai.run_cycle()
 
             # context ophalen uit optimizer
