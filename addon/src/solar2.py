@@ -401,7 +401,7 @@ class SolarAI2:
     def _publish_state(self, ctx: DecisionContext, current_pv: float):
         plan_iso = ctx.planned_start.isoformat() if ctx.planned_start else None
         logger.info(
-            f"SolarAI: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence}"
+            f"SolarML: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence}"
         )
 
         attrs = {
@@ -414,5 +414,6 @@ class SolarAI2:
             "energy_best_kwh": ctx.energy_best,
             "opportunity_cost": ctx.opportunity_cost,
             "confidence": ctx.confidence,
+            "device_class": "timestamp",
         }
         self.ha.set_solar_prediction(plan_iso, attrs)
