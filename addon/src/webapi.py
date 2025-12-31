@@ -256,7 +256,7 @@ def get_current_status():
             )
 
             status2, ctx2 = solar_ai2.optimizer.calculate_optimal_window(
-                df_calc, now_utc.to_pydatetime()
+                df_calc, now_utc.to_pydatetime(), 200
             )
             status_str2 = status2.value if hasattr(status2, "value") else str(status2)
 

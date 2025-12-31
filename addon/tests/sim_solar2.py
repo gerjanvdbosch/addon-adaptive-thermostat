@@ -100,7 +100,7 @@ def run_simulation():
     opts = {"system_max_kw": 4.0, "duration_hours": 1.0}
     ai = SolarAI2(mock_ha, opts)
 
-    times, actual_pv_values, forecast_values, p10_values, p90_values, ai_pred_values = generate_scenario("2025-12-30", ai)
+    times, actual_pv_values, forecast_values, p10_values, p90_values, ai_pred_values = generate_scenario("2025-12-28", ai)
 
     forecast_payload = []
     for i, t in enumerate(times):
@@ -122,13 +122,14 @@ def run_simulation():
     for i, t in enumerate(times):
         with freeze_time(t):
             states[ai.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")] = str(actual_pv_values[i] * 1000)
+            states[ai.opts.get("sensor_power_load", "sensor.fuj7chn07b_pv_output_actual")] = str(actual_pv_values[i] * 1000)
             ai.run_cycle()
 
             # context ophalen uit optimizer
             status = SolarStatus.DONE
             ctx = None
             if hasattr(ai, "optimizer") and ai.cached_forecast is not None:
-                status, ctx = ai.optimizer.calculate_optimal_window(ai.cached_forecast, t)
+                status, ctx = ai.optimizer.calculate_optimal_window(ai.cached_forecast, t, 100)
 
             row = {
                 "time": t,

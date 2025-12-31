@@ -45,6 +45,7 @@ class DecisionContext:
     action: SolarStatus
     reason: str
     planned_start: Optional[datetime] = None
+    load_now: float = 0.0
 
 
 # ==============================================================================
@@ -195,16 +196,16 @@ class SolarOptimizer:
         system_max_kw: float,
         duration_hours: float,
         min_kwh_threshold: float = 0.3,
+        avg_baseload_kw: float = 0.25,  # Standaard rustverbruik (koelkast, router, etc)
     ):
         self.system_max = system_max_kw
         self.duration = duration_hours
         self.timestep_hours = 0.25
-        self.min_kwh_threshold = (
-            min_kwh_threshold  # Minimale energie om een start te rechtvaardigen
-        )
+        self.min_kwh_threshold = min_kwh_threshold
+        self.avg_baseload = avg_baseload_kw
 
     def calculate_optimal_window(
-        self, df: pd.DataFrame, current_time: datetime
+        self, df: pd.DataFrame, current_time: datetime, current_load_kw: float
     ) -> Tuple[SolarStatus, DecisionContext]:
         # 1. Resample en voorbereiding
         df_res = (
@@ -221,14 +222,40 @@ class SolarOptimizer:
         if len(future) < window_size:
             return SolarStatus.DONE, None
 
-        # 2. Rolling calculations
+        # We maken een load profiel aan.
+        # Voor "Nu" gebruiken we de gemeten load (bijv. wasmachine aan = 2.5kW).
+        # Voor "Straks" (toekomst) nemen we aan dat de wasmachine klaar is en gebruiken we baseload.
+
+        # We laten het hoge huidige verbruik lineair afnemen naar baseload over 45 minuten (3 kwartier)
+        # Dit voorkomt dat het systeem denkt dat over 1 minuut de wasmachine spontaan uit is.
+        decay_steps = 3
+
+        future["projected_load"] = self.avg_baseload
+
+        # Pas de eerste paar rijen aan met werkelijke load (afbouwend)
+        for i in range(min(len(future), decay_steps)):
+            # Lineaire interpolatie van Current Load -> Base Load
+            factor = 1.0 - (i / decay_steps)
+            blended_load = (current_load_kw * factor) + (
+                self.avg_baseload * (1 - factor)
+            )
+            future.iloc[i, future.columns.get_loc("projected_load")] = max(
+                blended_load, self.avg_baseload
+            )
+
+        # Bereken Netto Solar: Zonne-energie MIN Huishoudelijk verbruik
+        # Als netto < 0 is (wasmachine verbruikt meer dan zon), is de 'beschikbare energie' 0.
+        future["net_power"] = (
+            future["power_corrected"] - future["projected_load"]
+        ).clip(lower=0)
+
+        # 2. Rolling calculations op NETTO power
         indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_size)
         future["rolling_energy_kwh"] = (
-            future["power_corrected"].rolling(window=indexer).sum()
-            * self.timestep_hours
+            future["net_power"].rolling(window=indexer).sum() * self.timestep_hours
         )
 
-        # 3. Low Light Check: Is er vandaag überhaupt genoeg zon?
+        # 3. Low Light Check: Is er vandaag genoeg OVERCAPACITEIT?
         max_attainable_energy = future["rolling_energy_kwh"].max()
         if max_attainable_energy < self.min_kwh_threshold:
             return SolarStatus.LOW_LIGHT, DecisionContext(
@@ -237,10 +264,11 @@ class SolarOptimizer:
                 opportunity_cost=1.0,
                 confidence=0,
                 action=SolarStatus.LOW_LIGHT,
-                reason=f"Te weinig zon verwacht ({max_attainable_energy:.2f} kWh)",
+                reason=f"Te weinig overcapaciteit ({max_attainable_energy:.2f} kWh)",
+                load_now=current_load_kw,
             )
 
-        # 4. Score berekening met onzekerheidsstraf
+        # 4. Score berekening
         future["rolling_uncertainty"] = (
             (future["pv_estimate90"] - future["pv_estimate10"])
             .rolling(window=indexer)
@@ -253,6 +281,7 @@ class SolarOptimizer:
         relative_uncert = future["rolling_uncertainty"] / future[
             "rolling_energy_kwh"
         ].clip(lower=0.1)
+
         future["score"] = future["rolling_energy_kwh"] * (
             1.0 - relative_uncert * 0.4 * time_factor
         )
@@ -263,11 +292,10 @@ class SolarOptimizer:
         energy_now = future["rolling_energy_kwh"].iloc[0]
         energy_best = best_row["rolling_energy_kwh"]
 
-        # Opportunity cost (voorkom delen door nul bij nacht/donker)
+        # Opportunity cost
         opp_cost = (energy_best - energy_now) / max(energy_best, 0.001)
 
-        # 6. Dynamische Confidence & Decision Logic
-        # Saliency check
+        # 6. Dynamische Confidence
         scores = future["score"].dropna()
         confidence = 0.1
         if len(scores) > 4:
@@ -294,22 +322,22 @@ class SolarOptimizer:
         minutes_to_peak = int(
             (best_row["timestamp"] - current_time).total_seconds() / 60
         )
-        reason = f"Wacht op piek ({energy_best:.2f}kWh) over {minutes_to_peak}m"
+        reason = (
+            f"Wacht op overcapaciteit ({energy_best:.2f}kWh) over {minutes_to_peak}m"
+        )
 
-        # Start condities:
-        # - We zitten binnen de verliesmarge EN de huidige opbrengst is substantieel
-        # - Of we zitten op de absolute piek van de dag
+        # Logica aanpassing: Als energy_now 0 is door hoge load, zal opp_cost heel hoog zijn (100%),
+        # waardoor we automatisch wachten.
+
         if (
             opp_cost <= decision_threshold
             and energy_now >= self.min_kwh_threshold * 0.8
         ) or (opp_cost <= 0.001 and energy_now >= self.min_kwh_threshold):
             status = SolarStatus.START
-            reason = (
-                f"Nu starten: verlies {opp_cost:.1%}, opbrengst {energy_now:.2f}kWh"
-            )
+            reason = f"Nu starten: verlies {opp_cost:.1%}, netto ruimte {energy_now:.2f}kWh (Load: {current_load_kw:.2f}kW)"
         elif energy_now < 0.05 and energy_best < self.min_kwh_threshold:
             status = SolarStatus.LOW_LIGHT
-            reason = "Te weinig licht voor zinvolle start"
+            reason = "Te weinig netto licht voor start"
 
         return status, DecisionContext(
             energy_now=round(energy_now, 2),
@@ -319,6 +347,7 @@ class SolarOptimizer:
             action=status,
             reason=reason,
             planned_start=best_row["timestamp"],
+            load_now=round(current_load_kw, 2),
         )
 
 
@@ -332,6 +361,8 @@ class SolarAI2:
         self.ha = ha_client
         self.opts = opts or {}
         self.system_max = float(self.opts.get("system_max_kw", 2.0))
+        # Config voor gemiddeld huisverbruik als apparaten uit staan
+        self.avg_baseload = float(self.opts.get("avg_baseload_kw", 0.25))
 
         model_path = Path(
             self.opts.get("solar_model_path2", "/config/models/solar2_model.joblib")
@@ -341,10 +372,15 @@ class SolarAI2:
             model_mae=self.model.mae, system_max_kw=self.system_max
         )
         self.optimizer = SolarOptimizer(
-            self.system_max, float(self.opts.get("duration_hours", 1.0))
+            self.system_max,
+            float(self.opts.get("duration_hours", 1.0)),
+            avg_baseload_kw=self.avg_baseload,
         )
 
+        # Buffers voor smoothing
         self.pv_buffer = deque(maxlen=20)
+        self.load_buffer = deque(maxlen=20)
+
         self.cached_forecast = None
         self.last_poll = None
 
@@ -365,6 +401,24 @@ class SolarAI2:
             current_pv = 0.0
         self.pv_buffer.append(current_pv)
 
+        # 1b. Update Load (Huisverbruik)
+        try:
+            val_load = self.ha.get_state(
+                self.opts.get("sensor_power_load", "sensor.stroomverbruik")
+            )
+            current_load = (
+                float(val_load) / 1000.0
+                if val_load not in ["unknown", "unavailable", None]
+                else self.avg_baseload
+            )
+        except Exception:
+            current_load = self.avg_baseload
+
+        self.load_buffer.append(current_load)
+
+        # Gebruik de mediaan om pieken (waterkoker) eruit te filteren
+        stable_load = np.median(self.load_buffer)
+
         # 2. Update Forecast
         self._update_forecast_data()
         if self.cached_forecast is None:
@@ -384,8 +438,8 @@ class SolarAI2:
         df_calc["power_corrected"] = self.nowcaster.apply(df_calc, now, "power_ml")
         df_calc["power_corrected"] = df_calc["power_corrected"].clip(0, self.system_max)
 
-        # 4. Optimalisatie
-        status, ctx = self.optimizer.calculate_optimal_window(df_calc, now)
+        # 4. Optimalisatie (Geef stable_load mee)
+        status, ctx = self.optimizer.calculate_optimal_window(df_calc, now, stable_load)
 
         # 5. Publiceren
         if ctx:
@@ -423,7 +477,7 @@ class SolarAI2:
     def _publish_state(self, ctx: DecisionContext, current_pv: float):
         plan_iso = ctx.planned_start.isoformat() if ctx.planned_start else None
         logger.info(
-            f"SolarML: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence}"
+            f"SolarML: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence} | Load: {ctx.load_now:.2f}kW"
         )
 
         attrs = {
@@ -432,6 +486,7 @@ class SolarAI2:
             "planned_start": plan_iso,
             "current_bias_ratio": round(self.nowcaster.current_ratio, 2),
             "current_pv_kw": round(current_pv, 2),
+            "current_load_kw": ctx.load_now,
             "energy_now_kwh": ctx.energy_now,
             "energy_best_kwh": ctx.energy_best,
             "opportunity_cost": ctx.opportunity_cost,
