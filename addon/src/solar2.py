@@ -20,6 +20,7 @@ from pandas.api.types import is_datetime64_any_dtype
 # Project Imports
 from utils import add_cyclic_time_features
 from ha_client import HAClient
+from db import fetch_solar_training_data_orm
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +388,16 @@ class SolarAI2:
         # 5. Publiceren
         if ctx:
             self._publish_state(ctx, stable_pv)
+
+    def train(self):
+        df_history = fetch_solar_training_data_orm(self.ha, self.opts)
+        if df_history.empty:
+            return
+
+        self.model.train(df_history, self.system_max)
+        logger.info(
+            f"SolarAI: Model getraind met MAE={self.model.mae:.2f} kW op {len(df_history)} records."
+        )
 
     def _update_forecast_data(self):
         poll = self.ha.get_state(
