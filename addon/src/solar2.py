@@ -133,7 +133,14 @@ class SolarModel:
         X = self._prepare_features(df_history)
         y = df_history["actual_pv_yield"].clip(0, system_max)
         self.model = HistGradientBoostingRegressor(
-            loss="absolute_error", random_state=42
+            loss="absolute_error",
+            learning_rate=0.08,
+            max_iter=400,
+            max_leaf_nodes=24,
+            min_samples_leaf=25,
+            l2_regularization=0.3,
+            early_stopping=False,
+            random_state=42,
         )
         self.model.fit(X, y)
         self.mae = mean_absolute_error(y, self.model.predict(X))
@@ -197,6 +204,7 @@ class SolarOptimizer:
         # 1. Resample en voorbereiding
         df_res = (
             df.set_index("timestamp")
+            .apply(pd.to_numeric, errors="coerce")
             .infer_objects(copy=False)
             .resample("15min")
             .interpolate("linear")
@@ -388,9 +396,7 @@ class SolarAI2:
             return
 
         payload = self.ha.get_payload(
-            self.opts.get(
-                "sensor_solcast", "sensor.solcast_pv_forecast_forecast_today"
-            )
+            self.opts.get("sensor_solcast", "sensor.solcast_pv_forecast_forecast_today")
         )
         if payload:
             raw = payload.get("attributes", {}).get("detailedForecast", [])

@@ -295,6 +295,8 @@ def trigger_training(
                 GLOBAL_COORDINATOR.thermostat_ai.train()
             elif model == "solar":
                 GLOBAL_COORDINATOR.solar_ai.train()
+            elif model == "solar2":
+                GLOBAL_COORDINATOR.solar_ai2.train()
             elif model == "presence":
                 GLOBAL_COORDINATOR.presence_ai.train()
             elif model == "thermal":
