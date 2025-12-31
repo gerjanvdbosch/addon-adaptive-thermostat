@@ -332,7 +332,7 @@ class SolarAI2:
         self.system_max = float(self.opts.get("system_max_kw", 2.0))
 
         model_path = Path(
-            self.opts.get("solar_model_path", "/config/models/solar2_model.joblib")
+            self.opts.get("solar_model_path2", "/config/models/solar2_model.joblib")
         )
         self.model = SolarModel(model_path)
         self.nowcaster = NowCaster(
@@ -396,7 +396,7 @@ class SolarAI2:
 
         self.model.train(df_history, self.system_max)
         logger.info(
-            f"SolarAI: Model getraind met MAE={self.model.mae:.2f} kW op {len(df_history)} records."
+            f"SolarAI: Model getraind met MAE={self.model.mae:.2f} op {len(df_history)} records."
         )
 
     def _update_forecast_data(self):
