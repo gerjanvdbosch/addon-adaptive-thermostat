@@ -296,7 +296,7 @@ def trigger_training(
             elif model == "solar":
                 GLOBAL_COORDINATOR.solar_ai.train()
             elif model == "solar2":
-                GLOBAL_COORDINATOR.solar_ai2.train()
+                GLOBAL_COORDINATOR.solar_ai2.model.train()
             elif model == "presence":
                 GLOBAL_COORDINATOR.presence_ai.train()
             elif model == "thermal":
