@@ -188,7 +188,7 @@ class SolarAI:
 
         df = fetch_solar_training_data_orm(days=180)
 
-        if len(df) < 2000:
+        if len(df) < 500:
             logger.warning(
                 f"SolarAI: Te weinig data ({len(df)} samples). Training overgeslagen."
             )
