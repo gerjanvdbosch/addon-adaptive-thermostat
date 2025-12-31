@@ -475,7 +475,7 @@ class SolarAI2:
             self.last_poll = poll
 
     def _publish_state(self, ctx: DecisionContext, current_pv: float):
-        plan_iso = ctx.planned_start.isoformat() if ctx.planned_start else None
+        plan_iso = ctx.planned_start.isoformat() if ctx.planned_start else "unknown"
         logger.info(
             f"SolarML: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence} | Load: {ctx.load_now:.2f}kW"
         )
