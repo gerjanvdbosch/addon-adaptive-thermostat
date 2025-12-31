@@ -49,6 +49,8 @@ class SolarContext:
     is_substantial_gain: bool
     should_check_waiting: bool
     is_waiting_worth_it: bool
+    forward_uncertainty: float
+    best_uncertainty: float
 
 
 class SolarAI:
@@ -79,15 +81,17 @@ class SolarAI:
         ]
 
         # Systeem instellingen
+        self.solcast_field = self.opts.get("solar_forecast_field", "pv_estimate90")
         self.system_max_kw = float(self.opts.get("system_max_kw", 2.0))
         self.duration_hours = float(self.opts.get("duration_hours", 1.0))
-        self.aggregation_minutes = int(self.opts.get("aggregation_minutes", 30))
 
         # Logica drempels
-        self.early_start_threshold = float(self.opts.get("early_start_threshold", 0.95))
+        self.early_start_threshold = float(self.opts.get("solar_start_threshold", 0.9))
+        self.uncertainty_penalty = float(
+            self.opts.get("solar_uncertainty_penalty", 0.1)
+        )
         self.min_viable_kw = float(self.opts.get("min_viable_kw", 0.3))
         self.min_noise_kw = float(self.opts.get("min_noise_kw", 0.01))
-
         self.interval = int(self.opts.get("solar_interval_seconds", 15))
 
         # Sensoren
@@ -113,11 +117,12 @@ class SolarAI:
         self.last_solcast_poll_ts = None
         self.solcast_just_updated = False
         self.last_midnight_reset_date = datetime.now().date()
+        self.aggregation_minutes = 30
 
         # Stabiliteits Buffer
         self.history_len = int(300 / max(1, self.interval))
         self.pv_buffer = deque(maxlen=self.history_len)
-        self.state_length = int(self.opts.get("state_length", 10))
+        self.state_length = int(self.opts.get("state_length", 4))
         self.state_buffer = deque(maxlen=self.state_length)
 
         self.last_stable_advice = {
@@ -330,6 +335,29 @@ class SolarAI:
 
         return median, is_stable
 
+    def _get_trend(self):
+        samples_back = 10
+
+        if len(self.pv_buffer) < samples_back:
+            return 0.0
+
+        current = self.pv_buffer[-1]
+        past = self.pv_buffer[-samples_back]
+
+        delta_kw = current - past
+
+        # Bereken hoeveel minuten er daadwerkelijk voorbij zijn
+        # Bij 15s interval: 10 * 15 = 150 sec = 2.5 minuten
+        seconds_passed = samples_back * self.interval
+        minutes_passed = seconds_passed / 60.0
+
+        if minutes_passed <= 0:
+            return 0.0
+
+        # Normaliseer naar kW per minuut
+        # Bijv: -0.2kW in 2.5 minuut = -0.08 kW/min
+        return delta_kw / minutes_passed
+
     def _make_result(self, status, reason, plan_time=None, context=None):
         return {
             "action": status,
@@ -350,25 +378,19 @@ class SolarAI:
 
         median_pv, is_stable = self._get_stability_stats()
 
+        if median_pv <= self.min_noise_kw:
+            return self._make_result(SolarStatus.DONE, "Zon is onder", None, None)
+
         # 1. DataFrame Voorbereiden
         df = pd.DataFrame(self.cached_solcast_data)
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
+        df["uncertainty"] = df["pv_estimate90"] - df["pv_estimate10"]
         df.sort_values("timestamp", inplace=True)
 
         now_utc = pd.Timestamp.now(tz="UTC")
         now_floor = now_utc.replace(second=0, microsecond=0)
         local_tz = datetime.now().astimezone().tzinfo
         future = df[df["timestamp"] >= now_floor].copy()
-
-        # 1. Check of de forecast zegt dat het over is
-        forecast_says_dark = future[future["pv_estimate"] > self.min_noise_kw].empty
-
-        # 2. Check of de panelen zeggen dat het over is
-        actual_is_dark = median_pv <= self.min_noise_kw
-
-        # We gaan pas naar de eind-statussen als BEIDE waar zijn
-        if forecast_says_dark and actual_is_dark:
-            return self._make_result(SolarStatus.DONE, "Zon is onder", None, None)
 
         # 2. AI Predictie op de ruwe blokken (30 min)
         # We voorspellen EERST, daarna interpoleren we.
@@ -377,11 +399,11 @@ class SolarAI:
             pred_ai = self.model.predict(X_pred)
             # Blending: 60% AI, 40% Solcast
             df["ai_power_raw"] = (self.ml_weight * pred_ai) + (
-                self.solcast_weight * df["pv_estimate"]
+                self.solcast_weight * df[self.solcast_field]
             )
             df["ai_power_raw"] = df["ai_power_raw"].clip(0, self.system_max_kw)
         else:
-            df["ai_power_raw"] = df.get("pv_estimate", 0.0)
+            df["ai_power_raw"] = df.get(self.solcast_field, 0.0)
 
         # FIX 3: INTERPOLATIE NAAR 1 MINUUT
         # We resamplen naar 1 minuut om bias-oscillatie te voorkomen.
@@ -405,13 +427,13 @@ class SolarAI:
             # Alleen updaten als er significant licht verwacht wordt
             if expected_now > self.min_viable_kw:
                 new_bias = median_pv / expected_now
-                # Als Solcast net update, vertrouwen we bias iets minder (0.8), anders traag (0.2)
-                alpha = 0.8 if self.solcast_just_updated else 0.2
-
-                # Extra demping om flipperen te voorkomen
-                self.smoothed_bias = ((1.0 - alpha) * self.smoothed_bias) + (
-                    alpha * new_bias
-                )
+                delta = new_bias - self.smoothed_bias
+                alpha = np.clip(
+                    abs(delta), 0.01, 0.3
+                )  # minimale correctie 0.01, max 0.3
+                if delta < 0:  # daling
+                    alpha *= 0.3  # traag corrigeren naar beneden
+                self.smoothed_bias = (1 - alpha) * self.smoothed_bias + alpha * new_bias
                 self.smoothed_bias = np.clip(self.smoothed_bias, 0.4, 1.6)
                 self.solcast_just_updated = False
 
@@ -423,8 +445,11 @@ class SolarAI:
         # 4. ROLLING WINDOW (Aangepast voor 1-minuut data)
         # Omdat data nu per minuut is, is de window_size = uren * 60
         window_steps = max(1, int(self.duration_hours * 60))
+
         indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_steps)
         df["window_avg_power"] = df["ai_power"].rolling(window=indexer).mean()
+        df["window_min_power"] = df["ai_power"].rolling(window=indexer).min()
+        df["window_max_uncertainty"] = df["uncertainty"].rolling(window=indexer).max()
 
         # Filter toekomst
         future = df[df["timestamp"] >= now_floor].copy()
@@ -499,9 +524,21 @@ class SolarAI:
         day_floor_limit = day_peak * 0.25
         final_trigger_val = max(future_threshold, day_floor_limit, self.min_viable_kw)
 
+        # UNCERTAINTY PENALTY (Forward Looking)
+        row_now_updated = df[df["timestamp"] == now_floor]
+        forward_uncertainty = 0.0
+        if not row_now_updated.empty:
+            forward_uncertainty = row_now_updated.iloc[0]["window_max_uncertainty"]
+
+        final_trigger_val += forward_uncertainty * self.uncertainty_penalty
+
         # Log labels & DEFINITIES
         day_quality_high = 0.75
         day_quality_average = 0.40
+
+        quality = max(0.0, min(day_quality_ratio, 1.0))
+        patience_threshold = 0.70 + 0.20 * quality  # 0.70 → 0.90
+        decay_speed = 0.25 - 0.15 * quality  # 0.25 → 0.10
 
         if day_quality_ratio > day_quality_high:
             day_type = "Sunny ☀️"
@@ -513,15 +550,28 @@ class SolarAI:
         # 7. BESLUITVORMING
         max_peak_power = future["window_avg_power"].max()
         threshold_planning = max(max_peak_power * percentage, 0.01)
-        candidates = future[future["window_avg_power"] >= threshold_planning]
+        candidates = future[
+            (future["window_avg_power"] >= threshold_planning)
+            & (future["window_min_power"] >= (threshold_planning * 0.6))
+        ].copy()
+
+        if candidates.empty:
+            candidates = future[future["window_avg_power"] >= threshold_planning].copy()
 
         if not candidates.empty:
+            candidates.sort_values(
+                by=["window_max_uncertainty", "window_avg_power", "timestamp"],
+                ascending=[True, False, True],
+                inplace=True,
+            )
             best_row = candidates.iloc[0]
         else:
+            # Fallback: Gewoon de hoogste piek als niks aan de eisen voldoet
             best_idx = future["window_avg_power"].idxmax()
             best_row = future.loc[best_idx]
 
         best_power = best_row["window_avg_power"]
+        best_uncertainty = best_row["uncertainty"]
         start_time_local = best_row["timestamp"].tz_convert(local_tz)
         wait_minutes = int((best_row["timestamp"] - now_utc).total_seconds() / 60)
         wait_hours = wait_minutes / 60.0
@@ -536,8 +586,8 @@ class SolarAI:
 
         # We wachten alleen als:
         # 1. Er nog genoeg tijd is (>15% dag over)
-        # 2. De winst substantieel is (>150 Watt Absoluut) OF (>20% Relatief)
-        has_time_left = remaining_ratio > 0.15
+        # 2. De winst substantieel is (>150 Watt Absoluut) OF (>40% Relatief)
+        has_time_left = remaining_ratio > 0.40
         is_substantial_gain = (absolute_gain_kw > 0.15) or (potential_gain_pct > 0.20)
 
         should_check_waiting = has_time_left and is_substantial_gain
@@ -547,12 +597,12 @@ class SolarAI:
             # En we checken nogmaals de day quality als extra eis voor de 'fijne kneepjes'
             if day_quality_ratio > day_quality_average:
                 # REGEL 1: Zijn we er al bijna? (85%)
-                if median_pv >= (best_power * 0.85):
+                if median_pv >= (best_power * patience_threshold):
                     is_waiting_worth_it = False
                 else:
                     # REGEL 2: Time Decay
-                    time_penalty_factor = max(0.5, 1.0 - (wait_hours * 0.10))
-                    if (best_power * time_penalty_factor) > (median_pv * 1.10):
+                    time_penalty_factor = max(0.5, 1.0 - (wait_hours * decay_speed))
+                    if (best_power * time_penalty_factor) > (median_pv * 1.15):
                         is_waiting_worth_it = True
             else:
                 # Op slechte dagen wachten we alleen bij gigantische absolute winst
@@ -580,6 +630,8 @@ class SolarAI:
             is_substantial_gain=is_substantial_gain,
             should_check_waiting=should_check_waiting,
             is_waiting_worth_it=is_waiting_worth_it,
+            forward_uncertainty=forward_uncertainty,
+            best_uncertainty=best_uncertainty,
         )
 
         logger.info(
@@ -589,6 +641,17 @@ class SolarAI:
             f"Actueel: {median_pv:.2f}kW | Percentage: {percentage:.1%} | Bias: {self.smoothed_bias:.2f} | "
             f"Should-Wait: {should_check_waiting} | Waiting-Worth: {is_waiting_worth_it}"
         )
+
+        trend = self._get_trend()
+
+        # Als we dalen met meer dan 100W/minuut (snel wolkendek of avond)
+        if trend < -0.100 and not is_substantial_gain:
+            return self._make_result(
+                SolarStatus.WAIT,
+                f"Vermogen daalt snel ({trend:.2f}/min)",
+                start_time_local,
+                context,
+            )
 
         # A. Low Light
         if adjusted_future_max < self.min_viable_kw and median_pv < self.min_viable_kw:
@@ -729,7 +792,7 @@ class SolarAI:
                 }
             )
 
-        self.ha.set_solar_prediction(iso_date, attributes)
+        # self.ha.set_solar_prediction(iso_date, attributes)
 
     def get_influence_factors(self, df_row: pd.DataFrame) -> dict:
         if not self.is_fitted or self.model is None:
@@ -753,7 +816,7 @@ class SolarAI:
                 col: float(val) for col, val in zip(self.feature_columns, vals)
             }
 
-            solcast_raw = df_row.iloc[0].get("pv_estimate", 0.0)
+            solcast_raw = df_row.iloc[0].get(self.solcast_field, 0.0)
 
             direct_impact = solcast_raw * self.solcast_weight
             model_impact = raw_influences.get("pv_estimate", 0) * self.ml_weight

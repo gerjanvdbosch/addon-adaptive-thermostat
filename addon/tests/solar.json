@@ -334,5 +334,329 @@
     "pv_estimate10": 0,
     "pv_estimate90": 0,
     "actual_pv_yield": 0
+  },
+
+
+  {
+    "timestamp": "2025-12-30T22:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T22:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T21:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T21:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T20:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T20:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T19:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T19:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T18:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T18:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T17:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T17:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T16:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T16:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T15:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T15:00:00",
+    "pv_estimate": 0.0071,
+    "pv_estimate10": 0.0024,
+    "pv_estimate90": 0.0176,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T14:30:00",
+    "pv_estimate": 0.1081,
+    "pv_estimate10": 0.0618,
+    "pv_estimate90": 0.1699,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T14:00:00",
+    "pv_estimate": 0.3556,
+    "pv_estimate10": 0.2486,
+    "pv_estimate90": 0.3902,
+    "actual_pv_yield": null
+  },
+  {
+    "timestamp": "2025-12-30T13:30:00",
+    "pv_estimate": 0.0788,
+    "pv_estimate10": 0.0639,
+    "pv_estimate90": 0.2304,
+    "actual_pv_yield": 0.23132250000000001
+  },
+  {
+    "timestamp": "2025-12-30T13:00:00",
+    "pv_estimate": 0.0885,
+    "pv_estimate10": 0.071,
+    "pv_estimate90": 0.1209,
+    "actual_pv_yield": 0.2851275
+  },
+  {
+    "timestamp": "2025-12-30T12:30:00",
+    "pv_estimate": 0.7107,
+    "pv_estimate10": 0.4502,
+    "pv_estimate90": 0.9264,
+    "actual_pv_yield": 0.2626075
+  },
+  {
+    "timestamp": "2025-12-30T12:00:00",
+    "pv_estimate": 1.0393,
+    "pv_estimate10": 0.88,
+    "pv_estimate90": 1.0426,
+    "actual_pv_yield": 0.63531
+  },
+  {
+    "timestamp": "2025-12-30T11:30:00",
+    "pv_estimate": 0.2037,
+    "pv_estimate10": 0.1079,
+    "pv_estimate90": 0.8186,
+    "actual_pv_yield": 0.7645649999999999
+  },
+  {
+    "timestamp": "2025-12-30T11:00:00",
+    "pv_estimate": 0.899,
+    "pv_estimate10": 0.6062,
+    "pv_estimate90": 1.2215,
+    "actual_pv_yield": 0.3370666666666667
+  },
+  {
+    "timestamp": "2025-12-30T10:30:00",
+    "pv_estimate": 0.8819,
+    "pv_estimate10": 0.7205,
+    "pv_estimate90": 0.9508,
+    "actual_pv_yield": 1.0794183333333334
+  },
+  {
+    "timestamp": "2025-12-30T10:00:00",
+    "pv_estimate": 0.4748,
+    "pv_estimate10": 0.1998,
+    "pv_estimate90": 0.81,
+    "actual_pv_yield": 0.6161483333333333
+  },
+  {
+    "timestamp": "2025-12-30T09:30:00",
+    "pv_estimate": 0.761,
+    "pv_estimate10": 0.137,
+    "pv_estimate90": 1.1234,
+    "actual_pv_yield": 0.15469916666666667
+  },
+  {
+    "timestamp": "2025-12-30T09:00:00",
+    "pv_estimate": 0.5104,
+    "pv_estimate10": 0.4188,
+    "pv_estimate90": 0.7784,
+    "actual_pv_yield": 0.3861991666666667
+  },
+  {
+    "timestamp": "2025-12-30T08:30:00",
+    "pv_estimate": 0.0749,
+    "pv_estimate10": 0.0528,
+    "pv_estimate90": 0.1648,
+    "actual_pv_yield": 0.08357083333333334
+  },
+  {
+    "timestamp": "2025-12-30T08:00:00",
+    "pv_estimate": 0.0216,
+    "pv_estimate10": 0.0204,
+    "pv_estimate90": 0.0434,
+    "actual_pv_yield": 0.057321666666666674
+  },
+  {
+    "timestamp": "2025-12-30T07:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T07:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T06:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T06:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T05:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T05:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T04:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T04:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T03:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T03:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T02:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T02:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T01:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T01:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T00:30:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
+  },
+  {
+    "timestamp": "2025-12-30T00:00:00",
+    "pv_estimate": 0,
+    "pv_estimate10": 0,
+    "pv_estimate90": 0,
+    "actual_pv_yield": 0
   }
 ]
