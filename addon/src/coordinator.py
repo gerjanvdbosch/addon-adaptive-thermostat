@@ -44,7 +44,7 @@ class ClimateCoordinator:
 
         # AI Agents
         self.thermostat_ai = ThermostatAI(self.ha, self.collector, opts)
-        self.solar = SolarAI(self.ha, opts)
+        self.solar = Solar(self.ha, opts)
         self.presence_ai = PresenceAI(opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
         self.dhw_ai = DhwAI(self.ha, opts)

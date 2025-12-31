@@ -129,7 +129,7 @@ class SolarModel:
                     self.model = data
                 self.is_fitted = True
             except Exception:
-                logger.error("SolarAI: Model corrupt.")
+                logger.error("Solar: Model corrupt.")
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -451,7 +451,7 @@ class Solar:
 
         self.model.train(df_history, self.system_max)
         logger.info(
-            f"SolarAI: Model getraind met MAE={self.model.mae:.2f} op {len(df_history)} records."
+            f"Solar: Model getraind met MAE={self.model.mae:.2f} op {len(df_history)} records."
         )
 
     def _update_forecast_data(self):
@@ -514,7 +514,7 @@ class Solar:
         self.last_decision_ctx = ctx
         plan_iso = ctx.planned_start.isoformat() if ctx.planned_start else "unknown"
         logger.info(
-            f"SolarML: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence} | Load: {ctx.load_now:.2f}kW"
+            f"Solar: [{ctx.action.value}] {ctx.reason} | Conf: {ctx.confidence} | Load: {ctx.load_now:.2f}kW"
         )
 
         attrs = {
