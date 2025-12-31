@@ -177,8 +177,8 @@ class SolarModel:
 
             result = {"Base": f"{base:.2f}", "Prediction": f"{y_pred[0]:.2f}"}
             for col, val in zip(self.feature_cols, shap_values[0]):
-                if abs(val) > 0.02:
-                    result[col] = f"{val:+.2f}"
+                # if abs(val) > 0.02:
+                result[col] = f"{val:+.2f}"
             return result
         except Exception:
             return {"Error": "Shap failed"}
