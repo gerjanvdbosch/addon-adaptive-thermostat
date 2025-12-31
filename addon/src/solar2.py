@@ -182,7 +182,7 @@ class SolarOptimizer:
         self,
         system_max_kw: float,
         duration_hours: float,
-        min_kwh_threshold: float = 0.5,
+        min_kwh_threshold: float = 0.3,
     ):
         self.system_max = system_max_kw
         self.duration = duration_hours
@@ -317,7 +317,7 @@ class SolarAI2:
     def __init__(self, ha_client: HAClient, opts: dict):
         self.ha = ha_client
         self.opts = opts or {}
-        self.system_max = float(self.opts.get("system_max_kw", 4.0))
+        self.system_max = float(self.opts.get("system_max_kw", 2.0))
 
         model_path = Path(
             self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
