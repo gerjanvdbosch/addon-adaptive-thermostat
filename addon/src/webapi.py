@@ -225,6 +225,40 @@ def get_current_status():
         target_ts = datetime.now() + timedelta(minutes=lookahead)
         dhw_influences = GLOBAL_COORDINATOR.dhw_ai.get_influence_factors(target_ts)
 
+        solar_ai2 = GLOBAL_COORDINATOR.solar_ai2
+        solar_ai2._update_forecast_data()
+
+        status_str2 = "UNKNOWN"
+        solar_influences2 = {}
+
+        if solar_ai2.cached_forecast is not None:
+            now_utc = pd.Timestamp.now(tz="UTC")
+            df_now = solar_ai2.cached_forecast.copy()
+            df_now["time_diff"] = (df_now["timestamp"] - now_utc).abs()
+            nearest_row = df_now.nsmallest(1, "time_diff")
+
+            if not nearest_row.empty and solar_ai2.model.is_fitted:
+                try:
+                    X_now = solar_ai2.model._prepare_features(nearest_row)
+                    solar_influences2 = solar_ai2.model.get_shap_values(nearest_row)
+                except Exception as e:
+                    logger.warning(f"WebAPI: Kon solar influences niet berekenen: {e}")
+
+            # Bereken status string via optimizer
+            df_calc = df_now.copy()
+            df_calc["power_ml"] = solar_ai2.model.predict(df_calc)
+            df_calc["power_corrected"] = solar_ai2.nowcaster.apply(
+                df_calc, now_utc.to_pydatetime(), "power_ml"
+            )
+            df_calc["power_corrected"] = df_calc["power_corrected"].clip(
+                0, solar_ai2.system_max
+            )
+
+            status2, ctx2 = solar_ai2.optimizer.calculate_optimal_window(
+                df_calc, now_utc.to_pydatetime()
+            )
+            status_str2 = status2.value if hasattr(status2, "value") else str(status2)
+
         return {
             "thermostat": {
                 "current_setpoint": cur_sp,
@@ -238,6 +272,11 @@ def get_current_status():
                 "planned_start": solar_rec.get("plan_start"),
                 "bias": round(solar_ai.smoothed_bias, 2),
                 "explanation": solar_influences,
+            },
+            "solar2": {
+                "status": status_str2,
+                "context": ctx2,
+                "explanation": solar_influences2,
             },
             "presence": {
                 "is_home": safe_bool(features.get("home_presence")),

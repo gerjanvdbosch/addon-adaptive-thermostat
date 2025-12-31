@@ -159,7 +159,7 @@ class SolarModel:
         # 60% ML, 40% Raw Solcast blend
         return (pred_ml * 0.6) + (raw_solcast * 0.4)
 
-    def get_shap_values(self, df_row: pd.DataFrame, solcast_col: str) -> Dict[str, str]:
+    def get_shap_values(self, df_row: pd.DataFrame) -> Dict[str, str]:
         if not self.is_fitted:
             return {"Info": "No model"}
 
@@ -173,7 +173,9 @@ class SolarModel:
                 else explainer.expected_value[0]
             )
 
-            result = {"Base": f"{base:.2f}"}
+            y_pred = self.model.predict(X)
+
+            result = {"Base": f"{base:.2f}", "Prediction": f"{y_pred[0]:.2f}"}
             for col, val in zip(self.feature_cols, shap_values[0]):
                 if abs(val) > 0.02:
                     result[col] = f"{val:+.2f}"
