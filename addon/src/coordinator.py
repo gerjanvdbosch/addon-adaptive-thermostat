@@ -6,8 +6,7 @@ from enum import Enum
 # Project imports
 from utils import safe_float, safe_bool, round_half
 from thermostat import ThermostatAI
-from solar import SolarAI
-from solar2 import SolarAI2
+from solar import Solar
 from presence import PresenceAI
 from thermal import ThermalAI
 from collector import Collector
@@ -45,8 +44,7 @@ class ClimateCoordinator:
 
         # AI Agents
         self.thermostat_ai = ThermostatAI(self.ha, self.collector, opts)
-        self.solar_ai = SolarAI(self.ha, opts)
-        self.solar_ai2 = SolarAI2(self.ha, opts)
+        self.solar = SolarAI(self.ha, opts)
         self.presence_ai = PresenceAI(opts)
         self.thermal_ai = ThermalAI(self.ha, opts)
         self.dhw_ai = DhwAI(self.ha, opts)
@@ -124,12 +122,12 @@ class ClimateCoordinator:
 
     def solar_tick(self):
         try:
-            self.solar_ai.run_cycle()
+            self.solar.run_cycle()
         except Exception:
             logger.exception("Coordinator: Fout in solar logic")
 
         try:
-            self.solar_ai2.run_cycle()
+            self.solar2.run_cycle()
         except Exception as e:
             logger.exception(f"Coordinator: Fout in solar2: {e}")
 
@@ -138,8 +136,8 @@ class ClimateCoordinator:
         for agent in [
             self.presence_ai,
             self.thermal_ai,
-            self.solar_ai,
-            self.solar_ai2,
+            self.solar,
+            self.solar2,
             self.thermostat_ai,
             self.dhw_ai,
         ]:

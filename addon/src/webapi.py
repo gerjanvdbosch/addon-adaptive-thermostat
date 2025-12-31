@@ -124,7 +124,6 @@ class DeleteResponse(BaseModel):
 class AIStatus(BaseModel):
     thermostat: dict
     solar: dict
-    solar2: dict
     presence: dict
     thermal: dict
     dhw: dict
@@ -165,36 +164,6 @@ def get_current_status():
         )
 
         # ----------------------------------------------------------------------
-        # 3. Vraag Solar aanbeveling & Invloeden (Uitgebreid)
-        # ----------------------------------------------------------------------
-        solar_ai = GLOBAL_COORDINATOR.solar_ai
-        solar_rec = solar_ai.get_solar_recommendation()
-
-        # Enum handling: Zorg dat we de string waarde krijgen
-        action_val = solar_rec.get("action")
-        status_str = (
-            action_val.value if hasattr(action_val, "value") else str(action_val)
-        )
-
-        # Bereken de Readable Influences (Live)
-        solar_influences = {}
-        if solar_ai.cached_solcast_data:
-            now_utc = pd.Timestamp.now(tz="UTC")
-            df_now = pd.DataFrame(solar_ai.cached_solcast_data)
-            df_now["timestamp"] = pd.to_datetime(df_now["period_start"], utc=True)
-
-            # Zoek dichtstbijzijnde record
-            df_now["time_diff"] = (df_now["timestamp"] - now_utc).abs()
-            nearest_row = df_now.nsmallest(1, "time_diff")
-
-            if not nearest_row.empty:
-                try:
-                    X_now = solar_ai._create_features(nearest_row)
-                    solar_influences = solar_ai.get_influence_factors(X_now)
-                except Exception as e:
-                    logger.warning(f"WebAPI: Kon solar influences niet berekenen: {e}")
-
-        # ----------------------------------------------------------------------
 
         # 4. Vraag Thermal voorspelling (hoe lang duurt opwarmen naar cur_sp)
         heating_mins = GLOBAL_COORDINATOR.thermal_ai.predict_heating_time(
@@ -215,47 +184,35 @@ def get_current_status():
             target_time
         )
 
-        sww_temp = features.get("dhw_temp", 45.0)
-
-        dhw_rec = GLOBAL_COORDINATOR.dhw_ai.get_recommendation(
-            sww_temp, solar_rec.get("action")
-        )
-
-        # Vraag invloeden op (voor het lookahead moment)
-        lookahead = GLOBAL_COORDINATOR.dhw_ai.lookahead_minutes
-        target_ts = datetime.now() + timedelta(minutes=lookahead)
-        dhw_influences = GLOBAL_COORDINATOR.dhw_ai.get_influence_factors(target_ts)
-
-        solar_ai2 = GLOBAL_COORDINATOR.solar_ai2
-        solar_ai2._update_forecast_data()
+        solar = GLOBAL_COORDINATOR.solar
+        solar._update_forecast_data()
 
         status_str2 = "UNKNOWN"
         solar_influences2 = {}
 
-        if solar_ai2.cached_forecast is not None:
+        if solar.cached_forecast is not None:
             now_utc = pd.Timestamp.now(tz="UTC")
-            df_now = solar_ai2.cached_forecast.copy()
+            df_now = solar.cached_forecast.copy()
             df_now["time_diff"] = (df_now["timestamp"] - now_utc).abs()
             nearest_row = df_now.nsmallest(1, "time_diff")
 
-            if not nearest_row.empty and solar_ai2.model.is_fitted:
+            if not nearest_row.empty and solar.model.is_fitted:
                 try:
-                    X_now = solar_ai2.model._prepare_features(nearest_row)
-                    solar_influences2 = solar_ai2.model.explain(nearest_row)
+                    solar_influences2 = solar.model.explain(nearest_row)
                 except Exception as e:
                     logger.warning(f"WebAPI: Kon solar influences niet berekenen: {e}")
 
             # Bereken status string via optimizer
             df_calc = df_now.copy()
-            df_calc["power_ml"] = solar_ai2.model.predict(df_calc)
-            df_calc["power_corrected"] = solar_ai2.nowcaster.apply(
+            df_calc["power_ml"] = solar.model.predict(df_calc)
+            df_calc["power_corrected"] = solar.nowcaster.apply(
                 df_calc, now_utc.to_pydatetime(), "power_ml"
             )
             df_calc["power_corrected"] = df_calc["power_corrected"].clip(
-                0, solar_ai2.system_max
+                0, solar.system_max
             )
 
-            status2, ctx2 = solar_ai2.optimizer.calculate_optimal_window(
+            status2, ctx2 = solar.optimizer.calculate_optimal_window(
                 df_calc, now_utc.to_pydatetime(), 200
             )
             status_str2 = status2.value if hasattr(status2, "value") else str(status2)
@@ -268,13 +225,6 @@ def get_current_status():
                 "explanation": thermostat_influences,
             },
             "solar": {
-                "status": status_str,
-                "reason": solar_rec.get("reason"),
-                "planned_start": solar_rec.get("plan_start"),
-                "bias": round(solar_ai.smoothed_bias, 2),
-                "explanation": solar_influences,
-            },
-            "solar2": {
                 "status": status_str2,
                 "context": ctx2,
                 "explanation": solar_influences2,
@@ -290,11 +240,6 @@ def get_current_status():
                 "current_temp": cur_temp,
                 "predicted_minutes_to_reach_target": round(heating_mins or 0),
                 "explanation": thermal_influences,
-            },
-            "dhw": {
-                "current_temp": sww_temp,
-                "target_temp": dhw_rec,
-                "explanation": dhw_influences,
             },
             "system": {
                 "hvac_mode": GLOBAL_COORDINATOR._get_hvac_mode(raw_data),
@@ -334,9 +279,9 @@ def trigger_training(
             elif model == "thermostat":
                 GLOBAL_COORDINATOR.thermostat_ai.train()
             elif model == "solar":
-                GLOBAL_COORDINATOR.solar_ai.train()
+                GLOBAL_COORDINATOR.solar.train()
             elif model == "solar2":
-                GLOBAL_COORDINATOR.solar_ai2.train()
+                GLOBAL_COORDINATOR.solar.train()
             elif model == "presence":
                 GLOBAL_COORDINATOR.presence_ai.train()
             elif model == "thermal":
