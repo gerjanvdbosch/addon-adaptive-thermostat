@@ -331,7 +331,7 @@ class SolarAI2:
         self.system_max = float(self.opts.get("system_max_kw", 2.0))
 
         model_path = Path(
-            self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
+            self.opts.get("solar_model_path", "/config/models/solar2_model.joblib")
         )
         self.model = SolarModel(model_path)
         self.nowcaster = NowCaster(
