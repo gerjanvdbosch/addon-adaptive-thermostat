@@ -126,18 +126,12 @@ class ClimateCoordinator:
         except Exception:
             logger.exception("Coordinator: Fout in solar logic")
 
-        try:
-            self.solar2.run_cycle()
-        except Exception as e:
-            logger.exception(f"Coordinator: Fout in solar2: {e}")
-
     def perform_nightly_training(self):
         logger.info("Coordinator: Start nachtelijke AI training...")
         for agent in [
             self.presence_ai,
             self.thermal_ai,
             self.solar,
-            self.solar2,
             self.thermostat_ai,
             self.dhw_ai,
         ]:
