@@ -129,7 +129,7 @@ class ClimateCoordinator:
             logger.exception("Coordinator: Fout in solar logic")
 
         try:
-            self.solar_a2i.run_cycle()
+            self.solar_ai2.run_cycle()
         except Exception as e:
             logger.exception(f"Coordinator: Fout in solar2: {e}")
 
