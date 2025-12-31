@@ -95,6 +95,7 @@ class SolarModel:
     def __init__(self, path: Path):
         self.path = path
         self.model: Optional[BaseEstimator] = None
+        self.field = "pv_estimate"
         self.mae = 0.2
         self.feature_cols = [
             "hour_sin",
@@ -152,7 +153,7 @@ class SolarModel:
         self.is_fitted = True
 
     def predict(self, df_forecast: pd.DataFrame) -> pd.Series:
-        raw_solcast = df_forecast["pv_estimate90"].fillna(0)
+        raw_solcast = df_forecast[self.field].fillna(0)
         if not self.is_fitted:
             return raw_solcast
         X = self._prepare_features(df_forecast)
@@ -160,7 +161,7 @@ class SolarModel:
         # 60% ML, 40% Raw Solcast blend
         return (pred_ml * 0.6) + (raw_solcast * 0.4)
 
-    def get_shap_values(self, df_row: pd.DataFrame) -> Dict[str, str]:
+    def explain(self, df_row: pd.DataFrame) -> Dict[str, str]:
         if not self.is_fitted:
             return {"Info": "No model"}
 
@@ -178,7 +179,6 @@ class SolarModel:
 
             result = {"Base": f"{base:.2f}", "Prediction": f"{y_pred[0]:.2f}"}
             for col, val in zip(self.feature_cols, shap_values[0]):
-                # if abs(val) > 0.02:
                 result[col] = f"{val:+.2f}"
             return result
         except Exception:
@@ -335,7 +335,7 @@ class SolarOptimizer:
         ) or (opp_cost <= 0.001 and energy_now >= self.min_kwh_threshold):
             status = SolarStatus.START
             reason = f"Nu starten: verlies {opp_cost:.1%}, netto ruimte {energy_now:.2f}kWh (Load: {current_load_kw:.2f}kW)"
-        elif energy_now < 0.05 and energy_best < self.min_kwh_threshold:
+        elif energy_now < 0.1 and energy_best < self.min_kwh_threshold:
             status = SolarStatus.LOW_LIGHT
             reason = "Te weinig netto licht voor start"
 
@@ -388,35 +388,22 @@ class SolarAI2:
         now = datetime.now(timezone.utc)
 
         # 1. Update PV
-        try:
-            val = self.ha.get_state(
-                self.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")
-            )
-            current_pv = (
-                float(val) / 1000.0
-                if val not in ["unknown", "unavailable", None]
-                else 0.0
-            )
-        except Exception:
-            current_pv = 0.0
+        val = self.ha.get_state(
+            self.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")
+        )
+        current_pv = float(val) / 1000.0 if val else 0.0
+
         self.pv_buffer.append(current_pv)
+        stable_pv = np.median(self.pv_buffer)
 
         # 1b. Update Load (Huisverbruik)
-        try:
-            val_load = self.ha.get_state(
-                self.opts.get("sensor_power_load", "sensor.stroomverbruik")
-            )
-            current_load = (
-                float(val_load) / 1000.0
-                if val_load not in ["unknown", "unavailable", None]
-                else self.avg_baseload
-            )
-        except Exception:
-            current_load = self.avg_baseload
-
-        self.load_buffer.append(current_load)
+        val_load = self.ha.get_state(
+            self.opts.get("sensor_power_load", "sensor.stroomverbruik")
+        )
+        current_load = float(val_load) / 1000.0 if val_load else self.avg_baseload
 
         # Gebruik de mediaan om pieken (waterkoker) eruit te filteren
+        self.load_buffer.append(current_load)
         stable_load = np.median(self.load_buffer)
 
         # 2. Update Forecast
@@ -432,7 +419,6 @@ class SolarAI2:
         idx_now = df_calc["timestamp"].searchsorted(now)
         row_now = df_calc.iloc[min(idx_now, len(df_calc) - 1)]
 
-        stable_pv = np.median(self.pv_buffer)
         self.nowcaster.update(stable_pv, row_now["power_ml"])
 
         df_calc["power_corrected"] = self.nowcaster.apply(df_calc, now, "power_ml")

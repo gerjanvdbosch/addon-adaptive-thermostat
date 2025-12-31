@@ -241,7 +241,7 @@ def get_current_status():
             if not nearest_row.empty and solar_ai2.model.is_fitted:
                 try:
                     X_now = solar_ai2.model._prepare_features(nearest_row)
-                    solar_influences2 = solar_ai2.model.get_shap_values(nearest_row)
+                    solar_influences2 = solar_ai2.model.explain(nearest_row)
                 except Exception as e:
                     logger.warning(f"WebAPI: Kon solar influences niet berekenen: {e}")
 
