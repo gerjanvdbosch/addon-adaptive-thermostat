@@ -124,6 +124,7 @@ class DeleteResponse(BaseModel):
 class AIStatus(BaseModel):
     thermostat: dict
     solar: dict
+    solar2: dict
     presence: dict
     thermal: dict
     dhw: dict
