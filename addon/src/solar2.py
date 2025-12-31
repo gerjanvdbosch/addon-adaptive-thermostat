@@ -197,6 +197,7 @@ class SolarOptimizer:
         # 1. Resample en voorbereiding
         df_res = (
             df.set_index("timestamp")
+            .infer_objects(copy=False)
             .resample("15min")
             .interpolate("linear")
             .reset_index()
