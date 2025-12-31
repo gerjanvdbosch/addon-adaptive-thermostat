@@ -390,7 +390,7 @@ class SolarAI2:
             self._publish_state(ctx, stable_pv)
 
     def train(self):
-        df_history = fetch_solar_training_data_orm(self.ha, self.opts)
+        df_history = fetch_solar_training_data_orm(days=365)
         if df_history.empty:
             return
 

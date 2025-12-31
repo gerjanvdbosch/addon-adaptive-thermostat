@@ -186,7 +186,7 @@ class SolarAI:
         """Traint het model op historische data."""
         logger.info("SolarAI: Training start...")
 
-        df = fetch_solar_training_data_orm(days=180)
+        df = fetch_solar_training_data_orm(days=365)
 
         if len(df) < 500:
             logger.warning(
