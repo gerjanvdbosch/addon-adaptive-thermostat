@@ -134,12 +134,14 @@ class SolarModel:
         y = df_history["actual_pv_yield"].clip(0, system_max)
         self.model = HistGradientBoostingRegressor(
             loss="absolute_error",
-            learning_rate=0.08,
-            max_iter=400,
-            max_leaf_nodes=24,
+            learning_rate=0.05,
+            max_iter=500,
+            max_leaf_nodes=31,
             min_samples_leaf=25,
-            l2_regularization=0.3,
-            early_stopping=False,
+            l2_regularization=0.5,
+            early_stopping=True,
+            validation_fraction=0.15,
+            n_iter_no_change=20,
             random_state=42,
         )
         self.model.fit(X, y)
