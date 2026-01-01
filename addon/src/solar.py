@@ -367,7 +367,7 @@ class Solar:
             self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
         )
         self.model = SolarModel(model_path)
-        self.weather = WeatherClient(opts)
+        self.weather = WeatherClient(ha_client, opts)
         self.nowcaster = NowCaster(
             model_mae=self.model.mae, system_max_kw=self.system_max
         )
