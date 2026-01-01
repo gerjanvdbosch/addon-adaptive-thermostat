@@ -477,6 +477,7 @@ class Solar:
             return
 
         raw = payload.get("attributes", {}).get("detailedForecast", [])
+        logger.info(f"Solar: Solcast data {raw}")
 
         df = pd.DataFrame(raw)
         df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_convert("UTC")

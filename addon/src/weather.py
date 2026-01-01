@@ -30,7 +30,7 @@ class WeatherClient:
             "azimuth": self.azimuth,
             "minutely_15": "temperature_2m,cloud_cover,direct_radiation,diffuse_radiation,global_tilted_irradiance",
             "timezone": "UTC",
-            "forecast_days": 2,
+            "forecast_days": 1,
         }
 
         try:
