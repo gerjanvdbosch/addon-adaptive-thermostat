@@ -25,6 +25,8 @@ options:
   solar_forecast_field: pv_estimate90
   solar_uncertainty_penalty: 0.1
   solar_start_threshold: 0.9
+  longitude: 52.0
+  latitude: 5.0
   cooldown_hours: 2.0
   stability_hours: 8
   full_retrain_time: "03:00"

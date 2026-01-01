@@ -525,6 +525,7 @@ class Solar:
 
         self.cached_forecast = df_merged.sort_values("timestamp")
         self.last_poll = now
+        logger.info("Solar: Forecast data bijgewerkt.")
 
     def _process_pv_sample(self, pv_kw):
         now = datetime.now(timezone.utc)
