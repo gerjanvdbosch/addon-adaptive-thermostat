@@ -5,7 +5,7 @@
 ### Features
 
 * Added ThermostatAI
-* Added SolarAI
+* Added Solar
 * Added PresenceAI
 * Added ThermalAI
 * Added ClimateCoordinator

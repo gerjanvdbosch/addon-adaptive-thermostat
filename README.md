@@ -18,7 +18,7 @@ AI-driven climate control optimized for modulating heat pumps and modern, highly
 | :--- | :--- |
 | **ThermostatAI** | Learns comfort preferences and daily routines. |
 | **ThermalAI** | Models building physics to predict heating duration. |
-| **SolarAI** | Optimizes consumption based on solar forecasts. |
+| **Solar** | Optimizes consumption based on solar forecasts. |
 | **PresenceAI** | Predicts arrival times for proactive heating. |
 | **Coordinator** | Central manager that safely executes actions. |
 

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import shap
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from collections import deque
 from enum import Enum
@@ -20,8 +20,9 @@ from pandas.api.types import is_datetime64_any_dtype
 # Project Imports
 from utils import add_cyclic_time_features
 from ha_client import HAClient
-# from weather import WeatherClient
+from weather import WeatherClient
 from db import fetch_solar_training_data_orm, upsert_solar_record
+from helpers import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,6 @@ class SolarModel:
     def __init__(self, path: Path):
         self.path = path
         self.model: Optional[BaseEstimator] = None
-        self.field = "pv_estimate"
         self.mae = 0.2
         self.feature_cols = [
             "hour_sin",
@@ -107,13 +107,11 @@ class SolarModel:
             "pv_estimate10",
             "pv_estimate90",
             "uncertainty",
-#             "temp",
-#             "radiation",
-#             "diffuse",
-#             "wind",
-#             "cloud",
-#             "tilted",
-#             "om_estimate"
+            "temp",
+            "radiation",
+            "diffuse",
+            "cloud",
+            "irradiance",
         ]
         self.is_fitted = False
         self._load()
@@ -161,13 +159,13 @@ class SolarModel:
         self.is_fitted = True
 
     def predict(self, df_forecast: pd.DataFrame) -> pd.Series:
-        raw_solcast = df_forecast[self.field].fillna(0)
+        raw_solcast = df_forecast["pv_estimate"].fillna(0)
         if not self.is_fitted:
             return raw_solcast
         X = self._prepare_features(df_forecast)
         pred_ml = np.maximum(self.model.predict(X), 0)
-        # 60% ML, 40% Raw Solcast blend
-        return (pred_ml * 0.6) + (raw_solcast * 0.4)
+        # 70% ML, 30% Raw Solcast blend
+        return (pred_ml * 0.7) + (raw_solcast * 0.3)
 
     def explain(self, df_row: pd.DataFrame) -> Dict[str, str]:
         if not self.is_fitted:
@@ -220,6 +218,7 @@ class SolarOptimizer:
         future = df[df["timestamp"] >= current_time].copy()
 
         if len(future) < window_size:
+            logger.info("Solar: Geen data meer.")
             return SolarStatus.DONE, None
 
         # We maken een load profiel aan.
@@ -368,7 +367,7 @@ class Solar:
             self.opts.get("solar_model_path", "/config/models/solar_model.joblib")
         )
         self.model = SolarModel(model_path)
-#         self.weather = WeatherClient(opts)
+        self.weather = WeatherClient(opts)
         self.nowcaster = NowCaster(
             model_mae=self.model.mae, system_max_kw=self.system_max
         )
@@ -388,31 +387,37 @@ class Solar:
         self.current_slot_start = None
         self.slot_samples = []
 
+        logger.info("Solar: Opstarten voltooid.")
+
     def run_cycle(self):
         now = datetime.now(timezone.utc)
 
         # 1. Update PV
-        val = self.ha.get_state(
-            self.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")
+        val = safe_float(
+            self.ha.get_state(
+                self.opts.get("sensor_pv_power", "sensor.fuj7chn07b_pv_output_actual")
+            )
         )
-        current_pv = float(val) / 1000.0 if val not in ["unknown", "unavailable", None] else 0.0
+        current_pv = float(val) / 1000.0 if val else 0.0
 
         self.pv_buffer.append(current_pv)
         stable_pv = np.median(self.pv_buffer)
 
         # 1b. Update Load (Huisverbruik)
-        val_load = self.ha.get_state(
-            self.opts.get("sensor_power_load", "sensor.stroomverbruik")
+        val_load = safe_float(
+            self.ha.get_state(
+                self.opts.get("sensor_power_load", "sensor.stroomverbruik")
+            )
         )
         current_load = float(val_load) / 1000.0 if val_load else self.avg_baseload
 
-#         # Filter HVAC load (indien van toepassing)
-#         hvac_mode = 'off'
-#         hvac_load = {
-#             'dwh': 3.7,
-#             'heating': 1.2
-#         }.get(hvac_mode, 0.0)
-#         current_load = max(total_load - hvac_load, 0.0)
+        #         # Filter HVAC load (indien van toepassing)
+        #         hvac_mode = 'off'
+        #         hvac_load = {
+        #             'dwh': 3.7,
+        #             'heating': 1.2
+        #         }.get(hvac_mode, 0.0)
+        #         current_load = max(total_load - hvac_load, 0.0)
 
         # Gebruik de mediaan om pieken (waterkoker) eruit te filteren
         self.load_buffer.append(current_load)
@@ -422,6 +427,7 @@ class Solar:
         self._process_pv_sample(current_pv)
         self._update_forecast_data()
         if self.cached_forecast is None:
+            logger.warning("Solar: Geen forecast data beschikbaar.")
             return
 
         # 3. Predictie & Nowcasting
@@ -455,59 +461,88 @@ class Solar:
         )
 
     def _update_forecast_data(self):
-        poll = self.ha.get_state(
-            self.opts.get(
-                "sensor_solcast_poll", "sensor.solcast_pv_forecast_api_last_polled"
-            )
-        )
-        if poll == self.last_poll and self.cached_forecast is not None:
-            return
+        now = datetime.now(timezone.utc)
+
+        if self.last_poll and (now - self.last_poll) < timedelta(minutes=15):
+            if self.cached_forecast is not None:
+                return
 
         payload = self.ha.get_payload(
             self.opts.get("sensor_solcast", "sensor.solcast_pv_forecast_forecast_today")
         )
-        if payload:
-            raw = payload.get("attributes", {}).get("detailedForecast", [])
 
-            df = pd.DataFrame(raw)
-            df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_convert("UTC")
-            df_res = (
-                df.set_index("timestamp")
-                .apply(pd.to_numeric, errors="coerce")
-                .infer_objects(copy=False)
-                .resample("15min")
-                .interpolate("linear")
-                .reset_index()
+        if not payload:
+            logger.warning("Solar: Geen Solcast data gevonden.")
+            return
+
+        raw = payload.get("attributes", {}).get("detailedForecast", [])
+
+        df = pd.DataFrame(raw)
+        df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_convert("UTC")
+        df_res = (
+            df.set_index("timestamp")
+            .apply(pd.to_numeric, errors="coerce")
+            .infer_objects(copy=False)
+            .resample("15min")
+            .interpolate(method="linear")
+            .fillna(0)
+            .reset_index()
+            .sort_values("timestamp")
+        )
+
+        df_om = self.weather.get_forecast()
+
+        if df_om.empty:
+            logger.warning("Solar: Geen Open-Meteo data gevonden.")
+
+        # Merge Solcast met Open-Meteo
+        df_merged = pd.merge_asof(
+            df_res,
+            df_om,
+            on="timestamp",
+            direction="nearest",
+        )
+
+        for _, row in df_merged.iterrows():
+            ts = row["timestamp"].to_pydatetime()
+            upsert_solar_record(
+                ts,
+                pv_estimate=float(row["pv_estimate"]),
+                pv_estimate10=float(row["pv_estimate10"]),
+                pv_estimate90=float(row["pv_estimate90"]),
+                temp=float(row["temp"]),
+                radiation=float(row["radiation"]),
+                diffuse=float(row["diffuse"]),
+                cloud=float(row["cloud"]),
+                irradiance=float(row["irradiance"]),
             )
 
-            for _, row in df_res.iterrows():
-                ts = row["timestamp"].to_pydatetime()
-                upsert_solar_record(
-                    ts,
-                    pv_estimate=float(row["pv_estimate"]),
-                    pv_estimate10=float(row["pv_estimate10"]),
-                    pv_estimate90=float(row["pv_estimate90"]),
-                )
-
-            self.cached_forecast = df_res.sort_values("timestamp")
-            self.last_poll = poll
+        self.cached_forecast = df_merged.sort_values("timestamp")
+        self.last_poll = now
 
     def _process_pv_sample(self, pv_kw):
-        """Verwerkt de huidige meting en slaat periodiek op."""
         now = datetime.now(timezone.utc)
         aggregation_minutes = 15
-        slot_minute = (
-            now.minute // aggregation_minutes
-        ) * aggregation_minutes
+        slot_minute = (now.minute // aggregation_minutes) * aggregation_minutes
         slot_start = now.replace(minute=slot_minute, second=0, microsecond=0)
 
-        if self.current_slot_start and slot_start > self.current_slot_start:
+        # Als dit de allereerste sample is
+        if self.current_slot_start is None:
+            self.current_slot_start = slot_start
+
+        # Als we een nieuw kwartier zijn binnengegaan
+        if slot_start > self.current_slot_start:
             if self.slot_samples:
                 avg_pv = float(np.mean(self.slot_samples))
+                # Sla het gemiddelde op voor het AFGELOPEN kwartier
                 upsert_solar_record(self.current_slot_start, actual_pv_yield=avg_pv)
-            self.slot_samples = []
+                logger.info(
+                    f"Solar: Actual yield opgeslagen voor {self.current_slot_start.strftime('%H:%M')}: {avg_pv:.2f}kW"
+                )
 
-        self.current_slot_start = slot_start
+            self.slot_samples = []
+            self.current_slot_start = slot_start
+
         self.slot_samples.append(pv_kw)
 
     def _publish_state(self, ctx: DecisionContext, current_pv: float):

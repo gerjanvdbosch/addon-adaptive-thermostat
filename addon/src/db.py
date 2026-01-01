@@ -57,7 +57,7 @@ class Setpoint(Base):
 
 
 class SolarRecord(Base):
-    """Zonne-energie historie voor SolarAI."""
+    """Zonne-energie historie voor Solar."""
 
     __tablename__ = "solar_history"
     timestamp = Column(DateTime, primary_key=True)
@@ -65,21 +65,12 @@ class SolarRecord(Base):
     pv_estimate10 = Column(Float)
     pv_estimate90 = Column(Float)
     actual_pv_yield = Column(Float, nullable=True)
+    temp = Column(Float, nullable=True)
+    cloud = Column(Float, nullable=True)
+    radiation = Column(Float, nullable=True)
+    diffuse = Column(Float, nullable=True)
+    irradiance = Column(Float, nullable=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-
-class HeatingCycle(Base):
-    """Traagheid van het huis voor ThermalAI (Warmtepomp)."""
-
-    __tablename__ = "heating_cycles"
-    id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
-    start_temp = Column(Float)
-    end_temp = Column(Float)
-    duration_minutes = Column(Float)
-    avg_outside_temp = Column(Float)
-    avg_solar = Column(Float, nullable=True)
-    avg_supply_temp = Column(Float, nullable=True)
 
 
 class PresenceRecord(Base):
@@ -90,15 +81,31 @@ class PresenceRecord(Base):
     is_home = Column(Boolean, index=True)
 
 
-class DhwSession(Base):
-    __tablename__ = "dhw_sessions"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    start_time = Column(DateTime, index=True)
-    end_time = Column(DateTime)
+class HeatingCycle(Base):
+    """Opwarm-fase: Hoe snel stijgt de temp als de WP aan staat?"""
+
+    __tablename__ = "heating_cycles"
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     start_temp = Column(Float)
     end_temp = Column(Float)
-    total_drop = Column(Float)
     duration_minutes = Column(Float)
+    avg_outside_temp = Column(Float)
+    avg_supply_temp = Column(Float)  # Belangrijk voor WP
+    rate = Column(Float)  # Graden per uur stijging
+
+
+class CoolingCycle(Base):
+    """Afkoel-fase: Hoe snel zakt de temp als alles UIT staat? (Isolatie)"""
+
+    __tablename__ = "cooling_cycles"
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    start_temp = Column(Float)
+    end_temp = Column(Float)
+    duration_minutes = Column(Float)
+    avg_outside_temp = Column(Float)
+    rate = Column(Float)  # Graden per uur daling
 
 
 Base.metadata.create_all(engine)
@@ -229,45 +236,81 @@ def fetch_presence_history(days: int = 60):
 # ==============================================================================
 
 
-def insert_dhw_session(start_time, end_time, start_temp, end_temp):
-    """Slaat 1 douchebeurt op."""
-    s: SASession = Session()
-    try:
-        # Bereken statistieken
-        duration = (end_time - start_time).total_seconds() / 60.0
-        drop = start_temp - end_temp
+def save_heating_cycle(start, end, duration_min, outside, supply):
+    if duration_min < 15 or (end - start) < 0.1:
+        return  # Negeer ruis
 
-        rec = DhwSession(
-            start_time=start_time,
-            end_time=end_time,
-            start_temp=start_temp,
-            end_temp=end_temp,
-            total_drop=drop,
-            duration_minutes=duration,
+    rate = (end - start) / (duration_min / 60.0)  # Graden per uur
+
+    s = Session()
+    try:
+        s.add(
+            HeatingCycle(
+                timestamp=datetime.utcnow(),
+                start_temp=start,
+                end_temp=end,
+                duration_minutes=duration_min,
+                avg_outside_temp=outside,
+                avg_supply_temp=supply,
+                rate=rate,
+            )
         )
-        s.add(rec)
         s.commit()
     except Exception as e:
-        logger.error(f"DB: Fout bij opslaan sessie: {e}")
-        s.rollback()
+        logger.error(f"DB Error: {e}")
     finally:
         s.close()
 
 
-def fetch_dhw_sessions(days: int = 60):
-    """Haalt de sessies op voor AI training."""
-    cutoff = datetime.now() - timedelta(days=days)  # Lokale tijd
-    stmt = select(DhwSession).where(DhwSession.start_time >= cutoff)
+def save_cooling_cycle(start, end, duration_min, outside):
+    if duration_min < 60 or (start - end) < 0.1:
+        return  # Afkoelen duurt lang
 
-    with engine.connect() as conn:
-        df = pd.read_sql(stmt, conn)
+    # Rate = Graden daling per uur per 10 graden verschil binnen/buiten (Normalisatie)
+    delta_t = max(1.0, start - outside)
+    raw_drop_per_hour = (start - end) / (duration_min / 60.0)
 
-    # Zorg dat datum kolommen datetime objecten zijn
-    if not df.empty:
-        df["start_time"] = pd.to_datetime(df["start_time"])
-        df["end_time"] = pd.to_datetime(df["end_time"])
+    # Genormaliseerde rate (lekfactor)
+    # Hoeveel graden verliezen we per uur als het buiten 0 is en binnen 1?
+    normalized_rate = raw_drop_per_hour / delta_t
 
-    return df
+    s = Session()
+    try:
+        s.add(
+            CoolingCycle(
+                timestamp=datetime.utcnow(),
+                start_temp=start,
+                end_temp=end,
+                duration_minutes=duration_min,
+                avg_outside_temp=outside,
+                rate=normalized_rate,
+            )
+        )
+        s.commit()
+    except Exception as e:
+        logger.error(f"DB Error: {e}")
+    finally:
+        s.close()
+
+
+def fetch_physics_stats(days=60):
+    """Haalt de gemiddelde rates op uit de DB voor het Planner model."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    s = Session()
+    try:
+        # 1. Heating Rate (Mediaan)
+        q_heat = s.query(HeatingCycle.rate).filter(HeatingCycle.timestamp >= cutoff)
+        heat_rates = [r[0] for r in q_heat.all()]
+        avg_heat = sorted(heat_rates)[len(heat_rates) // 2] if heat_rates else 1.0
+
+        # 2. Cooling Rate (Mediaan)
+        q_cool = s.query(CoolingCycle.rate).filter(CoolingCycle.timestamp >= cutoff)
+        cool_rates = [r[0] for r in q_cool.all()]
+        avg_cool = sorted(cool_rates)[len(cool_rates) // 2] if cool_rates else 0.5
+
+        return avg_heat, avg_cool
+    finally:
+        s.close()
 
 
 def cleanup_old_data(days: int = 730):
@@ -278,7 +321,6 @@ def cleanup_old_data(days: int = 730):
         s.query(SolarRecord).filter(SolarRecord.timestamp < cutoff).delete()
         s.query(HeatingCycle).filter(HeatingCycle.timestamp < cutoff).delete()
         s.query(PresenceRecord).filter(PresenceRecord.timestamp < cutoff).delete()
-        s.query(DhwSession).filter(DhwSession.timestamp < cutoff).delete()
         s.commit()
         s.execute(text("VACUUM"))
     finally:

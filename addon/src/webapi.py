@@ -70,6 +70,11 @@ class SolarOut(BaseModel):
     pv_estimate10: Optional[float]
     pv_estimate90: Optional[float]
     actual_pv_yield: Optional[float]
+    temp: Optional[float]
+    cloud: Optional[float]
+    diffuse: Optional[float]
+    radiation: Optional[float]
+    irradiance: Optional[float]
 
     class Config:
         from_attributes = True
