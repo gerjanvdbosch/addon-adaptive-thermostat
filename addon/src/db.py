@@ -60,12 +60,13 @@ class SolarRecord(Base):
     """Zonne-energie historie voor Solar."""
 
     __tablename__ = "solar_history"
-    timestamp = Column(DateTime, primary_key=True)
+    timestamp = Column(DateTime(timezone=True), primary_key=True)
     pv_estimate = Column(Float)
     pv_estimate10 = Column(Float)
     pv_estimate90 = Column(Float)
     actual_pv_yield = Column(Float, nullable=True)
     temp = Column(Float, nullable=True)
+    wind = Column(Float, nullable=True)
     cloud = Column(Float, nullable=True)
     radiation = Column(Float, nullable=True)
     diffuse = Column(Float, nullable=True)

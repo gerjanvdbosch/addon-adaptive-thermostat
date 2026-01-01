@@ -28,7 +28,7 @@ class WeatherClient:
             "longitude": self.lon,
             "tilt": self.tilt,
             "azimuth": self.azimuth,
-            "minutely_15": "temperature_2m,cloud_cover,direct_radiation,diffuse_radiation,global_tilted_irradiance",
+            "minutely_15": "temperature_2m,cloud_cover,direct_radiation,diffuse_radiation,global_tilted_irradiance,wind_speed_10m",
             "timezone": "UTC",
             "forecast_days": 1,
         }
@@ -49,6 +49,7 @@ class WeatherClient:
                     "timestamp": pd.to_datetime(minutely["time"], utc=True),
                     "temp": minutely["temperature_2m"],
                     "cloud": minutely["cloud_cover"],
+                    "wind": minutely["wind_speed_10m"],
                     "radiation": minutely["direct_radiation"],
                     "diffuse": minutely["diffuse_radiation"],
                     "irradiance": minutely["global_tilted_irradiance"],  # W/m2
