@@ -6,8 +6,8 @@ logger = logging.getLogger(__name__)
 
 
 class WeatherClient:
-    def __init__(self, opts):
-        payload = self.ha.get_payload(self.opts.get("sensor_hone", "zone.home"))
+    def __init__(self, opts, ha_client):
+        payload = ha_client.get_payload(self.opts.get("sensor_hone", "zone.home"))
 
         if not payload:
             logger.warning("WeatherClient: Geen data")
