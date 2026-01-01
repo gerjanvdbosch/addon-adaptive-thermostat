@@ -7,8 +7,15 @@ logger = logging.getLogger(__name__)
 
 class WeatherClient:
     def __init__(self, opts):
-        self.lat = float(opts.get("latitude", 52.0))
-        self.lon = float(opts.get("longitude", 5.0))
+        payload = self.ha.get_payload(self.opts.get("sensor_hone", "zone.home"))
+
+        if not payload:
+            logger.warning("WeatherClient: Geen data")
+            return
+        attributes = payload.get("attributes", {})
+
+        self.lat = float(attributes.get("latitude", 0))
+        self.lon = float(attributes.get("longitude", 0))
         self.tilt = float(opts.get("solar_tilt", 50.0))
         self.azimuth = float(opts.get("solar_azimuth", 148.0))
         self.base_url = "https://api.open-meteo.com/v1/forecast"

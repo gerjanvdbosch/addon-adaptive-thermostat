@@ -38,8 +38,6 @@ def _load_options():
         ),
         "dhw_entity": os.getenv("DHW_ENTITY"),
         "solar_interval_seconds": int(os.getenv("SOLAR_INTERVAL_SECONDS", 15)),
-        "latitude": float(os.getenv("LATITUDE", 52.0)),
-        "longitude": float(os.getenv("LONGITUDE", 5.0)),
         "cooldown_hours": float(os.getenv("COOLDOWN_HOURS", 2)),
         "full_retrain_time": os.getenv("FULL_RETRAIN_TIME", "03:00"),
         "stability_hours": float(os.getenv("STABILITY_HOURS", 8)),
