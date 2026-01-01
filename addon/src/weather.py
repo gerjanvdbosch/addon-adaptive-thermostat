@@ -21,7 +21,7 @@ class WeatherClient:
             "azimuth": self.azimuth,
             "minutely_15": "temperature_2m,cloud_cover,direct_radiation,diffuse_radiation,global_tilted_irradiance",
             "timezone": "UTC",
-            "forecast_days": 1,
+            "forecast_days": 2,
         }
 
         try:
@@ -47,7 +47,7 @@ class WeatherClient:
             )
 
             logger.info("WeatherClient: API-update succesvol.")
-            return df.sort_values("timestamp")
+            return df
 
         except Exception as e:
             logger.error(f"WeatherClient: Fout bij ophalen OpenMeteo: {e}")

@@ -22,7 +22,7 @@ from utils import add_cyclic_time_features
 from ha_client import HAClient
 from weather import WeatherClient
 from db import fetch_solar_training_data_orm, upsert_solar_record
-from helpers import safe_float
+from utils import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -462,6 +462,7 @@ class Solar:
 
     def _update_forecast_data(self):
         now = datetime.now(timezone.utc)
+        today = now.date()
 
         if self.last_poll and (now - self.last_poll) < timedelta(minutes=15):
             if self.cached_forecast is not None:
@@ -479,7 +480,7 @@ class Solar:
 
         df = pd.DataFrame(raw)
         df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_convert("UTC")
-        df_res = (
+        df_sol = (
             df.set_index("timestamp")
             .apply(pd.to_numeric, errors="coerce")
             .infer_objects(copy=False)
@@ -487,7 +488,6 @@ class Solar:
             .interpolate(method="linear")
             .fillna(0)
             .reset_index()
-            .sort_values("timestamp")
         )
 
         df_om = self.weather.get_forecast()
@@ -497,13 +497,19 @@ class Solar:
 
         # Merge Solcast met Open-Meteo
         df_merged = pd.merge_asof(
-            df_res,
-            df_om,
+            df_sol.sort_values("timestamp"),
+            df_om.sort_values("timestamp"),
             on="timestamp",
             direction="nearest",
         )
 
-        for _, row in df_merged.iterrows():
+        df_today = df_merged[df_merged["timestamp"].dt.date == today].copy()
+
+        if df_today.empty:
+            logger.warning("Solar: Geen forecast data voor vandaag.")
+            return
+
+        for _, row in df_today.iterrows():
             ts = row["timestamp"].to_pydatetime()
             upsert_solar_record(
                 ts,
