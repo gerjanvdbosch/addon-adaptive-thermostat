@@ -64,6 +64,7 @@ class SolarOut(BaseModel):
     pv_estimate90: Optional[float]
     actual_pv_yield: Optional[float]
     temp: Optional[float]
+    wind: Optional[float]
     cloud: Optional[float]
     diffuse: Optional[float]
     radiation: Optional[float]

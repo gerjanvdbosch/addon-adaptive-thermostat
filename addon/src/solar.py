@@ -496,6 +496,9 @@ class Solar:
         if df_om.empty:
             logger.warning("Solar: Geen Open-Meteo data gevonden.")
 
+
+        logger.info(f"Solar: sol {df_sol.sort_values("timestamp")}")
+        logger.info(f"Solar: mo {df_om.sort_values("timestamp")}")
         # Merge Solcast met Open-Meteo
         df_merged = pd.merge_asof(
             df_sol.sort_values("timestamp"),
