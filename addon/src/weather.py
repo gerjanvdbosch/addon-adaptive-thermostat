@@ -2,11 +2,13 @@ import logging
 import requests
 import pandas as pd
 
+from ha_client import HAClient
+
 logger = logging.getLogger(__name__)
 
 
 class WeatherClient:
-    def __init__(self, opts, ha_client):
+    def __init__(self, ha_client: HAClient, opts):
         payload = ha_client.get_payload(self.opts.get("sensor_hone", "zone.home"))
 
         if not payload:
