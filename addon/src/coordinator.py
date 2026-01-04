@@ -10,7 +10,6 @@ from config import Config
 from context import Context
 from collector import Collector
 from client import HAClient
-from forecaster import SolarForecaster
 from planner import Planner
 from dhw import DhwMachine
 from climate import ClimateMachine
@@ -23,18 +22,12 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 class Coordinator:
-    def __init__(self):
-        self.client = HAClient()
-        self.config = Config.load(self.client)
-        self.context = Context(now=datetime.now())
-
-        self.dhw_machine = DhwMachine(self.context)
-        self.climate_machine = ClimateMachine(self.context)
-
-        self.forecaster = SolarForecaster(self.config, self.context)
-        self.planner = Planner(self.forecaster, self.context)
-
-        self.collector = Collector(self.client, self.context, self.config)
+    def __init__(self, context: Context, config: Config):
+        self.planner = Planner(config, context)
+        self.dhw_machine = DhwMachine(context)
+        self.climate_machine = ClimateMachine(context)
+        self.context = context
+        self.config = config
 
     def tick(self):
         self.context.now = datetime.now()
@@ -43,13 +36,6 @@ class Coordinator:
 
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
-
-    def update_sensors(self):
-        self.collector.update_sensors()
-        self.collector.update_pv_status()
-
-    def update_forecast(self):
-        self.collector.update_forecast()
 
     def start_api(self):
         uvicorn.run(
@@ -66,15 +52,23 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler()
 
     try:
-        coordinator = Coordinator()
-        #         coordinator.update_sensors()
-        #         coordinator.update_forecast()
+        client = HAClient()
+        config = Config.load(client)
+        context = Context(now=datetime.now())
+        collector = Collector(client, context, config)
+        coordinator = Coordinator(context, config)
+
+        collector.update_sensors()
+        collector.update_forecast()
 
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
 
-        scheduler.add_job(coordinator.update_sensors, "interval", seconds=60)
-        scheduler.add_job(coordinator.update_forecast, "interval", minutes=15)
+        logger.info("System: API server started.")
+
+        scheduler.add_job(collector.update_sensors, "interval", seconds=60)
+        scheduler.add_job(collector.update_forecast, "interval", minutes=15)
+        scheduler.add_job(collector.update_pv, "interval", seconds=15)
 
         # Coordinator tick job: elke 60s, kleine startvertraging
         scheduler.add_job(

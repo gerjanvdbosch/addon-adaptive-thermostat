@@ -28,8 +28,8 @@ class Context:
 
     forecast_df: pd.DataFrame | None = None
 
-    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
-    load_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
+    pv_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
+    load_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
 
     current_slot_start: datetime | None = None
     slot_samples: list[float] = field(default_factory=list)

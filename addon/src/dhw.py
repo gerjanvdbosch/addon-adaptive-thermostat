@@ -28,10 +28,10 @@ class DhwMachine(StateMachine):
         # now = self.context.now
 
         if self.state == DhwState.IDLE:
-            if plan.start_dhw:
-                self.transition(DhwState.RUNNING, plan.reason)
-                # self.start_time = self.context.now
-
+            # if plan.start_dhw:
+            #    self.transition(DhwState.RUNNING, plan.reason)
+            #    self.start_time = self.context.now
+            pass
         elif self.state == DhwState.WAITING:
             # In afwachting van starttijd
             pass
