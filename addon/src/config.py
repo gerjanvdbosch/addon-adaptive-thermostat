@@ -7,13 +7,6 @@ from dataclasses import dataclass, fields
 
 @dataclass
 class Config:
-    sensor_pv: str
-    sensor_load: str
-    sensor_hvac: str
-
-    sensor_solcast_today: str
-    sensor_solcast_tomorrow: str
-
     temp_night: float = 19.0
     temp_morning: float = 19.5
     temp_day: float = 19.5
@@ -31,6 +24,13 @@ class Config:
     min_kwh_threshold: float = 0.1
     avg_baseload_kw: float = 0.15
     max_compressor_freq: int = 70
+
+    sensor_pv: str = "sensor.pv_output"
+    sensor_load: str = "sensor.stroomverbruik"
+    sensor_hvac: str = "sensor.ecodan_heatpump_ca09ec_status_bedrijf"
+
+    sensor_solcast_today: str = "sensor.solcast_pv_forecast_forecast_today"
+    sensor_solcast_tomorrow: str = "sensor.solcast_pv_forecast_forecast_tomorrow"
 
     webapi_host: str = "0.0.0.0"
     webapi_port: int = 8000
