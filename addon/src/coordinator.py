@@ -46,7 +46,7 @@ class Coordinator:
 
     def start_api(self):
         uvicorn.run(
-            "webapi:app",
+            "api:api",
             host=self.config.webapi_host,
             port=self.config.webapi_port,
             log_level="warning",
@@ -61,8 +61,8 @@ if __name__ == "__main__":
     try:
         coordinator = Coordinator()
 
-        api = threading.Thread(target=coordinator.start_api, daemon=True)
-        api.start()
+        webapi = threading.Thread(target=coordinator.start_api, daemon=True)
+        webapi.start()
 
         scheduler.add_job(coordinator.collector.tick, "interval", seconds=60)
 
