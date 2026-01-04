@@ -24,15 +24,18 @@ class Planner:
         now = self.context.now
         forecast = self.forecaster.analyze(now, self.context.stable_load)
 
-        logger.info(f"Planner: Action {forecast.action}")
-        logger.info(f"Planner: Reason {forecast.reason}")
-        logger.info(f"Planner: Load now {forecast.load_now}kW")
-        logger.info(f"Planner: Energy now {forecast.energy_now}kW")
-        logger.info(f"Planner: Energy best {forecast.energy_best}kW")
-        logger.info(f"Planner: Opportunity cost {forecast.oppurtunity_cost}")
-        logger.info(f"Planner: Confidence {forecast.confidence}")
-        logger.info(f"Planner: Bias {forecast.bias}")
-        logger.info(f"Planner: Planned start {forecast.planned_start}")
+        if forecast is not None:
+            logger.info(f"Planner: Action {forecast.action}")
+            logger.info(f"Planner: Reason {forecast.reason}")
+            logger.info(f"Planner: Load now {forecast.load_now}kW")
+            logger.info(f"Planner: Energy now {forecast.energy_now}kW")
+            logger.info(f"Planner: Energy best {forecast.energy_best}kW")
+            logger.info(f"Planner: Opportunity cost {forecast.oppurtunity_cost}")
+            logger.info(f"Planner: Confidence {forecast.confidence}")
+            logger.info(f"Planner: Bias {forecast.bias}")
+            logger.info(f"Planner: Planned start {forecast.planned_start}")
+        else:
+            logger.info("Planner: No forecast available")
 
         # Compressor freq gebruiken voor load / power inschatting
 

@@ -58,9 +58,6 @@ if __name__ == "__main__":
         collector = Collector(client, context, config)
         coordinator = Coordinator(context, config)
 
-        collector.update_sensors()
-        collector.update_forecast()
-
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
 
@@ -80,6 +77,9 @@ if __name__ == "__main__":
 
         logger.info("System: Engine running.")
         scheduler.start()
+
+        collector.update_sensors()
+        collector.update_forecast()
 
     except (KeyboardInterrupt, SystemExit):
         logger.info("System: Stopping and exiting...")
