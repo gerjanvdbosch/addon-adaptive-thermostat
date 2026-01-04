@@ -12,8 +12,8 @@ from collector import Collector
 from client import HAClient
 from forecaster import SolarForecaster
 from planner import Planner
-from dhw import DHWStateMachine
-from climate import ClimateStateMachine
+from dhw import DhwMachine
+from climate import ClimateMachine
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s: %(message)s")

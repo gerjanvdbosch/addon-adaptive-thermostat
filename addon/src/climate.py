@@ -15,7 +15,7 @@ class ClimateMachine(StateMachine):
     def __init__(self, context):
         super().__init__("CLIMATE", context)
         self.state = ClimateState.NIGHT
-        self.target_temp = context.temp_night
+        # self.target_temp = context.temp_night
 
     def on_enter(self, state):
         pass

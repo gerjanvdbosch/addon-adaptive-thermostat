@@ -13,7 +13,7 @@ class DhwMachine(StateMachine):
     def __init__(self, context):
         super().__init__("DHW", context)
         self.state = DhwState.IDLE
-        self.run_start_time = None
+        #self.run_start_time = None
 
     def on_enter(self, state):
         if state == DhwState.RUNNING:
@@ -30,7 +30,7 @@ class DhwMachine(StateMachine):
         if self.state == DhwState.IDLE:
             if plan.start_dhw:
                 self.transition(DhwState.RUNNING, plan.reason)
-                self.start_time = self.ctx.now
+                # self.start_time = self.context.now
 
         elif self.state == DhwState.WAITING:
             # In afwachting van starttijd
