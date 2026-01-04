@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import shap
+import logging
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,11 +12,12 @@ from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.base import BaseEstimator
 from sklearn.metrics import mean_absolute_error
-from logger import logger
 from utils import add_cyclic_time_features
 from typing import Dict
 from config import Config
 from context import Context
+
+logger = logging.getLogger(__name__)
 
 
 class SolarStatus(Enum):

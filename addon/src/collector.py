@@ -1,10 +1,12 @@
 import numpy as np
+import logging
 
 from context import Context
 from client import HAClient
 from config import Config
-from logger import logger
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 
 class Collector:

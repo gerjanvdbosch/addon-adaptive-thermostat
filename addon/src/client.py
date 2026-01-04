@@ -1,9 +1,11 @@
 import os
 import requests
+import logging
 
-from logger import logger
 from utils import safe_float, to_kw
 from context import HvacMode
+
+logger = logging.getLogger(__name__)
 
 
 class HAClient:

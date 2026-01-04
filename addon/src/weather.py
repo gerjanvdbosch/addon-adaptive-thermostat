@@ -1,8 +1,10 @@
 import requests
 import pandas as pd
+import logging
 
 from config import Config
-from logger import logger
+
+logger = logging.getLogger(__name__)
 
 
 class WeatherClient:

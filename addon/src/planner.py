@@ -1,7 +1,10 @@
+import logging
+
 from dataclasses import dataclass
 from forecaster import SolarForecaster
 from context import Context
-from logger import logger
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

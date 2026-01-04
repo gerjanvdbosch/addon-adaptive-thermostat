@@ -1,5 +1,8 @@
-from logger import logger
+import logging
+
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class StateMachine:
