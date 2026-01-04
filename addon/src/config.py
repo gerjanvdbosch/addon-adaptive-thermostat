@@ -14,7 +14,7 @@ class Config:
 
     pv_azimuth: float = 148.0
     pv_tilt: float = 50.0
-    pv_max_kw: float = 4.0
+    pv_max_kw: float = 2.0
 
     dhw_duration_hours: float = 1.0
 
@@ -30,6 +30,9 @@ class Config:
     sensor_solcast_tomorrow: str = "sensor.solcast_pv_forecast_forecast_tomorrow"
 
     sensor_home: str = "zone.home"
+
+    datebase_path: str = "/config/db/database.sqlite"
+    solar_model_path: str = "/config/models/solar_model.joblib"
 
     webapi_host: str = "0.0.0.0"
     webapi_port: int = 8000
