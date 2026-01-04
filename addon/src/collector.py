@@ -7,12 +7,14 @@ from context import Context
 from client import HAClient
 from config import Config
 from collections import deque
+from weather import WeatherClient
 
 logger = logging.getLogger(__name__)
 
 
 class Collector:
     def __init__(self, client: HAClient, context: Context, config: Config):
+        self.weather = WeatherClient()
         self.client = client
         self.context = context
         self.config = config
@@ -33,19 +35,25 @@ class Collector:
             .reset_index()
         )
 
-        df_om = pd.DataFrame()
+        #         df_om = pd.DataFrame()
+        #
+        #         df_merged = (
+        #              df_sol
+        #              .set_index("timestamp")
+        #              .join(df_om, how="inner")
+        #              .reset_index()
+        #         )
 
-        df_merged = df_sol.merge(df_om, on="timestamp")
+        df_merged = df_sol
 
-        local_tz = datetime.now().astimezone().tzinfo
-        now_local = pd.Timestamp.now(tz=local_tz)
+        now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
             hour=0, minute=0, second=0, microsecond=0
         ).tz_convert("UTC")
         end_filter = start_filter + timedelta(days=1)
 
         df_today = (
-            df_om[
+            df_merged[
                 (df_merged["timestamp"] >= start_filter)
                 & (df_merged["timestamp"] < end_filter)
             ]
