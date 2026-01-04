@@ -25,7 +25,7 @@ class Collector:
         pass
 
     def update_sensors(self):
-        self.context.current_pv = self.client.get_pv_power(self.config.pv_entity_id)
+        self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
         self.context.current_load = self.client.get_load_power(
             self.config.load_entity_id
         )

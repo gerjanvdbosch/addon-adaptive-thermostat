@@ -16,7 +16,7 @@ class Plan:
 
 class Planner:
     def __init__(self, forecaster: SolarForecaster, context: Context):
-        self.forecast = forecaster
+        self.forecaster = forecaster
         self.context = context
 
     def create_plan(self):
