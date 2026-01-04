@@ -1,8 +1,7 @@
-name: "Adaptive Thermostat"
-version: "0.4"
-slug: "adaptive_thermostat"
-description: "A scikit-learn based adaptive thermostat addon for Home Assistant"
-webui: "http://[HOST]:[PORT:8000]/status"
+name: "Home Optimizer"
+version: "0.5"
+slug: "home-optimizer"
+description: "A scikit-learn based home optimizer addon for Home Assistant"
 arch:
   - armhf
   - armv7
@@ -11,79 +10,10 @@ arch:
   - i386
 init: false
 homeassistant_api: true
-#ingress: true
-#ingress_port: 0
-#ingress_stream: true
 options:
-  thermostat_entity: input_number.adaptive_thermostat_setpoint
-  solar_entity: sensor.adaptive_thermostat_solar_forecast
-  presence_entity: input_number.kans_thuis_aanwezig
-  thermal_entity: input_number.warmtepomp_voorverwarming_tijd_minuten
-  dhw_entity: input_number.adaptive_dhw_setpoint
-  thermostat_interval_seconds: 60
-  solar_interval_seconds: 15
-  solar_forecast_field: pv_estimate90
-  solar_uncertainty_penalty: 0.1
-  solar_start_threshold: 0.9
-  cooldown_hours: 2.0
-  stability_hours: 8
-  full_retrain_time: "03:00"
-  min_setpoint: 18.0
-  max_setpoint: 21.0
-  min_change_threshold: 0.5
-  buffer_days: 730
   log_level: info
-  sensors:
-    current_temp: sensor.danfoss_15_temperature
-    temp_change: sensor.woonkamer_temperatuur_verandering
-    min_temp: sensor.minimale_temperatuur_1d
-    max_temp: sensor.temperatuur_1d
-    outside_temp: sensor.temperatuur
-    home_presence: input_boolean.thuis_aanwezig
-    hvac_mode: sensor.ecodan_heatpump_ca09ec_status_bedrijf
-    supply_temp: sensor.ecodan_heatpump_ca09ec_aanvoer_temp
-    heat_demand: binary_sensor.ecodan_heatpump_ca09ec_status_in1_thermostaat
-    solar_kwh: sensor.solcast_pv_forecast_forecast_today
-    pv_power: sensor.fuj7chn07b_pv_output_actual
-    wind_speed: sensor.windkracht_1d
-    wind_dir: sensor.windrichting_azimut_1d
-    dhw_temp: sensor.ecodan_heatpump_ca09ec_sww_huidige_temp
-    dhw_temp2: sensor.ecodan_heatpump_ca09ec_sww_2e_temp_sensor
 schema:
-  thermostat_entity: "str?"
-  solar_entity: "str?"
-  presence_entity: "str?"
-  thermal_entity: "str?"
-  dhw_entity: "str?"
-  thermostat_interval_seconds: "int?"
-  solar_interval_seconds: "int?"
-  solar_forecast_field: list(pv_estimate90|pv_estimate|pv_estimate10)?
-  solar_uncertainty_penalty: "float?"
-  solar_start_threshold: "float?"
-  cooldown_hours: "float?"
-  stability_hours: "int?"
-  full_retrain_time: "str?"
-  min_setpoint: "float?"
-  max_setpoint: "float?"
-  min_change_threshold: "float?"
-  buffer_days: "int?"
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
-  sensors:
-    current_temp: "str?"
-    temp_change: "str?"
-    min_temp: "str?"
-    max_temp: "str?"
-    outside_temp: "str?"
-    home_presence: "str?"
-    hvac_mode: "str?"
-    supply_temp: "str?"
-    heat_demand: "str?"
-    solar_kwh: "str?"
-    pv_power: "str?"
-    wind_speed: "str?"
-    wind_dir: "str?"
-    dhw_temp: "str?"
-    dhw_temp2: "str?"
 ports:
   8000/tcp: 8000
 map:
