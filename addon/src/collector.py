@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class Collector:
     def __init__(self, client: HAClient, context: Context, config: Config):
-        self.weather = WeatherClient()
+        self.weather = WeatherClient(config)
         self.client = client
         self.context = context
         self.config = config
