@@ -30,6 +30,8 @@ class Coordinator:
         self.config = config
 
     def tick(self):
+        logger.info("Coordinator: Tick")
+
         self.context.now = datetime.now()
 
         plan = self.planner.create_plan()
