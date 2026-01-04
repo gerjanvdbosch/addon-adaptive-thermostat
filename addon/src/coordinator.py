@@ -28,8 +28,8 @@ class Coordinator:
         self.config = Config.load(self.client)
         self.context = Context(now=datetime.now())
 
-        self.dhw_machine = DHWStateMachine(self.context)
-        self.climate_machine = ClimateStateMachine(self.context)
+        self.dhw_machine = DhwMachine(self.context)
+        self.climate_machine = ClimateMachine(self.context)
 
         self.forecaster = SolarForecaster(self.config, self.context)
         self.planner = Planner(self.forecaster, self.context)
