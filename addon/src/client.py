@@ -43,6 +43,12 @@ class HAClient:
         }.get(self._get_state(entity_id))
         return HvacMode(hvac)
 
+    def get_forecast(self, entity_id):
+        attributes = self._get_attributes(entity_id)
+        if not attributes:
+            return []
+        return attributes.get("detailedForecast", [])
+
     def _get_state(self, entity_id):
         return self._get_payload(entity_id).get("state")
 

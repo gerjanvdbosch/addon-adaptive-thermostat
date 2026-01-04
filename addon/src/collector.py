@@ -1,6 +1,8 @@
 import numpy as np
+import pandas as pd
 import logging
 
+from datetime import datetime, timedelta
 from context import Context
 from client import HAClient
 from config import Config
@@ -16,7 +18,44 @@ class Collector:
         self.config = config
 
     def update_forecast(self):
-        logger.info("Collector: Forecast update started")
+        solcast = self.client.get_forecast(self.config.sensor_solcast)
+
+        df = pd.DataFrame(solcast)
+        df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_convert("UTC")
+
+        df_sol = (
+            df.set_index("timestamp")
+            .apply(pd.to_numeric, errors="coerce")
+            .infer_objects(copy=False)
+            .resample("15min")
+            .interpolate(method="linear")
+            .fillna(0)
+            .reset_index()
+        )
+
+        df_om = pd.DataFrame()
+
+        df_merged = df_sol.merge(df_om, on="timestamp")
+
+        local_tz = datetime.now().astimezone().tzinfo
+        now_local = pd.Timestamp.now(tz=local_tz)
+        start_filter = now_local.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).tz_convert("UTC")
+        end_filter = start_filter + timedelta(days=1)
+
+        df_today = (
+            df_om[
+                (df_merged["timestamp"] >= start_filter)
+                & (df_merged["timestamp"] < end_filter)
+            ]
+            .copy()
+            .sort_values("timestamp")
+        )
+
+        self.context.forecast_df = df_today
+
+        logger.info("Collector: Forecast updated")
 
     def update_sensors(self):
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
@@ -30,6 +69,8 @@ class Collector:
         )
 
         self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
+
+        logger.info("Collector: Sensors updated")
 
     def update_pv(self):
         now = self.context.now

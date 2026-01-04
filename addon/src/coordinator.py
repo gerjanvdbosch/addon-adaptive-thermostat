@@ -75,8 +75,8 @@ if __name__ == "__main__":
             start_date=f"{datetime.now().date()} 00:00:02",
         )
 
-        logger.info("System: Engine running.")
         scheduler.start()
+        logger.info("System: Engine running.")
 
         collector.update_sensors()
         collector.update_forecast()

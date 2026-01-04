@@ -49,7 +49,7 @@ class NowCaster:
         self.min_ratio = max(0.2, 1.0 - error_margin)
 
     def update(self, actual_kw: float, forecasted_kw: float):
-        effective_forecast = max(0.05, forecasted_kw)
+        effective_forecast = max(0.01, forecasted_kw)
         raw_ratio = actual_kw / effective_forecast
         raw_ratio = np.clip(raw_ratio, self.min_ratio, self.max_ratio)
         self.current_ratio = (0.7 * self.current_ratio) + (0.3 * raw_ratio)
