@@ -47,7 +47,7 @@ def add_cyclic_time_features(df, col_name="timestamp"):
 
 class MockConfig:
     def __init__(self):
-        self.system_max_kw = 5.0
+        self.pv_max_kw = 5.0
         self.dhw_duration_hours = 1.5
         self.min_kwh_threshold = 0.5
         self.avg_baseload_kw = 0.3
@@ -59,7 +59,7 @@ class MockContext:
         self.forecast_df = None
         self.stable_pv = 0.0
         self.stable_load = 0.0
-        self.system_max_kw = 5.0
+        self.pv_max_kw = 5.0
 
 # --- DATA GENERATOR ---
 
@@ -116,7 +116,7 @@ def run_simulation():
     # Patch de klassen in de forecaster
     forecaster = SolarForecaster(cfg, ctx)
     forecaster.model = SimulatedSolarModel(Path("mock.joblib"))
-    forecaster.nowcaster = NowCaster(0.15, cfg.system_max_kw) # Reset nowcaster
+    forecaster.nowcaster = NowCaster(0.15, cfg.pv_max_kw) # Reset nowcaster
 
     # 3. Voer de analyse uit
     print("\n" + "="*50)
@@ -222,7 +222,7 @@ def run_time_travel_simulation():
     # 1. Genereer forecast voor de hele dag (startend vanaf middernacht UTC)
     start_of_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     ctx.forecast_df = generate_synthetic_forecast(start_of_day)
-    ctx.system_max_kw = cfg.system_max_kw
+    ctx.pv_max_kw = cfg.pv_max_kw
 
     # Definieer de Mock Model klasse één keer
     class SimulatedSolarModel(SolarModel):
@@ -251,8 +251,8 @@ def run_time_travel_simulation():
 
             # --- CRUCIAL: Initialiseer en PATCH bij elke stap ---
             forecaster = SolarForecaster(cfg, ctx)
-            forecaster.model = SimulatedSolarModel(Path("mock.joblib")) # FIX: Wijs model toe
-            forecaster.nowcaster = NowCaster(0.15, cfg.system_max_kw)   # FIX: Wijs nowcaster toe
+            forecaster.model = SimulatedSolarModel(Path("mock.joblib"))
+            forecaster.nowcaster = NowCaster(0.15, cfg.pv_max_kw)
 
             # Voer analyse uit
             decision = forecaster.analyze(ctx.now, ctx.stable_load)
@@ -276,7 +276,7 @@ if __name__ == "__main__":
         self.model = None # Wordt gepatcht in run_simulation
         self.nowcaster = None
         self.optimizer = SolarOptimizer(
-            system_max_kw=config.system_max_kw,
+            pv_max_kw=config.pv_max_kw,
             duration_hours=config.dhw_duration_hours,
             min_kwh_threshold=config.min_kwh_threshold,
             avg_baseload_kw=config.avg_baseload_kw,

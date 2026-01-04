@@ -39,12 +39,10 @@ class SolarContext:
 
 
 class NowCaster:
-    def __init__(
-        self, model_mae: float, system_max_kw: float, decay_hours: float = 3.0
-    ):
+    def __init__(self, model_mae: float, pv_max_kw: float, decay_hours: float = 3.0):
         self.decay_hours = decay_hours
         self.current_ratio = 1.0
-        error_margin = (2.5 * model_mae) / (system_max_kw + 0.1)
+        error_margin = (2.5 * model_mae) / (pv_max_kw + 0.1)
         self.max_ratio = 1.0 + error_margin
         self.min_ratio = max(0.2, 1.0 - error_margin)
 
@@ -176,12 +174,12 @@ class SolarModel:
 class SolarOptimizer:
     def __init__(
         self,
-        system_max_kw: float,
+        pv_max_kw: float,
         duration_hours: float,
-        min_kwh_threshold: float = 0.3,
+        min_kwh_threshold: float = 0.1,
         avg_baseload_kw: float = 0.25,  # Standaard rustverbruik (koelkast, router, etc)
     ):
-        self.system_max = system_max_kw
+        self.system_max = pv_max_kw
         self.duration = duration_hours
         self.timestep_hours = 0.25
         self.min_kwh_threshold = min_kwh_threshold
@@ -332,26 +330,27 @@ class SolarForecaster:
         self.model = SolarModel(Path(self.cfg.solar.model_path))
         self.nowcaster = NowCaster(
             model_mae=self.model.mae,
-            system_max_kw=config.system_max_kw,
+            pv_max_kw=config.pv_max_kw,
         )
         self.optimizer = SolarOptimizer(
-            system_max_kw=config.system_max_kw,
+            pv_max_kw=config.pv_max_kw,
             duration_hours=config.dhw_duration_hours,
             min_kwh_threshold=config.min_kwh_threshold,
             avg_baseload_kw=config.avg_baseload_kw,
         )
 
-    def update_forecast(self):
-        pass
-
-    def analyze(self, current_time: datetime, current_load_kw: float) -> SolarContext:
+    def analyze(self, current_time: datetime, current_load_kw: float):
         forecast_df = self.context.forecast_df
 
         if forecast_df is None or forecast_df.empty:
             return SolarStatus.WAIT, None
 
         df_calc = forecast_df.copy()
-        df_calc["power_ml"] = self.model.predict(df_calc)
+        if self.model and self.model.is_fitted:
+            df_calc["power_ml"] = self.model.predict(df_calc)
+        else:
+            # Fallback: Gebruik de ruwe schatting van de weerdienst
+            df_calc["power_ml"] = df_calc["pv_estimate"].fillna(0)
 
         # Bias ankerpunt (nu)
         idx_now = df_calc["timestamp"].searchsorted(current_time)
@@ -359,9 +358,11 @@ class SolarForecaster:
 
         self.nowcaster.update(self.context.stable_pv, row_now["power_ml"])
 
-        df_calc["power_corrected"] = self.nowcaster.apply(df_calc, current_time, "power_ml")
+        df_calc["power_corrected"] = self.nowcaster.apply(
+            df_calc, current_time, "power_ml"
+        )
         df_calc["power_corrected"] = df_calc["power_corrected"].clip(
-            0, self.context.system_max_kw
+            0, self.context.pv_max_kw
         )
 
         # 4. Optimalisatie (Geef stable_load mee)

@@ -4,6 +4,27 @@ import pandas as pd
 from datetime import datetime
 
 
+def round_half(x):
+    return round(x * 2) / 2
+
+
+def safe_float(x):
+    if x is None:
+        return None
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def to_kw(watts):
+    try:
+        value = float(watts)
+        return value / 1000.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def add_cyclic_time_features(df: pd.DataFrame, col_name="timestamp") -> pd.DataFrame:
     """
     Voegt cyclische tijd-features toe (hour, day, doy) als sin/cos paren.
@@ -12,6 +33,7 @@ def add_cyclic_time_features(df: pd.DataFrame, col_name="timestamp") -> pd.DataF
     if df is None or col_name not in df.columns:
         return df
 
+    # Huidige tijdzone van de omgeving
     tz = datetime.now().astimezone().tzinfo
 
     df = df.copy()

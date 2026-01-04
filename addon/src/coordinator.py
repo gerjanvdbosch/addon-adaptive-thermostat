@@ -1,16 +1,19 @@
 import os
 import threading
-import time
 import logging
 import uvicorn
 
 from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.schedulers.blocking import BlockingScheduler
 
 from config import Config
 from context import Context
 from collector import Collector
+from client import HAClient
+from forecaster import SolarForecaster
+from planner import Planner
+from dhw import DHWStateMachine
+from climate import ClimateStateMachine
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s: %(message)s")
@@ -20,54 +23,60 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 class Coordinator:
-    def __init__(self, scheduler):
-        self.config = Config.load()
-        self.context = Context(self.config)
+    def __init__(self):
+        self.client = HAClient()
+        self.config = Config.load(self.client)
+        self.context = Context(now=datetime.now())
 
-        collector = Collector(self.context)
+        self.dhw_machine = DHWStateMachine(self.context)
+        self.climate_machine = ClimateStateMachine(self.context)
 
-        scheduler.add_job(collector.tick, "interval", seconds=60)
-        # Voeg een kleine vertraging toe t.o.v. de sensor update
-        scheduler.add_job(
-            self.tick,
-            trigger=IntervalTrigger(
-                seconds=60, start_date=f"{datetime.now().date()} 00:00:05"
-            ),
-        )
-        scheduler.start()
+        self.forecaster = SolarForecaster(self.config, self.context)
+        self.planner = Planner(self.forecaster, self.context)
 
-        api_thread = threading.Thread(
-            target=self.start_api,
-            args=(self.config.webapi, self.config.webapi_port),
-            daemon=True,
-        )
-        api_thread.start()
-
-        logger.info("System: Engine running.")
+        self.collector = Collector(self.client, self.context, self.config)
 
     def tick(self):
         self.context.now = datetime.now()
 
-        plan = self.strategy.create_plan(self.ctx)
+        plan = self.planner.create_plan()
 
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
 
-    def start_api(host: str, port: int):
-        uvicorn.run("webapi:app", host=host, port=port, log_level="warning")
+    def start_api(self):
+        uvicorn.run(
+            "webapi:app",
+            host=self.config.webapi_host,
+            port=self.config.webapi_port,
+            log_level="warning",
+        )
 
 
 if __name__ == "__main__":
     logger.info("System: Starting...")
 
-    scheduler = BackgroundScheduler()
+    scheduler = BlockingScheduler()
 
     try:
-        coordinator = Coordinator(scheduler)
-        coordinator.tick()
+        coordinator = Coordinator()
 
-        while True:
-            time.sleep(1)
+        api = threading.Thread(target=coordinator.start_api, daemon=True)
+        api.start()
+
+        scheduler.add_job(coordinator.collector.tick, "interval", seconds=60)
+
+        # Coordinator tick job: elke 60s, kleine startvertraging
+        scheduler.add_job(
+            coordinator.tick,
+            "interval",
+            seconds=60,
+            start_date=f"{datetime.now().date()} 00:00:02",
+        )
+
+        logger.info("System: Engine running.")
+        scheduler.start()
+
     except (KeyboardInterrupt, SystemExit):
         logger.info("System: Stopping and exiting...")
         scheduler.shutdown()
