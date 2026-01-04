@@ -44,6 +44,13 @@ class Coordinator:
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
 
+    def update_sensors(self):
+        self.collector.update_sensors()
+        self.collector.update_pv_status()
+
+    def update_forecast(self):
+        self.collector.update_forecast()
+
     def start_api(self):
         uvicorn.run(
             "webapi:api",
@@ -60,11 +67,14 @@ if __name__ == "__main__":
 
     try:
         coordinator = Coordinator()
+        #         coordinator.update_sensors()
+        #         coordinator.update_forecast()
 
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
 
-        scheduler.add_job(coordinator.collector.tick, "interval", seconds=60)
+        scheduler.add_job(coordinator.update_sensors, "interval", seconds=60)
+        scheduler.add_job(coordinator.update_forecast, "interval", minutes=15)
 
         # Coordinator tick job: elke 60s, kleine startvertraging
         scheduler.add_job(

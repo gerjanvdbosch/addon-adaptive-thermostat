@@ -1,3 +1,5 @@
+import pandas as pd
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
@@ -23,6 +25,8 @@ class Context:
     current_load: float = 0.0
     stable_pv: float = 0.0
     stable_load: float = 0.0
+
+    forecast_df: pd.DataFrame | None = None
 
     pv_buffer: deque = field(default_factory=lambda: deque(maxlen=5))
     load_buffer: deque = field(default_factory=lambda: deque(maxlen=5))

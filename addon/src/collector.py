@@ -15,14 +15,8 @@ class Collector:
         self.context = context
         self.config = config
 
-    def tick(self):
-        self.update_forecast()
-        self.update_sensors()
-        self.update_pv_status()
-        self.log_snapshot()
-
     def update_forecast(self):
-        pass
+        logger.info("Collector: Forecast update started")
 
     def update_sensors(self):
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
