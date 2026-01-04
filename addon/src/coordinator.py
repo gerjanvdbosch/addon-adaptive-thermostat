@@ -75,11 +75,12 @@ if __name__ == "__main__":
             start_date=f"{datetime.now().date()} 00:00:02",
         )
 
-        scheduler.start()
         logger.info("System: Engine running.")
 
         collector.update_sensors()
         collector.update_forecast()
+
+        scheduler.start()
 
     except (KeyboardInterrupt, SystemExit):
         logger.info("System: Stopping and exiting...")
