@@ -46,7 +46,7 @@ class Coordinator:
 
     def start_api(self):
         uvicorn.run(
-            "api:api",
+            "webapi:api",
             host=self.config.webapi_host,
             port=self.config.webapi_port,
             log_level="warning",
