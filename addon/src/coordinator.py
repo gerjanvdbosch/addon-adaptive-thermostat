@@ -22,15 +22,16 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 class Coordinator:
-    def __init__(self, context: Context, config: Config):
+    def __init__(self, context: Context, config: Config, collector: Collector):
         self.planner = Planner(config, context)
         self.dhw_machine = DhwMachine(context)
         self.climate_machine = ClimateMachine(context)
         self.context = context
         self.config = config
+        self.collector = collector
 
     def tick(self):
-        logger.info("Coordinator: Tick")
+        self.collector.update_sensors()
 
         self.context.now = datetime.now()
 
@@ -58,14 +59,13 @@ if __name__ == "__main__":
         config = Config.load(client)
         context = Context(now=datetime.now())
         collector = Collector(client, context, config)
-        coordinator = Coordinator(context, config)
+        coordinator = Coordinator(context, config, collector)
 
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
 
         logger.info("System: API server started.")
 
-        scheduler.add_job(collector.update_sensors, "interval", minutes=1)
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
         scheduler.add_job(collector.update_pv, "interval", seconds=15)
 

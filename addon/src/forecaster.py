@@ -364,7 +364,7 @@ class SolarForecaster:
             df_calc, current_time, "power_ml"
         )
         df_calc["power_corrected"] = df_calc["power_corrected"].clip(
-            0, self.context.pv_max_kw
+            0, self.config.pv_max_kw
         )
 
         # 4. Optimalisatie (Geef stable_load mee)
