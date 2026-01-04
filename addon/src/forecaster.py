@@ -328,8 +328,7 @@ class SolarOptimizer:
 
 class SolarForecaster:
     def __init__(self, config: Config, context: Context):
-        self.config = config
-        self.model = SolarModel(Path(self.cfg.solar.model_path))
+        self.model = SolarModel(Path(config.solar.model_path))
         self.nowcaster = NowCaster(
             model_mae=self.model.mae,
             pv_max_kw=config.pv_max_kw,
