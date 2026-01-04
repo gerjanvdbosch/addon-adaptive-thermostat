@@ -1,8 +1,5 @@
-import os
-import json
-
 from client import HAClient
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 
 @dataclass
@@ -32,20 +29,16 @@ class Config:
     sensor_solcast_today: str = "sensor.solcast_pv_forecast_forecast_today"
     sensor_solcast_tomorrow: str = "sensor.solcast_pv_forecast_forecast_tomorrow"
 
+    sensor_home: str = "zone.home"
+
     webapi_host: str = "0.0.0.0"
     webapi_port: int = 8000
 
     @staticmethod
     def load(client: HAClient):
-        raw = os.environ.get("ADDON_CONFIG", "{}")
-        options = json.loads(raw)
+        config = Config()
 
-        field_names = {f.name for f in fields(Config)}
-        filtered = {k: v for k, v in options.items() if k in field_names}
-
-        config = Config(**filtered)
-
-        location = client.get_location(options.get("sensor_home", "zone.home"))
+        location = client.get_location(config.sensor_home)
         if location != (None, None):
             config.latitude, config.longitude = location
 

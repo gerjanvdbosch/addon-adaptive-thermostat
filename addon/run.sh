@@ -10,6 +10,5 @@ mkdir -p "${MODEL_DIR}"
 mkdir -p "${DB_DIR}"
 
 export LOG_LEVEL="$(bashio::config 'log_level')"
-export ADDON_CONFIG="$(bashio::config)"
 
 python3 -u ./src/coordinator.py

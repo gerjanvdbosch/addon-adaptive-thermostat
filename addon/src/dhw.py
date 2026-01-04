@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from state_machine import StateMachine
+from statemachine import StateMachine
 
 
 class DhwState(Enum):
