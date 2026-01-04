@@ -63,10 +63,11 @@ if __name__ == "__main__":
 
         logger.info("System: API server started.")
 
-        scheduler.add_job(collector.update_sensors, "interval", seconds=60)
-        scheduler.add_job(coordinator.tick, "interval", seconds=60)
+        scheduler.add_job(collector.update_sensors, "interval", minutes=1)
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
         scheduler.add_job(collector.update_pv, "interval", seconds=15)
+
+        scheduler.add_job(coordinator.tick, "interval", minutes=1)
 
         logger.info("System: Engine running.")
 
