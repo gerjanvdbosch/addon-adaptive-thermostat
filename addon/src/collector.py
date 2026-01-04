@@ -26,9 +26,7 @@ class Collector:
 
     def update_sensors(self):
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
-        self.context.current_load = self.client.get_load_power(
-            self.config.load_entity_id
-        )
+        self.context.current_load = self.client.get_load_power(self.config.sensor_load)
 
         self.context.stable_pv = self._update_buffer(
             self.context.pv_buffer, self.context.current_pv
