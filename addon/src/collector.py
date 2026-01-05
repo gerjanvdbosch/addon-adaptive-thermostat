@@ -63,7 +63,7 @@ class Collector:
 
         self.context.forecast_df = df_today
 
-        logger.info("Collector: Forecast updated")
+        logger.info("[Collector] Forecast updated")
 
     def update_sensors(self):
         self.context.current_pv = self.client.get_pv_power(self.config.sensor_pv)
@@ -78,7 +78,7 @@ class Collector:
 
         self.context.hvac_mode = self.client.get_hvac_mode(self.config.sensor_hvac)
 
-        logger.info("Collector: Sensors updated")
+        logger.info("[Collector] Sensors updated")
 
     def update_pv(self):
         now = self.context.now
@@ -97,7 +97,7 @@ class Collector:
                 # Sla het gemiddelde op voor het AFGELOPEN kwartier
                 # upsert_solar_record(self.current_slot_start, actual_yield=avg_pv)
                 logger.info(
-                    f"Collector: Actual yield opgeslagen voor {self.context.current_slot_start.strftime('%H:%M')}: {avg_pv:.2f}kW"
+                    f"[Collector] Actual yield opgeslagen voor {self.context.current_slot_start.strftime('%H:%M')}: {avg_pv:.2f}kW"
                 )
 
             self.context.slot_samples = []

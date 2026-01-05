@@ -50,7 +50,7 @@ class Coordinator:
 
 
 if __name__ == "__main__":
-    logger.info("System: Starting...")
+    logger.info("[System] Starting...")
 
     scheduler = BlockingScheduler()
 
@@ -64,14 +64,14 @@ if __name__ == "__main__":
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
         webapi.start()
 
-        logger.info("System: API server started.")
+        logger.info("[System] API server started.")
 
         scheduler.add_job(collector.update_forecast, "interval", minutes=15)
         scheduler.add_job(collector.update_pv, "interval", seconds=15)
 
         scheduler.add_job(coordinator.tick, "interval", minutes=1)
 
-        logger.info("System: Engine running.")
+        logger.info("[System] Engine running.")
 
         collector.update_sensors()
         collector.update_forecast()
@@ -79,5 +79,5 @@ if __name__ == "__main__":
         scheduler.start()
 
     except (KeyboardInterrupt, SystemExit):
-        logger.info("System: Stopping and exiting...")
+        logger.info("[System] Stopping and exiting...")
         scheduler.shutdown()

@@ -62,10 +62,10 @@ class HAClient:
             )
             r.raise_for_status()
             payload = r.json()
-            logger.debug("Payload %s fetched", entity_id)
+            logger.debug("[Client] Payload %s fetched", entity_id)
             return payload
         except Exception as e:
-            logger.exception("Error getting state %s: %s", entity_id, e)
+            logger.exception("[Client] Error getting state %s: %s", entity_id, e)
             return None
 
     def _set_state(self, entity_id, state, attributes=None, friendly_name=None):
@@ -82,12 +82,12 @@ class HAClient:
             r = requests.post(url, json=payload, headers=self.headers)
             r.raise_for_status()
             logger.debug(
-                f"State set for {entity_id}: {state} (attrs: {len(attributes)})"
+                f"[Client] State set for {entity_id}: {state} (attrs: {len(attributes)})"
             )
             return True
         except Exception as e:
             logger.error(
-                f"Failed to set state for {entity_id} with payload {payload}: {e}"
+                f"[Client] Failed to set state for {entity_id} with payload {payload}: {e}"
             )
             return False
 
@@ -102,5 +102,7 @@ class HAClient:
             r.raise_for_status()
             return r.json() if r.text else {}
         except Exception as e:
-            logger.exception("Error calling service %s.%s: %s", domain, service, e)
+            logger.exception(
+                "[Client] Error calling service %s.%s: %s", domain, service, e
+            )
             return None

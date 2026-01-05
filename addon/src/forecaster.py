@@ -103,7 +103,7 @@ class SolarModel:
                     self.model = data
                 self.is_fitted = True
             except Exception:
-                logger.error("Solar: Model corrupt.")
+                logger.error("[Solar] Model corrupt.")
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -193,7 +193,7 @@ class SolarOptimizer:
         future = df[df["timestamp"] >= current_time].copy()
 
         if len(future) < window_size:
-            logger.info("Solar: Geen data meer.")
+            logger.info("[Solar] Geen data meer.")
             return SolarStatus.DONE, None
 
         # We maken een load profiel aan.
@@ -217,7 +217,7 @@ class SolarOptimizer:
                 blended_load, self.avg_baseload
             )
 
-        # Bereken Netto Solar: Zonne-energie MIN Huishoudelijk verbruik
+        # Bereken Netto [Solar] Zonne-energie MIN Huishoudelijk verbruik
         # Als netto < 0 is (wasmachine verbruikt meer dan zon), is de 'beschikbare energie' 0.
         future["net_power"] = (
             future["power_corrected"] - future["projected_load"]
@@ -356,6 +356,9 @@ class SolarForecaster:
 
         # Bias ankerpunt (nu)
         current_time = pd.Timestamp(current_time).tz_localize("UTC")
+        logger.info(
+            f"[Solar] Huidige tijd voor analyse: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+        )
         idx_now = df_calc["timestamp"].searchsorted(current_time)
         row_now = df_calc.iloc[min(idx_now, len(df_calc) - 1)]
 
@@ -373,4 +376,4 @@ class SolarForecaster:
             df_calc, current_time, current_load_kw
         )
 
-        return context
+        return status, context
