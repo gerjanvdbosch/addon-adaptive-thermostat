@@ -30,7 +30,7 @@ class WeatherClient:
             "longitude": self.lon,
             "tilt": self.tilt,
             "azimuth": self.azimuth,
-            "minutely_15": sensors.unioncomma(),
+            "minutely_15": ",".join(sensors),
             "timezone": "UTC",
             "forecast_days": 1,
             "past_days": 1,
