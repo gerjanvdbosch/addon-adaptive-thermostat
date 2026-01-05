@@ -1,17 +1,20 @@
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import matplotlib.pyplot as plt
-
-from types import ModuleType
 import os
 import sys
 
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import ModuleType
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.abspath(os.path.join(current_dir, '..', 'src'))
+
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
+
+from forecaster import SolarForecaster, SolarModel, NowCaster, SolarOptimizer
 
 def mock_module(name, attributes):
     mock = ModuleType(name)
@@ -31,9 +34,6 @@ logger = MockLogger()
 mock_module('logger', {'logger': MockLogger()})
 mock_module('config', {'Config': object})
 mock_module('context', {'Context': object})
-
-
-from forecaster import SolarForecaster, SolarModel, NowCaster, SolarOptimizer
 
 def add_cyclic_time_features(df, col_name="timestamp"):
     df = df.copy()
