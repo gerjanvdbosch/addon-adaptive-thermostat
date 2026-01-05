@@ -47,19 +47,19 @@ def add_cyclic_time_features(df, col_name="timestamp"):
 
 class MockConfig:
     def __init__(self):
-        self.pv_max_kw = 5.0
-        self.dhw_duration_hours = 1.5
-        self.min_kwh_threshold = 0.5
-        self.avg_baseload_kw = 0.3
+        self.pv_max_kw = 2.0
+        self.dhw_duration_hours = 1.0
+        self.min_kwh_threshold = 0.3
+        self.avg_baseload_kw = 0.15
         self.solar_model_path = "solar_model.joblib"
 
 class MockContext:
     def __init__(self):
         self.now = None
         self.forecast_df = None
-        self.stable_pv = 0.0
-        self.stable_load = 0.0
-        self.pv_max_kw = 5.0
+        self.stable_pv = 0
+        self.stable_load = 0
+        self.pv_max_kw = 0
 
 # --- DATA GENERATOR ---
 
@@ -98,14 +98,14 @@ def run_simulation():
     ctx = MockContext()
 
     # We zetten de tijd op 11:00 's ochtends
-    sim_now = datetime.now(timezone.utc).replace(hour=11, minute=0, second=0, microsecond=0)
+    sim_now = datetime.now(timezone.utc).replace(hour=9, minute=0, second=0, microsecond=0)
     ctx.now = sim_now
     ctx.forecast_df = generate_synthetic_forecast(sim_now.replace(hour=0))
 
     # Realiteit op dit moment:
     # Voorspelling voor 11u was ~2.8kW, maar we meten maar 1.5kW (bewolkt)
-    ctx.stable_pv = 1.5
-    ctx.stable_load = 2.2  # Hoge load (bijv. wasmachine staat aan)
+    ctx.stable_pv = 0.1
+    ctx.stable_load = 2.0  # Hoge load (bijv. wasmachine staat aan)
 
     # 2. Initialiseer klassen
     # Omdat we geen getraind model hebben, mocken we de predict methode van SolarModel

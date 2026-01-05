@@ -29,6 +29,7 @@ class SolarStatus(Enum):
 
 @dataclass
 class SolarContext:
+    actual_pv: float
     load_now: float
     energy_now: float
     energy_best: float
@@ -223,6 +224,9 @@ class SolarOptimizer:
         min_kwh_threshold: float = 0.1,
         avg_baseload_kw: float = 0.25,  # Standaard rustverbruik (koelkast, router, etc)
     ):
+        if duration_hours < 1:
+            raise ValueError("[Solar] Duur moet minimaal 1 uur zijn.")
+
         self.system_max = pv_max_kw
         self.duration = duration_hours
         self.timestep_hours = 0.25
@@ -230,142 +234,176 @@ class SolarOptimizer:
         self.avg_baseload = avg_baseload_kw
 
     def calculate_optimal_window(
-        self, df: pd.DataFrame, current_time: datetime, current_load_kw: float
+        self,
+        df: pd.DataFrame,
+        current_time: pd.Timestamp,
+        current_load_kw: float,
+        current_pv_kw: float,
     ):
-        window_size = int(self.duration / self.timestep_hours)
+        # --- 0. Data & Timezone check ---
+        if df is None or df.empty:
+            logger.warning("[Solar] Geen forecastdata.")
+            return SolarStatus.LOW_LIGHT, None
+
+        # --- 1. FYSICA: Load & Net Power (De Basis) ---
         future = df[df["timestamp"] >= current_time].copy()
+        window_size = int(self.duration / self.timestep_hours)
 
         if len(future) < window_size:
-            logger.info("[Solar] Geen data meer.")
             return SolarStatus.DONE, None
 
-        # We maken een load profiel aan.
-        # Voor "Nu" gebruiken we de gemeten load (bijv. wasmachine aan = 2.5kW).
-        # Voor "Straks" (toekomst) nemen we aan dat de wasmachine klaar is en gebruiken we baseload.
-
-        # We laten het hoge huidige verbruik lineair afnemen naar baseload over 45 minuten (3 kwartier)
-        # Dit voorkomt dat het systeem denkt dat over 1 minuut de wasmachine spontaan uit is.
+        future["projected_load"] = self.avg_baseload
         decay_steps = 3
 
-        future["projected_load"] = self.avg_baseload
-
-        # Pas de eerste paar rijen aan met werkelijke load (afbouwend)
         for i in range(min(len(future), decay_steps)):
-            # Lineaire interpolatie van Current Load -> Base Load
             factor = 1.0 - (i / decay_steps)
-            blended_load = (current_load_kw * factor) + (
-                self.avg_baseload * (1 - factor)
-            )
+            blended = (current_load_kw * factor) + (self.avg_baseload * (1 - factor))
             future.iloc[i, future.columns.get_loc("projected_load")] = max(
-                blended_load, self.avg_baseload
+                blended, self.avg_baseload
             )
 
-        # Bereken Netto [Solar] Zonne-energie MIN Huishoudelijk verbruik
-        # Als netto < 0 is (wasmachine verbruikt meer dan zon), is de 'beschikbare energie' 0.
         future["net_power"] = (
             future["power_corrected"] - future["projected_load"]
         ).clip(lower=0)
 
-        # 2. Rolling calculations op NETTO power
+        # --- 2. FYSICA: Rolling Energy & Uncertainty (Het Landschap) ---
         indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=window_size)
+
         future["rolling_energy_kwh"] = (
-            future["net_power"].rolling(window=indexer).sum() * self.timestep_hours
+            future["net_power"].rolling(window=indexer, min_periods=window_size).sum()
+            * self.timestep_hours
+        )
+        future["rolling_uncertainty"] = (
+            (future["pv_estimate90"] - future["pv_estimate10"])
+            .rolling(window=indexer, min_periods=window_size)
+            .mean()
         )
 
-        # 3. Low Light Check: Is er vandaag genoeg OVERCAPACITEIT?
+        # --- 3. ANALYSE: De Objectieve Piek & Confidence ---
+        # We kijken hier PUUR naar energie. Waar ligt de fysieke top?
         max_energy = future["rolling_energy_kwh"].max()
 
-        # C. Vind ALLE starttijden die >98% van de maximale opbrengst geven.
-        # Dit vangt plateaus op (bijv. 12:00, 12:15 en 12:30 zijn allemaal even goed).
-        best_candidates = future[future["rolling_energy_kwh"] >= max_energy * 0.98]
-
-        # D. Kies de middelste kandidaat
-        # Hierdoor centreert het window zich automatisch in het midden van het plateau.
-        middle_idx = int(len(best_candidates) / 2)
-        best_row = best_candidates.iloc[middle_idx]
-
+        # Low Light Check op basis van fysieke realiteit
         if max_energy < self.min_kwh_threshold:
             return SolarStatus.LOW_LIGHT, SolarContext(
                 energy_now=0,
-                energy_best=max_energy,
+                energy_best=0,
                 opportunity_cost=1.0,
                 confidence=0,
                 action=SolarStatus.LOW_LIGHT,
-                reason=f"Te weinig overcapaciteit ({max_energy:.2f} kWh)",
+                reason=f"Te weinig energie ({max_energy:.2f} kWh)",
                 load_now=current_load_kw,
+                actual_pv=current_pv_kw,
             )
 
-        # 4. Score berekening
-        future["rolling_uncertainty"] = (
-            (future["pv_estimate90"] - future["pv_estimate10"])
-            .rolling(window=indexer)
-            .mean()
-        )
+        # Confidence Berekening (Objectief)
+        # Hoe uniek is de fysieke piek t.o.v. de rest van de dag?
+        scores = future["rolling_energy_kwh"].dropna()
+        confidence = 0.1
+
+        if len(scores) > window_size + 2:
+            # Maskeer de piek en buren (1 uur radius) om 'de rest' te vinden
+            best_idx_num = scores.argmax()
+            ignore_radius = int(1.0 / self.timestep_hours)
+            mask = np.abs(np.arange(len(scores)) - best_idx_num) > ignore_radius
+
+            rest_scores = scores.iloc[mask] if len(scores) > 0 else pd.Series()
+
+            if not rest_scores.empty:
+                # Dit is de zuivere confidence: Piek vs Rest
+                confidence = float(
+                    np.clip((max_energy - rest_scores.max()) / max_energy, 0.0, 1.0)
+                )
+
+        # --- 4. COMPOSITE SCORE (alleen waar energie geldig is) ---
+        valid = future["rolling_energy_kwh"].notna()
+        future = future[valid].copy()
+
         time_diff_hours = (
             future["timestamp"] - current_time
         ).dt.total_seconds() / 3600.0
         time_factor = np.clip(time_diff_hours / 4.0, 0.4, 1.2)
-        relative_uncert = future["rolling_uncertainty"] / future[
+        relative_uncertainty = future["rolling_uncertainty"] / future[
             "rolling_energy_kwh"
         ].clip(lower=0.1)
 
+        # De Score functie: Stuurt op 'Front-loading' en zekerheid
         future["score"] = future["rolling_energy_kwh"] * (
-            1.0 - relative_uncert * 0.4 * time_factor
+            1.0 - relative_uncertainty * 0.4 * time_factor
         )
 
-        # 5. Bepaal beste moment
-        energy_now = future["rolling_energy_kwh"].iloc[0]
-        energy_best = best_row["rolling_energy_kwh"]
-        planned_start = best_row["timestamp"]
+        # Vind het beste startmoment volgens de strategie
+        # (Bij een plateau kiest idxmax() van de score automatisch het vroegste moment door de time_factor)
+        target_idx = future["score"].idxmax()
+        planned_start = future.loc[target_idx, "timestamp"]
 
-        # Opportunity cost
+        # BELANGRIJK: We halen de ENERGIE op van dat moment (niet de score!)
+        energy_best = future.loc[target_idx, "rolling_energy_kwh"]
+        energy_now = future["rolling_energy_kwh"].iloc[0]
+
+        # Opportunity Cost: Verlies t.o.v. het GEKOZEN strategische moment
         opp_cost = (energy_best - energy_now) / max(energy_best, 0.001)
 
-        # 6. Dynamische Confidence
-        scores = future["score"].dropna()
-        confidence = 0.1
-        if len(scores) > 4:
-            best_idx_num = scores.argmax()
-            mask = np.abs(np.arange(len(scores)) - best_idx_num) > 3
-            other_scores = scores[mask]
-            if not other_scores.empty:
-                confidence = float(
-                    np.clip(
-                        (scores.max() - other_scores.max()) / max(scores.max(), 0.1),
-                        0.0,
-                        1.0,
-                    )
-                )
+        # --- 5. BESLUITVORMING (Execution) ---
+        minutes_to_start = int((planned_start - current_time).total_seconds() / 60)
 
-        # Besluitvorming: drempel is strenger als de totale opbrengst laag is
-        # Als energy_best laag is, moet de opp_cost NUL zijn om te starten.
+        # Drempel bepalen met de zuivere confidence en de strategische target energie
         yield_weight = np.clip(
             energy_best / (self.system_max * self.duration * 0.5), 0.2, 1.0
         )
         decision_threshold = (0.02 + (0.10 * (1 - confidence))) * yield_weight
 
-        status = SolarStatus.WAIT
-        minutes_to_peak = int(
-            (planned_start - current_time).total_seconds() / 60
-        )
-        reason = (
-            f"Wacht op overcapaciteit ({energy_best:.2f}kWh) over {minutes_to_peak}m"
-        )
+        minutes_to_peak = int((planned_start - current_time).total_seconds() / 60)
 
-        # Logica aanpassing: Als energy_now 0 is door hoge load, zal opp_cost heel hoog zijn (100%),
-        # waardoor we automatisch wachten.
+        # Basis logica
+        should_start = False
+        if minutes_to_start <= 5:
+            should_start = True
 
-        if (
-            opp_cost <= decision_threshold
-            and energy_now >= self.min_kwh_threshold * 0.8
-        ) or (opp_cost <= 0.001 and energy_now >= self.min_kwh_threshold):
+        elif opp_cost <= decision_threshold:
+            should_start = True
+
+        elif opp_cost <= 0.005:
+            should_start = True
+
+        elif energy_now >= self.min_kwh_threshold:
+            should_start = True
+
+        if should_start:
+            idx_now = min(df["timestamp"].searchsorted(current_time), len(df) - 1)
+            model_power_now = df.iloc[idx_now]["power_corrected"]
+
+            # Absolute harde blokkade
+            if current_pv_kw < 0.5:
+                should_start = False
+                reason = f"Wachten: Huidige PV ({current_pv_kw:.2f} kW) te laag."
+
+            # Grote afwijking van model & PV < load
+            elif (
+                model_power_now > 0.5 and current_pv_kw < model_power_now * 0.5
+            ) and current_pv_kw < current_load_kw:
+                should_start = False
+                reason = f"Wachten: Verwacht {model_power_now:.1f} kW, Meet {current_pv_kw:.1f} kW. Wacht op zon."
+
+            # PV < load en onzekerheid te groot
+            elif current_pv_kw < current_load_kw and confidence < 0.85:
+                should_start = False
+                reason = f"Wachten: PV ({current_pv_kw:.2f} kW) < Load ({current_load_kw:.2f} kW)"
+
+        if should_start:
             status = SolarStatus.START
-            reason = f"Nu starten: verlies {opp_cost:.1%}, netto ruimte {energy_now:.2f}kWh (Load: {current_load_kw:.2f}kW)"
+            reason = (
+                f"Nu starten: verlies {opp_cost:.1%}, netto ruimte {energy_now:.2f}kWh"
+            )
         elif energy_now < 0.1 and energy_best < self.min_kwh_threshold:
             status = SolarStatus.LOW_LIGHT
             reason = "Te weinig netto licht voor start"
+        else:
+            status = SolarStatus.WAIT
+            reason = f"Wacht op overcapaciteit ({energy_best:.2f}kWh) over {minutes_to_peak}m"
 
         return status, SolarContext(
+            actual_pv=current_pv_kw,
             energy_now=round(energy_now, 2),
             energy_best=round(energy_best, 2),
             opportunity_cost=round(opp_cost, 3),
@@ -418,7 +456,7 @@ class SolarForecaster:
 
         # 4. Optimalisatie (Geef stable_load mee)
         status, context = self.optimizer.calculate_optimal_window(
-            df_calc, current_time, current_load_kw
+            df_calc, current_time, current_load_kw, self.context.stable_pv
         )
 
         return status, context
