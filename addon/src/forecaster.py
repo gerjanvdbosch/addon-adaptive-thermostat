@@ -43,31 +43,72 @@ class SolarContext:
 class NowCaster:
     def __init__(self, model_mae: float, pv_max_kw: float, decay_hours: float = 3.0):
         self.decay_hours = decay_hours
+        self.pv_max_kw = pv_max_kw
         self.current_ratio = 1.0
+
+        # Veiligheidsmarges
         error_margin = (2.5 * model_mae) / (pv_max_kw + 0.1)
         self.max_ratio = 1.0 + error_margin
         self.min_ratio = max(0.2, 1.0 - error_margin)
 
     def update(self, actual_kw: float, forecasted_kw: float):
-        if forecasted_kw < 0.05:
-            self.current_ratio = 1.0
+        # 1. Gating: Negeer ruis in de nacht/ochtend (<5% van systeem max)
+        # We laten de ratio langzaam 'uitdoven' naar 1.0 als er geen zon is.
+        if forecasted_kw < 0.05 * self.pv_max_kw:
+            self.current_ratio = (0.95 * self.current_ratio) + (0.05 * 1.0)
             return
-        raw_ratio = actual_kw / forecasted_kw
-        raw_ratio = np.clip(raw_ratio, self.min_ratio, self.max_ratio)
-        self.current_ratio = (0.7 * self.current_ratio) + (0.3 * raw_ratio)
 
-    def apply(self, df: pd.DataFrame, now: datetime, col_name: str) -> pd.Series:
+        # 2. Ratio met floor
+        # Voorkom delen door 0, maar gebruik max(0.05) om extreme ratio's te dempen
+        raw_ratio = actual_kw / max(forecasted_kw, 0.05)
+        raw_ratio = np.clip(raw_ratio, self.min_ratio, self.max_ratio)
+
+        # 3. Confidence Weighting (Cruciaal voor ochtendstabiliteit)
+        # Bij laag vermogen (ochtend) vertrouwen we de meting minder -> lage alpha
+        confidence = np.clip(forecasted_kw / (self.pv_max_kw * 0.4), 0.1, 1.0)
+        alpha = 0.3 * confidence
+
+        # Update (Low pass filter)
+        self.current_ratio = (1 - alpha) * self.current_ratio + alpha * raw_ratio
+
+    def apply(
+        self, df: pd.DataFrame, now: datetime, col_name: str, actual_pv: float = None
+    ) -> pd.Series:
         if df.empty:
             return pd.Series(dtype=float)
 
+        # Tijdsverschil
         delta_hours = (df["timestamp"] - now).dt.total_seconds() / 3600.0
         delta_hours = delta_hours.clip(lower=0)
 
-        # Bias vervaagt naarmate we verder in de toekomst kijken
-        decay_factors = np.exp(-delta_hours / self.decay_hours)
-        correction_vector = 1.0 + (self.current_ratio - 1.0) * decay_factors
+        # 1. Asymmetrische Decay
+        # Negatieve bias (wolk) vergeten we sneller dan positieve bias
+        effective_decay = (
+            self.decay_hours if self.current_ratio >= 1.0 else (self.decay_hours * 0.5)
+        )
+        decay_factors = np.exp(-delta_hours / effective_decay)
 
-        return (df[col_name] * correction_vector).clip(lower=0)
+        # Basis correctie (vermenigvuldigen)
+        correction_vector = 1.0 + (self.current_ratio - 1.0) * decay_factors
+        corrected_series = df[col_name] * correction_vector
+
+        # 2. Short-term Persistence (De '0-Forecast' Fix)
+        # Dit repareert het gat als forecast=0 maar actual=2kW
+        if actual_pv is not None and actual_pv > 0.1:
+            idx_now = df["timestamp"].searchsorted(now)
+            idx_now = min(idx_now, len(df) - 1)
+
+            # Vergelijk kW met kW
+            current_model_val = corrected_series.iloc[idx_now]
+            error_gap = max(0, actual_pv - current_model_val)
+
+            if error_gap > 0.1:
+                # Voeg het verschil toe, uitstervend over ~1 uur
+                steps = np.maximum(0, np.arange(len(df)) - idx_now)
+                boost_vector = error_gap * np.exp(-steps / 4.0)
+                corrected_series += boost_vector
+
+        return corrected_series.clip(0, self.pv_max_kw)
 
 
 class SolarModel:
@@ -332,10 +373,7 @@ class SolarForecaster:
         self.model = SolarModel(Path(config.solar_model_path))
         self.context = context
         self.config = config
-        self.nowcaster = NowCaster(
-            model_mae=self.model.mae,
-            pv_max_kw=config.pv_max_kw,
-        )
+        self.nowcaster = NowCaster(model_mae=self.model.mae, pv_max_kw=config.pv_max_kw)
         self.optimizer = SolarOptimizer(
             pv_max_kw=config.pv_max_kw,
             duration_hours=config.dhw_duration_hours,
@@ -366,7 +404,7 @@ class SolarForecaster:
         self.nowcaster.update(self.context.stable_pv, row_now["power_ml"])
 
         df_calc["power_corrected"] = self.nowcaster.apply(
-            df_calc, current_time, "power_ml"
+            df_calc, current_time, "power_ml", actual_pv=self.context.stable_pv
         )
         df_calc["power_corrected"] = df_calc["power_corrected"].clip(
             0, self.config.pv_max_kw

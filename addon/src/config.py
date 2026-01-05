@@ -18,7 +18,7 @@ class Config:
 
     dhw_duration_hours: float = 1.0
 
-    min_kwh_threshold: float = 0.1
+    min_kwh_threshold: float = 0.3
     avg_baseload_kw: float = 0.15
     max_compressor_freq: int = 70
 

@@ -123,7 +123,7 @@ def run_simulation():
     print(f"SOLAR SIMULATIE - TIJD: {sim_now.strftime('%H:%M')} UTC")
     print("="*50)
 
-    decision = forecaster.analyze(ctx.now, ctx.stable_load)
+    status, decision = forecaster.analyze(ctx.now, ctx.stable_load)
 
     # 4. Rapportage
     if decision:
