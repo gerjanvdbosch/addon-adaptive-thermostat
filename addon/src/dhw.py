@@ -15,6 +15,12 @@ class DhwState(Enum):
 
 
 class DhwMachine(StateMachine):
+    def __init__(self, context):
+        super().__init__("DHW", context)
+        self.state = DhwState.IDLE
+        # self.run_start_time = None
+        # self.run_start_time = None
+
     def on_enter(self, state):
         if state == "RUNNING":
             logger.info("[DHW] AAN: Start verwarmen.")
