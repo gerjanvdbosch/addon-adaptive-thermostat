@@ -27,7 +27,9 @@ class Collector:
             hour=0, minute=0, second=0, microsecond=0
         ).tz_convert("UTC")
         end_filter = start_filter + timedelta(days=1)
-        full_index = pd.date_range(start=start_filter, periods=96, freq="15min")
+        full_index = pd.date_range(
+            start=start_filter, periods=96, freq="15min", name="timestamp"
+        )
 
         df = pd.DataFrame(solcast)
         df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
