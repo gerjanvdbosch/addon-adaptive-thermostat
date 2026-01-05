@@ -357,7 +357,6 @@ class SolarForecaster:
             df_calc["power_ml"] = df_calc["pv_estimate"].fillna(0)
 
         # Bias ankerpunt (nu)
-        current_time = pd.Timestamp(current_time).tz_localize("UTC")
         logger.info(
             f"[Solar] Huidige tijd voor analyse: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}"
         )
