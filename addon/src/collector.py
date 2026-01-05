@@ -22,35 +22,30 @@ class Collector:
     def update_forecast(self):
         solcast = self.client.get_forecast(self.config.sensor_solcast)
 
-        df = pd.DataFrame(solcast)
-        df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_convert("UTC")
-
-        df_sol = (
-            df.set_index("timestamp")
-            .apply(pd.to_numeric, errors="coerce")
-            .infer_objects(copy=False)
-            .resample("15min")
-            .interpolate(method="linear")
-            .fillna(0)
-            .reset_index()
-        )
-
-        #         df_om = pd.DataFrame()
-        #
-        #         df_merged = (
-        #              df_sol
-        #              .set_index("timestamp")
-        #              .join(df_om, how="inner")
-        #              .reset_index()
-        #         )
-
-        df_merged = df_sol
-
         now_local = pd.Timestamp.now(tz=datetime.now().astimezone().tzinfo)
         start_filter = now_local.replace(
             hour=0, minute=0, second=0, microsecond=0
         ).tz_convert("UTC")
         end_filter = start_filter + timedelta(days=1)
+        full_index = pd.date_range(
+            start=start_filter, end=end_filter, freq="15min", closed="left"
+        )
+
+        df = pd.DataFrame(solcast)
+        df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_localize("UTC")
+
+        df_sol = (
+            df.set_index("timestamp")
+            .apply(pd.to_numeric, errors="coerce")
+            .infer_objects(copy=False)
+            .reindex(full_index)
+            .interpolate(method="linear")
+            .fillna(0)
+            .reset_index()
+        )
+
+        df_om = self.weather.get_forecast()
+        df_merged = df_sol.set_index("timestamp").join(df_om, how="left").reset_index()
 
         df_today = (
             df_merged[
