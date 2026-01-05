@@ -273,15 +273,25 @@ class SolarOptimizer:
         )
 
         # 3. Low Light Check: Is er vandaag genoeg OVERCAPACITEIT?
-        max_attainable_energy = future["rolling_energy_kwh"].max()
-        if max_attainable_energy < self.min_kwh_threshold:
+        max_energy = future["rolling_energy_kwh"].max()
+
+        # C. Vind ALLE starttijden die >98% van de maximale opbrengst geven.
+        # Dit vangt plateaus op (bijv. 12:00, 12:15 en 12:30 zijn allemaal even goed).
+        best_candidates = future[future["rolling_energy_kwh"] >= max_energy * 0.98]
+
+        # D. Kies de middelste kandidaat
+        # Hierdoor centreert het window zich automatisch in het midden van het plateau.
+        middle_idx = int(len(best_candidates) / 2)
+        best_row = best_candidates.iloc[middle_idx]
+
+        if max_energy < self.min_kwh_threshold:
             return SolarStatus.LOW_LIGHT, SolarContext(
                 energy_now=0,
-                energy_best=max_attainable_energy,
+                energy_best=max_energy,
                 opportunity_cost=1.0,
                 confidence=0,
                 action=SolarStatus.LOW_LIGHT,
-                reason=f"Te weinig overcapaciteit ({max_attainable_energy:.2f} kWh)",
+                reason=f"Te weinig overcapaciteit ({max_energy:.2f} kWh)",
                 load_now=current_load_kw,
             )
 
@@ -304,10 +314,9 @@ class SolarOptimizer:
         )
 
         # 5. Bepaal beste moment
-        best_idx = future["score"].idxmax()
-        best_row = future.loc[best_idx]
         energy_now = future["rolling_energy_kwh"].iloc[0]
         energy_best = best_row["rolling_energy_kwh"]
+        planned_start = best_row["timestamp"]
 
         # Opportunity cost
         opp_cost = (energy_best - energy_now) / max(energy_best, 0.001)
@@ -337,7 +346,7 @@ class SolarOptimizer:
 
         status = SolarStatus.WAIT
         minutes_to_peak = int(
-            (best_row["timestamp"] - current_time).total_seconds() / 60
+            (planned_start - current_time).total_seconds() / 60
         )
         reason = (
             f"Wacht op overcapaciteit ({energy_best:.2f}kWh) over {minutes_to_peak}m"
@@ -363,7 +372,7 @@ class SolarOptimizer:
             confidence=round(confidence, 2),
             action=status,
             reason=reason,
-            planned_start=best_row["timestamp"],
+            planned_start=planned_start,
             load_now=round(current_load_kw, 2),
         )
 
