@@ -33,7 +33,7 @@ class Planner:
             logger.info(f"[Planner] Energy best {forecast.energy_best}kW")
             logger.info(f"[Planner] Opportunity cost {forecast.opportunity_cost}")
             logger.info(f"[Planner] Confidence {forecast.confidence}")
-            logger.info(f"[Planner] Bias {forecast.bias}")
+            logger.info(f"[Planner] Bias {forecast.current_bias}")
             logger.info(f"[Planner] Planned start {forecast.planned_start}")
 
         # Compressor freq gebruiken voor load / power inschatting
