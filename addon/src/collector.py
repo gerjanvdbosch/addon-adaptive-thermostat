@@ -45,7 +45,7 @@ class Collector:
         )
 
         df_om = self.weather.get_forecast()
-        df_merged = df_sol.set_index("timestamp").join(df_om, how="left").reset_index()
+        df_merged = pd.merge(df_sol, df_om, on="timestamp", how="left")
 
         df_today = (
             df_merged[
