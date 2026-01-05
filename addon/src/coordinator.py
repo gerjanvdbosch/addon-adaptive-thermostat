@@ -15,7 +15,9 @@ from dhw import DhwMachine
 from climate import ClimateMachine
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=LOG_LEVEL, format="%(asctime)s %(levelname)s: %(message)s", datefmt="%H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
