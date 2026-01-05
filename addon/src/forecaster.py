@@ -4,9 +4,7 @@ import joblib
 import shap
 import logging
 
-from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 from typing import Optional
 from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -15,30 +13,9 @@ from sklearn.metrics import mean_absolute_error
 from utils import add_cyclic_time_features
 from typing import Dict
 from config import Config
-from context import Context
+from context import Context, SolarStatus, SolarContext
 
 logger = logging.getLogger(__name__)
-
-
-class SolarStatus(Enum):
-    START = "START"
-    WAIT = "WAIT"
-    LOW_LIGHT = "LOW_LIGHT"
-    DONE = "DONE"
-
-
-@dataclass
-class SolarContext:
-    actual_pv: float
-    load_now: float
-    energy_now: float
-    energy_best: float
-    opportunity_cost: float
-    confidence: float
-    action: SolarStatus
-    reason: str
-    planned_start: Optional[datetime] = None
-    current_bias: float = 1.0
 
 
 class NowCaster:
