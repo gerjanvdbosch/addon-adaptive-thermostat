@@ -3,7 +3,7 @@ import threading
 import logging
 import uvicorn
 
-from datetime import datetime
+from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from config import Config
@@ -33,7 +33,7 @@ class Coordinator:
     def tick(self):
         self.collector.update_sensors()
 
-        self.context.now = datetime.now(utc=True)
+        self.context.now = datetime.now(timezone.utc)
 
         plan = self.planner.create_plan()
 
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     try:
         client = HAClient()
         config = Config.load(client)
-        context = Context(now=datetime.now(utc=True))
+        context = Context(now=datetime.now(timezone.utc))
         collector = Collector(client, context, config)
         coordinator = Coordinator(context, config, collector)
 
