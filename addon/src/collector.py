@@ -30,7 +30,7 @@ class Collector:
         full_index = pd.date_range(start=start_filter, periods=96, freq="15min")
 
         df = pd.DataFrame(solcast)
-        df["timestamp"] = pd.to_datetime(df["period_start"]).dt.tz_localize("UTC")
+        df["timestamp"] = pd.to_datetime(df["period_start"], utc=True)
 
         df_sol = (
             df.set_index("timestamp")
