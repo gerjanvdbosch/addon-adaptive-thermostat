@@ -26,8 +26,14 @@ def get_solar_plot(request: Request):
         coordinator = request.app.state.coordinator
         context = coordinator.context
         forecaster = coordinator.forecaster
-
         forecast = context.forecast
+
+        if not hasattr(context, "forecast") or context.forecast is None:
+            return Response(
+                content="Geen data beschikbaar. Wacht op de eerste meting (max 1 minuut).",
+                status_code=202,
+            )
+
         df = context.forecast_df.copy()
 
         df["power_ml"] = forecaster.model.predict(df)
