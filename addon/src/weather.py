@@ -43,7 +43,7 @@ class WeatherClient:
             minutely = data.get("minutely_15", {})
 
             if not minutely:
-                logger.error("[Weather] Geen 15-min data ontvangen.")
+                logger.error("[Weather] Geen 15-min data ontvangen")
                 return pd.DataFrame()
 
             df = pd.DataFrame(
@@ -59,7 +59,7 @@ class WeatherClient:
                 }
             )
 
-            logger.info("[Weather] API-update succesvol.")
+            logger.info("[Weather] API-update succesvol")
             return df
 
         except Exception as e:

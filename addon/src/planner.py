@@ -1,8 +1,6 @@
 import logging
 
 from dataclasses import dataclass
-from forecaster import SolarForecaster
-from config import Config
 from context import Context
 
 logger = logging.getLogger(__name__)
@@ -16,14 +14,14 @@ class Plan:
 
 
 class Planner:
-    def __init__(self, config: Config, context: Context):
-        self.forecaster = SolarForecaster(config, context)
+    def __init__(self, context: Context):
         self.context = context
 
     def create_plan(self):
         now = self.context.now
         status, forecast = self.forecaster.analyze(now, self.context.stable_load)
 
+        self.context.forecast = forecast
         logger.info(f"[Planner] Status {status}")
 
         if forecast is not None:

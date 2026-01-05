@@ -30,7 +30,7 @@ class DhwMachine(StateMachine):
             # self.ctx.ha.set_switch(self.ctx.cfg.entity_dhw, False)
 
     def process(self, plan: Plan):
-        now = self.ctx.now
+        now = self.context.now
 
         # Bereken hoe lang we al draaien (in minuten)
         # Als we niet draaien, is dit getal niet relevant

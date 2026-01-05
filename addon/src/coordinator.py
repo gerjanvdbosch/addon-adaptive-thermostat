@@ -11,8 +11,10 @@ from context import Context
 from collector import Collector
 from client import HAClient
 from planner import Planner
+from forecaster import SolarForecaster
 from dhw import DhwMachine
 from climate import ClimateMachine
+from webapi import api
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -25,7 +27,8 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 class Coordinator:
     def __init__(self, context: Context, config: Config, collector: Collector):
-        self.planner = Planner(config, context)
+        self.forecaster = SolarForecaster(config, context)
+        self.planner = Planner(context)
         self.dhw_machine = DhwMachine(context)
         self.climate_machine = ClimateMachine(context)
         self.context = context
@@ -43,8 +46,9 @@ class Coordinator:
         self.climate_machine.process(plan)
 
     def start_api(self):
+        api.state.coordinator = self
         uvicorn.run(
-            "webapi:api",
+            api,
             host=self.config.webapi_host,
             port=self.config.webapi_port,
             log_level="warning",

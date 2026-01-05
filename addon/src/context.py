@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
 from enum import Enum
+from forecaster import SolarContext
 
 
 class HvacMode(Enum):
@@ -26,6 +27,7 @@ class Context:
     stable_pv: float = 0.0
     stable_load: float = 0.0
 
+    forecast: SolarContext | None = None
     forecast_df: pd.DataFrame | None = None
 
     pv_buffer: deque = field(default_factory=lambda: deque(maxlen=15))
