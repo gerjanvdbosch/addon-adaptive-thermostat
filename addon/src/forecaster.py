@@ -395,9 +395,6 @@ class SolarForecaster:
             df_calc["power_ml"] = df_calc["pv_estimate"].fillna(0)
 
         # Bias ankerpunt (nu)
-        logger.info(
-            f"[Solar] Huidige tijd voor analyse: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}"
-        )
         idx_now = df_calc["timestamp"].searchsorted(current_time)
         row_now = df_calc.iloc[min(idx_now, len(df_calc) - 1)]
 
