@@ -11,7 +11,6 @@ from context import Context
 from collector import Collector
 from client import HAClient
 from planner import Planner
-from forecaster import SolarForecaster
 from dhw import DhwMachine
 from climate import ClimateMachine
 from webapi import api
@@ -27,8 +26,7 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 class Coordinator:
     def __init__(self, context: Context, config: Config, collector: Collector):
-        self.forecaster = SolarForecaster(config, context)
-        self.planner = Planner(context)
+        self.planner = Planner(context, config)
         self.dhw_machine = DhwMachine(context)
         self.climate_machine = ClimateMachine(context)
         self.context = context

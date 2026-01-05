@@ -25,7 +25,7 @@ def get_solar_plot(request: Request):
     try:
         coordinator = request.app.state.coordinator
         context = coordinator.context
-        forecaster = coordinator.forecaster
+        forecaster = coordinator.planner.forecaster
         forecast = context.forecast
 
         if not hasattr(context, "forecast") or context.forecast is None:

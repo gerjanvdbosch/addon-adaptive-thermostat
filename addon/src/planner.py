@@ -2,6 +2,7 @@ import logging
 
 from dataclasses import dataclass
 from context import Context
+from config import Config
 from forecaster import SolarForecaster
 
 logger = logging.getLogger(__name__)
@@ -15,8 +16,8 @@ class Plan:
 
 
 class Planner:
-    def __init__(self, context: Context, forecaster: SolarForecaster):
-        self.forecaster = forecaster
+    def __init__(self, context: Context, config: Config):
+        self.forecaster = SolarForecaster(config, context)
         self.context = context
 
     def create_plan(self):
