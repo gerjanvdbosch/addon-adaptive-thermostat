@@ -4,8 +4,7 @@ import matplotlib.dates as mdates
 
 from matplotlib.figure import Figure
 from fastapi import FastAPI, Response, Request
-from datetime import timedelta
-from zoneinfo import ZoneInfo
+from datetime import timedelta, datetime
 
 
 logger = logging.getLogger(__name__)
@@ -32,14 +31,16 @@ def get_solar_plot(request: Request):
                 status_code=202,
             )
 
-        local_tz = ZoneInfo("Europe/Amsterdam")
-        local_now = context.now.astimezone(local_tz)
+        local_tz = datetime.now().astimezone().tzinfo
+        local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
         logger.info(
             f"[WebApi] Generating solar forecast plot for {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}"
         )
 
         df = context.forecast_df.copy()
-        df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz)
+        df["timestamp_local"] = (
+            df["timestamp"].dt.tz_convert(local_tz).replace(tzinfo=None)
+        )
 
         df["power_ml"] = forecaster.model.predict(df)
         df["power_corrected"] = forecaster.nowcaster.apply(
@@ -131,7 +132,9 @@ def get_solar_plot(request: Request):
 
         # Start Window
         if forecast and forecast.planned_start:
-            local_start = forecast.planned_start.astimezone(local_tz)
+            local_start = forecast.planned_start.astimezone(local_tz).replace(
+                tzinfo=None
+            )
             # Check of startmoment in het plot-window valt
             if local_start >= df_plot["timestamp_local"].min():
                 ax.axvline(
