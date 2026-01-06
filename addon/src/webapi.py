@@ -3,21 +3,32 @@ import io
 import matplotlib.dates as mdates
 
 from matplotlib.figure import Figure
+from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Response, Request
+from fastapi.responses import HTMLResponse
 from datetime import timedelta, datetime
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
 
 api = FastAPI(title="Home Optimizer API")
 
-
-@api.get("/")
-def index():
-    return {"status": "ok"}
+BASE_DIR = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-@api.get("/solar/forecast")
+@api.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+        },
+    )
+
+
+@api.get("/solar/forecast.png", response_class=Response)
 def get_solar_plot(request: Request):
     try:
         coordinator = request.app.state.coordinator
@@ -33,9 +44,6 @@ def get_solar_plot(request: Request):
 
         local_tz = datetime.now().astimezone().tzinfo
         local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
-        logger.info(
-            f"[WebApi] Generating solar forecast plot for {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}"
-        )
 
         df = context.forecast_df.copy()
         df["timestamp_local"] = (
@@ -184,7 +192,7 @@ def get_solar_plot(request: Request):
             boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="silver"
         )
         ax.text(
-            0.95,
+            0.99,
             0.78,
             info_text,
             transform=ax.transAxes,
