@@ -1,13 +1,14 @@
 import logging
 import io
 import matplotlib
+import matplotlib.dates as mdates
 
 matplotlib.use("Agg")
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from fastapi import FastAPI, Response, Request
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,10 @@ def get_solar_plot(request: Request):
                 status_code=202,
             )
 
+        local_tz = datetime.now().astimezone().tzinfo
         df = context.forecast_df.copy()
+        df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz)
+        local_now = context.now.astimezone(local_tz)
 
         df["power_ml"] = forecaster.model.predict(df)
         df["power_corrected"] = forecaster.nowcaster.apply(
@@ -59,9 +63,9 @@ def get_solar_plot(request: Request):
         fig = Figure(figsize=(12, 7))
         ax = fig.add_subplot(111)
 
-        # 1. Solar lijnen
+        # Gebruik df["timestamp_local"] voor alle plot calls
         ax.plot(
-            df["timestamp"],
+            df["timestamp_local"],
             df["pv_estimate"],
             "--",
             label="Raw Solcast (Forecast)",
@@ -69,7 +73,7 @@ def get_solar_plot(request: Request):
             alpha=0.4,
         )
         ax.plot(
-            df["timestamp"],
+            df["timestamp_local"],
             df["power_ml"],
             ":",
             label="ML Model Output",
@@ -77,100 +81,105 @@ def get_solar_plot(request: Request):
             alpha=0.6,
         )
         ax.plot(
-            df["timestamp"],
+            df["timestamp_local"],
             df["power_corrected"],
             "g-",
             linewidth=2,
             label="Corrected Solar (Nowcast)",
         )
-
-        # 2. Load lijn (Verbruik) - Gebruik step voor realistisch verbruik
         ax.step(
-            df["timestamp"],
+            df["timestamp_local"],
             df["consumption"],
             where="post",
             color="red",
             linewidth=2,
-            label="Geprojecteerd Verbruik (Load)",
+            label="Load Projection",
         )
-
-        # 3. Netto area
         ax.fill_between(
-            df["timestamp"],
+            df["timestamp_local"],
             0,
             df["net_power"],
             color="green",
             alpha=0.15,
-            label="Netto Beschikbare Solar",
+            label="Netto Solar",
         )
 
-        # 4. Markeer "NU"
-        ax.axvline(context.now, color="black", linestyle="-", alpha=0.5)
-        # Bepaal y-limiet voor tekstplaatsing
-        y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.1
-        ax.text(context.now, y_max * 0.9, " NU", color="black", fontweight="bold")
+        # Markeer "NU" in lokale tijd
+        ax.axvline(local_now, color="black", linestyle="-", alpha=0.5)
+        y_max = (
+            max(df["pv_estimate"].max(), df["consumption"].max()) * 1.2
+        )  # Iets meer ruimte bovenin
+        ax.text(local_now, y_max * 0.95, " NU", color="black", fontweight="bold")
 
-        # 5. Markeer geplande start en het window
+        # Markeer geplande start
         if forecast and forecast.planned_start:
+            local_start = forecast.planned_start.astimezone(local_tz)
             ax.axvline(
-                forecast.planned_start,
+                local_start,
                 color="orange",
                 linestyle="--",
                 linewidth=2,
-                label=f"Geplande Start ({forecast.planned_start.strftime('%H:%M')})",
+                label=f"Start ({local_start.strftime('%H:%M')})",
             )
 
-            # Teken een blok voor de DHW duration
-            duration_end = forecast.planned_start + timedelta(
-                hours=forecaster.optimizer.duration
-            )
-            ax.axvspan(
-                forecast.planned_start,
-                duration_end,
-                color="orange",
-                alpha=0.1,
-                label="DHW Run Window",
-            )
+            duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
+            ax.axvspan(local_start, duration_end, color="orange", alpha=0.1)
 
-        # --- STYLING & INFO BOX ---
+        # --- AS FORMATTERING (Alleen tijd) ---
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         ax.set_title(
-            f"Solar & Load Simulatie\nActie: {forecast.action.value} - {forecast.reason}",
+            f"Solar Optimizer: {forecast.action.value}\n{forecast.reason}",
             fontsize=12,
             pad=15,
         )
         ax.set_ylabel("Vermogen (kW)")
-        ax.set_xlabel("Tijd (UTC)")
+        ax.set_xlabel("Tijd")
 
-        # Voeg een tekstbox toe met de belangrijkste metrics
+        # --- INFO BOX & LEGENDA RECHTSBOVEN ---
         info_text = (
-            f"Meting PV: {context.stable_pv:.2f} kW\n"
-            f"Huisverbruik: {context.stable_load:.2f} kW\n"
-            f"Bias Factor: {forecast.current_bias:.2f}x\n"
+            f"PV Nu: {context.stable_pv:.2f} kW\n"
+            f"Load Nu: {context.stable_load:.2f} kW\n"
+            f"Bias: {forecast.current_bias:.2f}x\n"
             f"Confidence: {forecast.confidence:.1%}"
         )
-        props = dict(boxstyle="round", facecolor="white", alpha=0.5)
+
+        # Plaats de Infobox rechtsboven (binnen de assen)
+        props = dict(boxstyle="round", facecolor="white", alpha=0.8, edgecolor="silver")
         ax.text(
-            0.02,
-            0.95,
+            0.98,
+            0.98,
             info_text,
             transform=ax.transAxes,
             fontsize=10,
             verticalalignment="top",
+            horizontalalignment="right",
             bbox=props,
+            zorder=5,
         )
 
-        ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
+        # Plaats de Legenda direct onder de infobox
+        # We gebruiken bbox_to_anchor om hem exact onder de box (die op y=0.98 begint) te zetten
+        ax.legend(
+            loc="upper right",
+            bbox_to_anchor=(
+                0.98,
+                0.78,
+            ),  # Coördinaat aangepast om onder de box te vallen
+            fontsize=9,
+            frameon=True,
+            facecolor="white",
+            framealpha=0.8,
+        )
+
         ax.grid(True, alpha=0.2)
         ax.set_ylim(0, y_max)
-
         fig.autofmt_xdate()
         fig.tight_layout()
 
-        # --- CONVERTEER NAAR BYTES ---
         output = io.BytesIO()
         FigureCanvas(fig).print_png(output)
 
         return Response(content=output.getvalue(), media_type="image/png")
     except Exception as e:
         logger.error(f"[WebApi] Fout bij genereren grafiek: {e}")
-        return {"error": "Could not generate plot"}
+        return {"error": str(e)}
