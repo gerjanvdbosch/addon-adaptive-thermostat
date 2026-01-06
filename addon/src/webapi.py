@@ -14,8 +14,19 @@ logger = logging.getLogger(__name__)
 
 api = FastAPI(title="Home Optimizer API")
 
+
+def url_for(request: Request, name: str, **path_params):
+    url = request.url_for(name, **path_params)
+    try:
+        forced_port = request.app.state.coordinator.config.webapi_port
+    except Exception:
+        forced_port = 8000
+    return str(url.replace(port=forced_port))
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["url_for"] = url_for
 
 
 @api.get("/", response_class=HTMLResponse)
