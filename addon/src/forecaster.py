@@ -128,7 +128,6 @@ class SolarModel:
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = add_cyclic_time_features(df, col_name="timestamp")
         df["uncertainty"] = df["pv_estimate90"] - df["pv_estimate10"]
         X = df.reindex(columns=self.feature_cols)
