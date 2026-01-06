@@ -39,7 +39,7 @@ def get_solar_plot(request: Request):
 
         df = context.forecast_df.copy()
         df["timestamp_local"] = (
-            df["timestamp"].dt.tz_convert(local_tz).replace(tzinfo=None)
+            df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
 
         df["power_ml"] = forecaster.model.predict(df)
