@@ -135,7 +135,17 @@ def get_solar_plot(request: Request):
         ax.set_ylabel("Vermogen (kW)")
         ax.set_xlabel("Tijd")
 
-        # --- INFO BOX & LEGENDA RECHTSBOVEN ---
+        # --- RECHTSBOVEN: LEGENDA BOVENAAN ---
+        ax.legend(
+            loc="upper right",
+            bbox_to_anchor=(0.98, 0.98),
+            fontsize=9,
+            frameon=True,
+            facecolor="white",
+            framealpha=0.8,
+        )
+
+        # --- RECHTSBOVEN: INFOBOX ONDER LEGENDA ---
         info_text = (
             f"PV Nu: {context.stable_pv:.2f} kW\n"
             f"Load Nu: {context.stable_load:.2f} kW\n"
@@ -143,32 +153,17 @@ def get_solar_plot(request: Request):
             f"Confidence: {forecast.confidence:.1%}"
         )
 
-        # Plaats de Infobox rechtsboven (binnen de assen)
+        # De y-waarde 0.75 plaatst de box net onder een standaard legenda
         props = dict(boxstyle="round", facecolor="white", alpha=0.8, edgecolor="silver")
         ax.text(
             0.98,
-            0.98,
+            0.70,
             info_text,
             transform=ax.transAxes,
             fontsize=10,
             verticalalignment="top",
             horizontalalignment="right",
             bbox=props,
-            zorder=5,
-        )
-
-        # Plaats de Legenda direct onder de infobox
-        # We gebruiken bbox_to_anchor om hem exact onder de box (die op y=0.98 begint) te zetten
-        ax.legend(
-            loc="upper right",
-            bbox_to_anchor=(
-                0.98,
-                0.78,
-            ),  # Coördinaat aangepast om onder de box te vallen
-            fontsize=9,
-            frameon=True,
-            facecolor="white",
-            framealpha=0.8,
         )
 
         ax.grid(True, alpha=0.2)
@@ -177,7 +172,7 @@ def get_solar_plot(request: Request):
         fig.tight_layout()
 
         output = io.BytesIO()
-        FigureCanvas(fig).print_png(output)
+        FigureCanvas(fig).print_png(output, dpi=200)
 
         return Response(content=output.getvalue(), media_type="image/png")
     except Exception as e:
