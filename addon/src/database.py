@@ -40,7 +40,7 @@ class Database:
         self.database_path = config.database_path
 
         self.engine = create_engine(
-            self.database_path, connect_args={"check_same_thread": False}
+            f"sqlite:///{self.database_path}", connect_args={"check_same_thread": False}
         )
         self.SessionLocal = sessionmaker(
             autocommit=False, autoflush=False, bind=self.engine
