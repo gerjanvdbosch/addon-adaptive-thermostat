@@ -30,7 +30,7 @@ def index(request: Request):
     )
 
 
-@api.get("/solar/forecast.png", response_class=Response)
+@api.get("/solar/forecast", response_class=Response)
 def get_solar_plot(request: Request):
     image = _get_solar_forecast_image(request)
     return Response(content=image, media_type="image/png")
@@ -110,6 +110,23 @@ def _get_solar_forecast_image(request: Request):
         label="Model Correction",
         color="blue",
         alpha=0.6,
+    )
+    ax.axhline(
+        y=context.stable_pv,
+        color="darkgreen",
+        linestyle=":",
+        alpha=0.5,
+        xmin=0.05,
+        xmax=0.95,
+    )
+    # En een duidelijke marker op de NU-lijn
+    ax.scatter(
+        local_now,
+        context.stable_pv,
+        color="darkgreen",
+        s=60,
+        zorder=15,
+        label=f"Actual PV ({context.stable_pv:.2f} kW)",
     )
     ax.plot(
         df_plot["timestamp_local"],
