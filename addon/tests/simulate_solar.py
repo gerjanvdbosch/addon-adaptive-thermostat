@@ -163,7 +163,7 @@ def plot_results(ctx, forecaster, decision):
     future_mask = df["timestamp"] >= ctx.now
     future_indices = df.index[future_mask]
 
-    decay_steps = 3 # 45 minuten bij 15-min intervallen
+    decay_steps = 2 # 45 minuten bij 15-min intervallen
     for i, idx in enumerate(future_indices[:decay_steps + 1]):
         factor = 1.0 - (i / decay_steps)
         blended_load = (ctx.stable_load * factor) + (baseload * (1 - factor))
@@ -182,6 +182,17 @@ def plot_results(ctx, forecaster, decision):
     plt.plot(df["timestamp"], df["pv_estimate"], '--', label="Raw Solcast (Forecast)", color='gray', alpha=0.4)
     plt.plot(df["timestamp"], df["power_ml"], ':', label="ML Model Output", color='blue', alpha=0.6)
     plt.plot(df["timestamp"], df["power_corrected"], 'g-', linewidth=2, label="Corrected Solar (Nowcast)")
+
+    # --- NIEUW: Huidige PV Meting toevoegen ---
+    # We tekenen een stip op de huidige meting
+    x_min_plot = df["timestamp"].min()
+
+    # Teken de horizontale lijn:
+    # y = de waarde, xmin = begin van de grafiek, xmax = nu
+    plt.hlines(y=ctx.stable_pv, xmin=x_min_plot, xmax=ctx.now, color='darkgreen', linestyle=':', alpha=0.4, linewidth=1)
+
+    # De Stip (Huidige Meting) exact op het eindpunt van de stippellijn
+    plt.scatter(ctx.now, ctx.stable_pv, color='darkgreen', s=120,edgecolors='white', linewidths=1.5, zorder=15, label=f"Actuele PV Meting ({ctx.stable_pv:.2f} kW)")
 
     # Load lijn (Verbruik)
     # We gebruiken 'step' omdat stroomverbruik vaak blokvormig is

@@ -230,7 +230,7 @@ class SolarOptimizer:
             return SolarStatus.DONE, None
 
         future["projected_load"] = self.avg_baseload
-        decay_steps = 3
+        decay_steps = 2
 
         for i in range(min(len(future), decay_steps)):
             factor = 1.0 - (i / decay_steps)

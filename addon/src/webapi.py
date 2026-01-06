@@ -65,7 +65,7 @@ def _get_solar_forecast_image(request: Request):
 
     future_mask = df["timestamp_local"] >= local_now
     future_indices = df.index[future_mask]
-    decay_steps = 3
+    decay_steps = 2
     for i, idx in enumerate(future_indices[: decay_steps + 1]):
         factor = 1.0 - (i / decay_steps)
         blended_load = (context.stable_load * factor) + (baseload * (1 - factor))
@@ -120,13 +120,30 @@ def _get_solar_forecast_image(request: Request):
         xmax=0.95,
     )
     # En een duidelijke marker op de NU-lijn
+    x_min_plot = df_plot["timestamp_local"].min()
+
+    # Teken de horizontale lijn:
+    # y = de waarde, xmin = begin van de grafiek, xmax = nu
+    ax.hlines(
+        y=context.stable_pv,
+        xmin=x_min_plot,
+        xmax=local_now,
+        color="darkgreen",
+        linestyle=":",
+        alpha=0.4,
+        linewidth=1,
+    )
+
+    # De Stip (Huidige Meting) exact op het eindpunt van de stippellijn
     ax.scatter(
         local_now,
         context.stable_pv,
         color="darkgreen",
-        s=60,
+        s=120,
+        edgecolors="white",
+        linewidths=1.5,
         zorder=15,
-        label=f"Actual PV ({context.stable_pv:.2f} kW)",
+        label=f"Actuele PV Meting ({context.stable_pv:.2f} kW)",
     )
     ax.plot(
         df_plot["timestamp_local"],
