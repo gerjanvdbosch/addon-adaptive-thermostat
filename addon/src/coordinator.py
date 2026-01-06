@@ -3,7 +3,7 @@ import threading
 import logging
 import uvicorn
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from config import Config
@@ -44,6 +44,11 @@ class Coordinator:
         self.dhw_machine.process(plan)
         self.climate_machine.process(plan)
 
+    def train(self):
+        cutoff_date = self.context.now - timedelta(days=730)
+        history = self.collector.database.get_forecast_history(cutoff_date)
+        self.planner.forecaster.model.train(history, system_max=self.config.pv_max_kw)
+
     def start_api(self):
         api.state.coordinator = self
         uvicorn.run(
@@ -76,11 +81,12 @@ if __name__ == "__main__":
         scheduler.add_job(collector.update_pv, "interval", seconds=15)
 
         scheduler.add_job(coordinator.tick, "interval", minutes=1)
+        scheduler.add_job(coordinator.train, "cron", hour=21, minute=46)
 
         logger.info("[System] Engine running.")
 
-        collector.update_sensors()
         collector.update_forecast()
+        coordinator.tick()
 
         scheduler.start()
 

@@ -67,7 +67,7 @@ class Database:
                 session.merge(obj)
 
             session.commit()
-            self.logger.info(f"[DB] {len(records)} records opgeslagen/geüpdatet.")
+            self.logger.debug(f"[DB] {len(records)} records opgeslagen/geüpdate")
         except Exception as e:
             session.rollback()
             self.logger.error(f"[DB] Fout bij opslaan forecast: {e}")
@@ -98,10 +98,15 @@ class Database:
         finally:
             session.close()
 
-    def get_forecasts(self, days: int = 30):
+    def get_forecast_history(self, cutoff_date: datetime):
         """Haalt historische data op als Pandas DataFrame voor training."""
+        session: Session = self.SessionLocal()
         try:
-            query = "SELECT * FROM solar_forecast ORDER BY timestamp ASC"
+            query = (
+                session.query(SolarForecast)
+                .filter(SolarForecast.timestamp >= cutoff_date)
+                .order_by(SolarForecast.timestamp.asc())
+            )
             df = pd.read_sql(query, self.engine)
 
             # Zorg dat de timestamp kolom ook echt als datetime wordt herkend door Pandas
