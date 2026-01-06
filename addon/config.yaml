@@ -12,7 +12,7 @@ arch:
 init: false
 homeassistant_api: true
 ingress: true
-ingress_port: 0
+ingress_port: 8000
 ingress_stream: true
 options:
   log_level: info

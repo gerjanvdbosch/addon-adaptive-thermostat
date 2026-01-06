@@ -62,27 +62,26 @@ def get_solar_plot(request: Request):
         # 2. Filter: Tijd >= 1u geleden EN (er is zon-output OF het is dichtbij 'nu')
         # We houden 'nu' altijd in beeld, ook als het donker is.
         mask = (df["timestamp"] >= one_hour_ago) & (
-            (df["pv_estimate"] > 0.05)
-            | (df["power_corrected"] > 0.05)
+            (df["pv_estimate"] > 0.0)
+            | (df["power_corrected"] > 0.0)
             | (df["timestamp"] <= context.now + timedelta(minutes=30))
         )
+
         df_plot = df[mask].copy()
+        df_plot["timestamp_local"] = df_plot["timestamp"].dt.tz_convert(local_tz)
 
         if df_plot.empty:
             return Response(
                 content="Geen relevante data om te tonen (nacht).", status_code=202
             )
 
-        # Converteer timestamps van de gefilterde set naar lokaal voor de X-as
-        df_plot["timestamp_local"] = df_plot["timestamp"].dt.tz_convert(local_tz)
-
         # --- PLOT GENERATIE (DPI=200) ---
         fig = Figure(figsize=(12, 7), dpi=200)
         ax = fig.add_subplot(111)
 
-        # Gebruik df["timestamp_local"] voor alle plot calls
+        # Gebruik df_plot["timestamp"] voor alle plot calls
         ax.plot(
-            df_plot["timestamp_local"],
+            df_plot["timestamp"],
             df_plot["pv_estimate"],
             "--",
             label="Raw Solcast (Forecast)",
@@ -90,7 +89,7 @@ def get_solar_plot(request: Request):
             alpha=0.4,
         )
         ax.plot(
-            df_plot["timestamp_local"],
+            df_plot["timestamp"],
             df_plot["power_ml"],
             ":",
             label="ML Model Output",
@@ -98,14 +97,14 @@ def get_solar_plot(request: Request):
             alpha=0.6,
         )
         ax.plot(
-            df_plot["timestamp_local"],
+            df_plot["timestamp"],
             df_plot["power_corrected"],
             "g-",
             linewidth=2,
             label="Corrected Solar (Nowcast)",
         )
         ax.step(
-            df_plot["timestamp_local"],
+            df_plot["timestamp"],
             df_plot["consumption"],
             where="post",
             color="red",
@@ -113,7 +112,7 @@ def get_solar_plot(request: Request):
             label="Load Projection",
         )
         ax.fill_between(
-            df_plot["timestamp_local"],
+            df_plot["timestamp"],
             0,
             df_plot["net_power"],
             color="green",
@@ -130,20 +129,21 @@ def get_solar_plot(request: Request):
 
         # Start Window
         if forecast and forecast.planned_start:
-            local_start = forecast.planned_start.astimezone(local_tz)
             # Alleen tekenen als de starttijd binnen ons gefilterde window valt
-            if local_start >= df_plot["timestamp_local"].min():
+            if forecast.planned_start >= df_plot["timestamp"].min():
                 ax.axvline(
-                    local_start,
+                    forecast.planned_start,
                     color="orange",
                     linestyle="--",
                     linewidth=2,
-                    label=f"Start ({local_start.strftime('%H:%M')})",
+                    label=f"Start ({forecast.planned_start.astimezone(local_tz).strftime('%H:%M')})",
                 )
-                duration_end = local_start + timedelta(
+                duration_end = forecast.planned_start + timedelta(
                     hours=forecaster.optimizer.duration
                 )
-                ax.axvspan(local_start, duration_end, color="orange", alpha=0.1)
+                ax.axvspan(
+                    forecast.planned_start, duration_end, color="orange", alpha=0.1
+                )
 
         # X-as formattering
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
@@ -173,11 +173,11 @@ def get_solar_plot(request: Request):
             f"Confidence: {forecast.confidence:.1%}"
         )
         props = dict(
-            boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor="silver"
+            boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="silver"
         )
         ax.text(
-            0.98,
-            0.72,
+            0.99,
+            0.80,
             info_text,
             transform=ax.transAxes,
             fontsize=9,
