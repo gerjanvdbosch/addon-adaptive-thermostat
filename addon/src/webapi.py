@@ -37,31 +37,12 @@ def get_solar_plot(request: Request):
         df = context.forecast_df.copy()
         df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz)
 
-        # --- FILTERING (TIJD EN ZON) ---
-        # 1. Maximaal 1 uur terug vanaf 'nu'
-        one_hour_ago = local_now - timedelta(hours=1)
-
-        # 2. Filter: Tijd >= 1u geleden EN (er is zon-output OF het is dichtbij 'nu')
-        # We houden 'nu' altijd in beeld, ook als het donker is.
-        mask = (df["timestamp_local"] >= one_hour_ago) & (
-            (df["pv_estimate"] > 0.0)
-            | (df["power_corrected"] > 0.0)
-            | (df["timestamp_local"] <= local_now + timedelta(minutes=30))
-        )
-
-        df_plot = df[mask].copy()
-
-        if df_plot.empty:
-            return Response(
-                content="Geen relevante data om te tonen (nacht).", status_code=202
-            )
-
         df["power_ml"] = forecaster.model.predict(df)
         df["power_corrected"] = forecaster.nowcaster.apply(
-            df, local_now, "power_ml", actual_pv=context.stable_pv
+            df, context.now, "power_ml", actual_pv=context.stable_pv
         )
 
-        # Load & Net Power
+        # Load & Net Power projectie
         baseload = forecaster.optimizer.avg_baseload
         df["consumption"] = baseload
 
@@ -76,7 +57,23 @@ def get_solar_plot(request: Request):
         df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
         df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
-        # --- PLOT GENERATIE (DPI=200) ---
+        # 3. FILTERING (Nu kan 'power_corrected' wel gebruikt worden)
+        one_hour_ago = local_now - timedelta(hours=1)
+
+        # Filter: 1u terug en alleen waar zon is of nabij 'nu'
+        mask = (df["timestamp_local"] >= one_hour_ago) & (
+            (df["pv_estimate"] > 0.0)
+            | (df["power_corrected"] > 0.0)
+            | (df["timestamp_local"] <= local_now + timedelta(hours=1))
+        )
+        df_plot = df[mask].copy()
+
+        if df_plot.empty:
+            return Response(
+                content="Geen relevante data om te tonen (nacht).", status_code=202
+            )
+
+        # --- PLOT GENERATIE ---
         fig = Figure(figsize=(12, 7), dpi=200)
         ax = fig.add_subplot(111)
 
@@ -130,20 +127,23 @@ def get_solar_plot(request: Request):
 
         # Start Window
         if forecast and forecast.planned_start:
-            # Alleen tekenen als de starttijd binnen ons gefilterde window valt
-            if forecast.planned_start >= df_plot["timestamp"].min():
+            local_start = forecast.planned_start.astimezone(local_tz)
+            # Check of startmoment in het plot-window valt
+            if local_start >= df_plot["timestamp_local"].min():
                 ax.axvline(
-                    forecast.planned_start,
+                    local_start,
                     color="orange",
                     linestyle="--",
-                    linewidth=2,
-                    label=f"Start ({forecast.planned_start.astimezone(local_tz).strftime('%H:%M')})",
+                    linewidth=2.5,
+                    label=f"Start ({local_start.strftime('%H:%M')})",
+                    zorder=9,
                 )
-                duration_end = forecast.planned_start + timedelta(
+
+                duration_end = local_start + timedelta(
                     hours=forecaster.optimizer.duration
                 )
                 ax.axvspan(
-                    forecast.planned_start, duration_end, color="orange", alpha=0.1
+                    local_start, duration_end, color="orange", alpha=0.12, zorder=1
                 )
 
         # X-as formattering
