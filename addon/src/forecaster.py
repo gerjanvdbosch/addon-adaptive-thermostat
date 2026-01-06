@@ -102,13 +102,15 @@ class SolarModel:
             "pv_estimate",
             "pv_estimate10",
             "pv_estimate90",
+            "pv_actual",
             "uncertainty",
             "temp",
-            "wind",
             "cloud",
+            "wind",
+            "precipitation",
             "radiation",
             "diffuse",
-            "irradiance",
+            "tilted",
         ]
         self.is_fitted = False
         self._load()
