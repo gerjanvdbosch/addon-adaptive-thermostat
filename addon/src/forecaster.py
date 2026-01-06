@@ -136,7 +136,7 @@ class SolarModel:
 
     def train(self, df_history: pd.DataFrame, system_max: float):
         X = self._prepare_features(df_history)
-        y = df_history["actual_pv_yield"].clip(0, system_max)
+        y = df_history["pv_actual"].clip(0, system_max)
 
         self.model = HistGradientBoostingRegressor(
             loss="absolute_error",
