@@ -1,11 +1,7 @@
 import logging
 import io
-import matplotlib
 import matplotlib.dates as mdates
 
-matplotlib.use("Agg")
-
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from fastapi import FastAPI, Response, Request
 from datetime import timedelta, datetime
@@ -45,6 +41,7 @@ def get_solar_plot(request: Request):
             df, context.now, "power_ml", actual_pv=context.stable_pv
         )
 
+        # Load & Net Power
         baseload = forecaster.optimizer.avg_baseload
         df["consumption"] = baseload
 
@@ -59,105 +56,123 @@ def get_solar_plot(request: Request):
         df.loc[df["timestamp"] < context.now, "consumption"] = context.stable_load
         df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
-        # --- PLOT GENERATIE ---
-        fig = Figure(figsize=(6, 4), dpi=200)
+        # --- FILTERING (TIJD EN ZON) ---
+        # 1. Maximaal 1 uur terug vanaf 'nu'
+        one_hour_ago = context.now - timedelta(hours=1)
+
+        # 2. Filter: Tijd >= 1u geleden EN (er is zon-output OF het is dichtbij 'nu')
+        # We houden 'nu' altijd in beeld, ook als het donker is.
+        mask = (df["timestamp"] >= one_hour_ago) & (
+            (df["pv_estimate"] > 0.05)
+            | (df["power_corrected"] > 0.05)
+            | (df["timestamp"] <= context.now + timedelta(minutes=30))
+        )
+        df_plot = df[mask].copy()
+
+        if df_plot.empty:
+            return Response(
+                content="Geen relevante data om te tonen (nacht).", status_code=202
+            )
+
+        # Lokale tijd voor de gefilterde set
+        df_plot["timestamp_local"] = df_plot["timestamp"].dt.tz_convert(local_tz)
+        local_now = context.now.astimezone(local_tz)
+
+        # --- PLOT GENERATIE (DPI=200) ---
+        fig = Figure(figsize=(12, 7), dpi=200)
         ax = fig.add_subplot(111)
 
         # Gebruik df["timestamp_local"] voor alle plot calls
         ax.plot(
-            df["timestamp_local"],
-            df["pv_estimate"],
+            df_plot["timestamp_local"],
+            df_plot["pv_estimate"],
             "--",
             label="Raw Solcast (Forecast)",
             color="gray",
             alpha=0.4,
         )
         ax.plot(
-            df["timestamp_local"],
-            df["power_ml"],
+            df_plot["timestamp_local"],
+            df_plot["power_ml"],
             ":",
             label="ML Model Output",
             color="blue",
             alpha=0.6,
         )
         ax.plot(
-            df["timestamp_local"],
-            df["power_corrected"],
+            df_plot["timestamp_local"],
+            df_plot["power_corrected"],
             "g-",
             linewidth=2,
             label="Corrected Solar (Nowcast)",
         )
         ax.step(
-            df["timestamp_local"],
-            df["consumption"],
+            df_plot["timestamp_local"],
+            df_plot["consumption"],
             where="post",
             color="red",
             linewidth=2,
             label="Load Projection",
         )
         ax.fill_between(
-            df["timestamp_local"],
+            df_plot["timestamp_local"],
             0,
-            df["net_power"],
+            df_plot["net_power"],
             color="green",
             alpha=0.15,
             label="Netto Solar",
         )
 
-        # Markeer "NU" in lokale tijd
-        ax.axvline(local_now, color="black", linestyle="-", alpha=0.5)
-        y_max = (
-            max(df["pv_estimate"].max(), df["consumption"].max()) * 1.2
-        )  # Iets meer ruimte bovenin
-        ax.text(local_now, y_max * 0.95, " NU", color="black", fontweight="bold")
+        # "NU" lijn
+        ax.axvline(local_now, color="black", linestyle="-", alpha=0.6, linewidth=1)
+        y_max = max(df_plot["pv_estimate"].max(), df_plot["consumption"].max()) * 1.35
+        ax.text(
+            local_now, y_max * 0.95, " NU", color="black", fontweight="bold", fontsize=9
+        )
 
-        # Markeer geplande start
+        # Start Window
         if forecast and forecast.planned_start:
             local_start = forecast.planned_start.astimezone(local_tz)
-            ax.axvline(
-                local_start,
-                color="orange",
-                linestyle="--",
-                linewidth=2,
-                label=f"Start ({local_start.strftime('%H:%M')})",
-            )
+            # Alleen tekenen als de starttijd binnen ons gefilterde window valt
+            if local_start >= df_plot["timestamp_local"].min():
+                ax.axvline(
+                    local_start,
+                    color="orange",
+                    linestyle="--",
+                    linewidth=2,
+                    label=f"Start ({local_start.strftime('%H:%M')})",
+                )
+                duration_end = local_start + timedelta(
+                    hours=forecaster.optimizer.duration
+                )
+                ax.axvspan(local_start, duration_end, color="orange", alpha=0.1)
 
-            duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
-            ax.axvspan(local_start, duration_end, color="orange", alpha=0.1)
-
-        # --- AS FORMATTERING (Alleen tijd) ---
+        # X-as formattering
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         ax.set_title(
             f"Solar Optimizer: {forecast.action.value}\n{forecast.reason}",
-            fontsize=12,
+            fontsize=11,
             pad=15,
         )
         ax.set_ylabel("Vermogen (kW)")
         ax.set_xlabel("Tijd")
 
-        # --- RECHTSBOVEN: LEGENDA BOVENAAN ---
+        # Legenda (Rechtsboven)
         ax.legend(
-            loc="upper right",
-            bbox_to_anchor=(0.98, 0.98),
-            fontsize=9,
-            frameon=True,
-            facecolor="white",
-            framealpha=0.8,
+            loc="upper right", bbox_to_anchor=(0.98, 0.98), fontsize=9, framealpha=0.8
         )
 
-        # --- RECHTSBOVEN: INFOBOX ONDER LEGENDA ---
+        # Infobox (Onder Legenda)
         info_text = (
             f"PV Nu: {context.stable_pv:.2f} kW\n"
             f"Load Nu: {context.stable_load:.2f} kW\n"
             f"Bias: {forecast.current_bias:.2f}x\n"
             f"Confidence: {forecast.confidence:.1%}"
         )
-
-        # De y-waarde 0.75 plaatst de box net onder een standaard legenda
         props = dict(boxstyle="round", facecolor="white", alpha=0.8, edgecolor="silver")
         ax.text(
             0.98,
-            0.70,
+            0.72,
             info_text,
             transform=ax.transAxes,
             fontsize=10,
@@ -166,15 +181,17 @@ def get_solar_plot(request: Request):
             bbox=props,
         )
 
-        ax.grid(True, alpha=0.2)
+        ax.grid(True, alpha=0.2, linestyle=":")
         ax.set_ylim(0, y_max)
         fig.autofmt_xdate()
-        fig.tight_layout()
 
+        # EXPORT
         output = io.BytesIO()
-        FigureCanvas(fig).print_png(output)
+        fig.savefig(output, format="png", dpi=200, bbox_inches="tight")
+        output.seek(0)
 
         return Response(content=output.getvalue(), media_type="image/png")
+
     except Exception as e:
-        logger.error(f"[WebApi] Fout bij genereren grafiek: {e}")
+        logger.error(f"[WebApi] Grafiek fout: {e}", exc_info=True)
         return {"error": str(e)}
