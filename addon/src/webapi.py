@@ -4,7 +4,8 @@ import matplotlib.dates as mdates
 
 from matplotlib.figure import Figure
 from fastapi import FastAPI, Response, Request
-from datetime import timedelta, datetime
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,11 @@ def get_solar_plot(request: Request):
                 status_code=202,
             )
 
-        local_tz = datetime.now().astimezone().tzinfo
+        local_tz = ZoneInfo("Europe/Amsterdam")
         local_now = context.now.astimezone(local_tz)
+        logger.info(
+            f"[WebApi] Generating solar forecast plot for {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+        )
 
         df = context.forecast_df.copy()
         df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz)
@@ -177,7 +181,7 @@ def get_solar_plot(request: Request):
             boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="silver"
         )
         ax.text(
-            1.0,
+            0.95,
             0.78,
             info_text,
             transform=ax.transAxes,
