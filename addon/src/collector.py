@@ -8,14 +8,18 @@ from client import HAClient
 from config import Config
 from collections import deque
 from weather import WeatherClient
+from database import Database
 
 logger = logging.getLogger(__name__)
 
 
 class Collector:
-    def __init__(self, client: HAClient, context: Context, config: Config):
+    def __init__(
+        self, client: HAClient, database: Database, context: Context, config: Config
+    ):
         self.weather = WeatherClient(config)
         self.client = client
+        self.database = database
         self.context = context
         self.config = config
 
@@ -57,6 +61,7 @@ class Collector:
         )
 
         self.context.forecast_df = df_today
+        self.database.save_forecast(df_today)
 
         logger.info("[Collector] Forecast updated")
 
@@ -90,7 +95,9 @@ class Collector:
             if self.context.slot_samples:
                 avg_pv = float(np.mean(self.context.slot_samples))
                 # Sla het gemiddelde op voor het AFGELOPEN kwartier
-                # upsert_solar_record(self.current_slot_start, actual_yield=avg_pv)
+                self.database.update_pv_actual(
+                    self.context.current_slot_start, yield_kw=avg_pv
+                )
                 logger.info(
                     f"[Collector] Actual yield opgeslagen voor {self.context.current_slot_start.strftime('%H:%M')}: {avg_pv:.2f}kW"
                 )

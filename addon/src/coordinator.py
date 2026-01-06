@@ -11,6 +11,7 @@ from context import Context
 from collector import Collector
 from client import HAClient
 from planner import Planner
+from database import Database
 from dhw import DhwMachine
 from climate import ClimateMachine
 from webapi import api
@@ -62,7 +63,8 @@ if __name__ == "__main__":
         client = HAClient()
         config = Config.load(client)
         context = Context(now=datetime.now(timezone.utc))
-        collector = Collector(client, context, config)
+        database = Database(config)
+        collector = Collector(client, database, context, config)
         coordinator = Coordinator(context, config, collector)
 
         webapi = threading.Thread(target=coordinator.start_api, daemon=True)
