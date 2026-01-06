@@ -37,8 +37,7 @@ def add_cyclic_time_features(df: pd.DataFrame, col_name="timestamp") -> pd.DataF
     tz = datetime.now().astimezone().tzinfo
 
     df = df.copy()
-    df[col_name] = pd.to_datetime(df[col_name])
-    dt = df[col_name].dt.tz_convert(tz)
+    dt = df[col_name].dt.tz_convert(tz).dt
 
     # 1. Tijd van de dag (0..24 uur)
     # We voegen minuten toe voor precisie (bv. 14:30 wordt 14.5)
