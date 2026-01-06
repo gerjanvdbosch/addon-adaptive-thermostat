@@ -174,7 +174,7 @@ def get_solar_plot(request: Request):
         # Legenda (Rechtsboven)
         ax.legend(
             loc="upper right",
-            bbox_to_anchor=(0.9, 0.9),
+            bbox_to_anchor=(1.0, 1.0),
             fontsize=9,
             framealpha=0.8,
             edgecolor="silver",

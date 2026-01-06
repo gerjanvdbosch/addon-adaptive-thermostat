@@ -72,7 +72,7 @@
     </header>
 
     <main class="card">
-        <img src="{{ url_for('get_solar_plot') }}" alt="Solar Forecast" class="forecast-img">
+        <img src="{{ request.url_for('get_solar_plot') }}" alt="Solar Forecast" class="forecast-img">
     </main>
 
     <footer class="footer">
