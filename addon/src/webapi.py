@@ -33,18 +33,39 @@ def get_solar_plot(request: Request):
 
         local_tz = datetime.now().astimezone().tzinfo
         local_now = context.now.astimezone(local_tz)
+
         df = context.forecast_df.copy()
+        df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz)
+
+        # --- FILTERING (TIJD EN ZON) ---
+        # 1. Maximaal 1 uur terug vanaf 'nu'
+        one_hour_ago = local_now - timedelta(hours=1)
+
+        # 2. Filter: Tijd >= 1u geleden EN (er is zon-output OF het is dichtbij 'nu')
+        # We houden 'nu' altijd in beeld, ook als het donker is.
+        mask = (df["timestamp_local"] >= one_hour_ago) & (
+            (df["pv_estimate"] > 0.0)
+            | (df["power_corrected"] > 0.0)
+            | (df["timestamp_local"] <= local_now + timedelta(minutes=30))
+        )
+
+        df_plot = df[mask].copy()
+
+        if df_plot.empty:
+            return Response(
+                content="Geen relevante data om te tonen (nacht).", status_code=202
+            )
 
         df["power_ml"] = forecaster.model.predict(df)
         df["power_corrected"] = forecaster.nowcaster.apply(
-            df, context.now, "power_ml", actual_pv=context.stable_pv
+            df, local_now, "power_ml", actual_pv=context.stable_pv
         )
 
         # Load & Net Power
         baseload = forecaster.optimizer.avg_baseload
         df["consumption"] = baseload
 
-        future_mask = df["timestamp"] >= context.now
+        future_mask = df["timestamp_local"] >= local_now
         future_indices = df.index[future_mask]
         decay_steps = 3
         for i, idx in enumerate(future_indices[: decay_steps + 1]):
@@ -52,28 +73,8 @@ def get_solar_plot(request: Request):
             blended_load = (context.stable_load * factor) + (baseload * (1 - factor))
             df.at[idx, "consumption"] = max(blended_load, baseload)
 
-        df.loc[df["timestamp"] < context.now, "consumption"] = context.stable_load
+        df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
         df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
-
-        # --- FILTERING (TIJD EN ZON) ---
-        # 1. Maximaal 1 uur terug vanaf 'nu'
-        one_hour_ago = context.now - timedelta(hours=1)
-
-        # 2. Filter: Tijd >= 1u geleden EN (er is zon-output OF het is dichtbij 'nu')
-        # We houden 'nu' altijd in beeld, ook als het donker is.
-        mask = (df["timestamp"] >= one_hour_ago) & (
-            (df["pv_estimate"] > 0.0)
-            | (df["power_corrected"] > 0.0)
-            | (df["timestamp"] <= context.now + timedelta(minutes=30))
-        )
-
-        df_plot = df[mask].copy()
-        df_plot["timestamp_local"] = df_plot["timestamp"].dt.tz_convert(local_tz)
-
-        if df_plot.empty:
-            return Response(
-                content="Geen relevante data om te tonen (nacht).", status_code=202
-            )
 
         # --- PLOT GENERATIE (DPI=200) ---
         fig = Figure(figsize=(12, 7), dpi=200)
@@ -81,7 +82,7 @@ def get_solar_plot(request: Request):
 
         # Gebruik df_plot["timestamp"] voor alle plot calls
         ax.plot(
-            df_plot["timestamp"],
+            df_plot["timestamp_local"],
             df_plot["pv_estimate"],
             "--",
             label="Raw Solcast (Forecast)",
@@ -89,22 +90,22 @@ def get_solar_plot(request: Request):
             alpha=0.4,
         )
         ax.plot(
-            df_plot["timestamp"],
+            df_plot["timestamp_local"],
             df_plot["power_ml"],
             ":",
-            label="ML Model Output",
+            label="Model Correction",
             color="blue",
             alpha=0.6,
         )
         ax.plot(
-            df_plot["timestamp"],
+            df_plot["timestamp_local"],
             df_plot["power_corrected"],
             "g-",
             linewidth=2,
             label="Corrected Solar (Nowcast)",
         )
         ax.step(
-            df_plot["timestamp"],
+            df_plot["timestamp_local"],
             df_plot["consumption"],
             where="post",
             color="red",
@@ -112,7 +113,7 @@ def get_solar_plot(request: Request):
             label="Load Projection",
         )
         ax.fill_between(
-            df_plot["timestamp"],
+            df_plot["timestamp_local"],
             0,
             df_plot["net_power"],
             color="green",
@@ -176,8 +177,8 @@ def get_solar_plot(request: Request):
             boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="silver"
         )
         ax.text(
-            0.99,
-            0.80,
+            1.0,
+            0.78,
             info_text,
             transform=ax.transAxes,
             fontsize=9,
