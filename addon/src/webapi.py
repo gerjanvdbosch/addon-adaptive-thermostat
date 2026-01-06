@@ -64,7 +64,7 @@ def _get_solar_forecast_image(request: Request):
     df["consumption"] = baseload
 
     future_mask = df["timestamp_local"] >= local_now
-    future_indices = df.index[future_mask]
+    future_indices = df.index[future_mask].copy()
     decay_steps = 2
     for i, idx in enumerate(future_indices[: decay_steps + 1]):
         factor = 1.0 - (i / decay_steps)
@@ -91,7 +91,7 @@ def _get_solar_forecast_image(request: Request):
         )
 
     # --- PLOT GENERATIE ---
-    fig = Figure(figsize=(12, 7), dpi=200)
+    fig = Figure(figsize=(8, 5), dpi=150)
     ax = fig.add_subplot(111)
 
     # Gebruik df_plot["timestamp"] voor alle plot calls
@@ -219,7 +219,7 @@ def _get_solar_forecast_image(request: Request):
 
     # EXPORT
     output = io.BytesIO()
-    fig.savefig(output, format="png", dpi=200, bbox_inches="tight")
+    fig.savefig(output, format="png", dpi=150, bbox_inches="tight")
     output.seek(0)
 
     return output.getvalue()
