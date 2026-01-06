@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Float, DateTime
+from sqlalchemy import create_engine, Column, Float, DateTime, select
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from config import Config
@@ -100,14 +100,14 @@ class Database:
 
     def get_forecast_history(self, cutoff_date: datetime):
         """Haalt historische data op als Pandas DataFrame voor training."""
-        session: Session = self.SessionLocal()
         try:
-            query = (
-                session.query(SolarForecast)
-                .filter(SolarForecast.timestamp >= cutoff_date)
+            stmt = (
+                select(SolarForecast)
+                .where(SolarForecast.timestamp >= cutoff_date)
                 .order_by(SolarForecast.timestamp.asc())
             )
-            df = pd.read_sql(query, self.engine)
+            with self.engine.connect() as conn:
+                df = pd.read_sql(stmt, conn)
 
             # Zorg dat de timestamp kolom ook echt als datetime wordt herkend door Pandas
             if not df.empty:
