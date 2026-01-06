@@ -30,7 +30,7 @@ class Config:
 
     sensor_home: str = "zone.home"
 
-    datebase_path: str = "/config/db/database.sqlite"
+    database_path: str = "/config/db/database.sqlite"
     solar_model_path: str = "/config/models/solar_model.joblib"
 
     webapi_host: str = "0.0.0.0"
