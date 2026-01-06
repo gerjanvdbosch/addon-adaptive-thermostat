@@ -155,7 +155,7 @@ def _get_solar_forecast_image(request: Request):
     ax.step(
         df_plot["timestamp_local"],
         df_plot["consumption"],
-        where="post",
+        where="pre",
         color="red",
         linewidth=2,
         label="Load Projection",

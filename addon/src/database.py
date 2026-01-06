@@ -111,7 +111,7 @@ class Database:
 
             # Zorg dat de timestamp kolom ook echt als datetime wordt herkend door Pandas
             if not df.empty:
-                df["timestamp"] = pd.to_datetime(df["timestamp"])
+                df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
             return df
         except Exception as e:
