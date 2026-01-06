@@ -55,11 +55,15 @@ class Database:
         session: Session = self.SessionLocal()
         try:
             # We zetten de DataFrame om naar een lijst van dictionaries
+            valid_columns = {c.key for c in SolarForecast.__table__.columns}
             records = df.to_dict(orient="records")
             for record in records:
                 # 'merge' kijkt naar de primary key (timestamp).
                 # Bestaat hij al? Dan update. Bestaat hij niet? Dan insert.
-                obj = SolarForecast(**record)
+                filtered_record = {
+                    k: v for k, v in record.items() if k in valid_columns
+                }
+                obj = SolarForecast(**filtered_record)
                 session.merge(obj)
 
             session.commit()
