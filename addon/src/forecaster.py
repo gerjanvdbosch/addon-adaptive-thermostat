@@ -137,8 +137,10 @@ class SolarModel:
         return X.apply(pd.to_numeric, errors="coerce").fillna(0)
 
     def train(self, df_history: pd.DataFrame, system_max: float):
+        df_train = df_history.dropna(subset=["pv_actual"]).copy()
+
         X = self._prepare_features(df_history)
-        y = df_history["pv_actual"].clip(0, system_max)
+        y = df_train["pv_actual"].clip(0, system_max)
 
         self.model = HistGradientBoostingRegressor(
             loss="absolute_error",
