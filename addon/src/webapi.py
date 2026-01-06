@@ -32,9 +32,8 @@ def get_solar_plot(request: Request):
             )
 
         local_tz = datetime.now().astimezone().tzinfo
-        df = context.forecast_df.copy()
-        df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz)
         local_now = context.now.astimezone(local_tz)
+        df = context.forecast_df.copy()
 
         df["power_ml"] = forecaster.model.predict(df)
         df["power_corrected"] = forecaster.nowcaster.apply(
@@ -74,9 +73,8 @@ def get_solar_plot(request: Request):
                 content="Geen relevante data om te tonen (nacht).", status_code=202
             )
 
-        # Lokale tijd voor de gefilterde set
+        # Converteer timestamps van de gefilterde set naar lokaal voor de X-as
         df_plot["timestamp_local"] = df_plot["timestamp"].dt.tz_convert(local_tz)
-        local_now = context.now.astimezone(local_tz)
 
         # --- PLOT GENERATIE (DPI=200) ---
         fig = Figure(figsize=(12, 7), dpi=200)
@@ -178,8 +176,8 @@ def get_solar_plot(request: Request):
             boxstyle="round,pad=0.4", facecolor="white", alpha=0.8, edgecolor="silver"
         )
         ax.text(
-            1.0,
-            0.76,
+            0.98,
+            0.72,
             info_text,
             transform=ax.transAxes,
             fontsize=9,
