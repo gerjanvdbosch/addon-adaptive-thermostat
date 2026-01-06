@@ -2,6 +2,7 @@ name: "Home Optimizer"
 version: "0.5"
 slug: "home-optimizer"
 description: "A scikit-learn based home optimizer addon for Home Assistant"
+webui: "http://[HOST]:[PORT:8000]/solar/forecast"
 arch:
   - armhf
   - armv7
@@ -10,6 +11,9 @@ arch:
   - i386
 init: false
 homeassistant_api: true
+ingress: true
+ingress_port: 0
+ingress_stream: true
 options:
   log_level: info
 schema:

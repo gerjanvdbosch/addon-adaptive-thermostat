@@ -21,7 +21,7 @@ def index():
     return {"status": "ok"}
 
 
-@api.get("/solar/plot")
+@api.get("/solar/forecast")
 def get_solar_plot(request: Request):
     try:
         coordinator = request.app.state.coordinator
@@ -60,7 +60,7 @@ def get_solar_plot(request: Request):
         df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
         # --- PLOT GENERATIE ---
-        fig = Figure(figsize=(12, 7))
+        fig = Figure(figsize=(6, 4), dpi=200)
         ax = fig.add_subplot(111)
 
         # Gebruik df["timestamp_local"] voor alle plot calls
@@ -172,7 +172,7 @@ def get_solar_plot(request: Request):
         fig.tight_layout()
 
         output = io.BytesIO()
-        FigureCanvas(fig).print_png(output, dpi=200)
+        FigureCanvas(fig).print_png(output)
 
         return Response(content=output.getvalue(), media_type="image/png")
     except Exception as e:
