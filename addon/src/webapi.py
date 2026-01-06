@@ -174,32 +174,11 @@ def get_solar_plot(request: Request):
         # Legenda (Rechtsboven)
         ax.legend(
             loc="upper right",
-            bbox_to_anchor=(1.0, 1.0),
+            bbox_to_anchor=(0.9, 0.9),
             fontsize=9,
             framealpha=0.8,
             edgecolor="silver",
             borderaxespad=0.2,
-        )
-
-        # Infobox (Onder Legenda)
-        info_text = (
-            f"PV Nu: {context.stable_pv:.2f} kW\n"
-            f"Load Nu: {context.stable_load:.2f} kW\n"
-            f"Bias: {forecast.current_bias:.2f}x\n"
-            f"Confidence: {forecast.confidence:.1%}"
-        )
-        props = dict(
-            boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="silver"
-        )
-        ax.text(
-            0.99,
-            0.78,
-            info_text,
-            transform=ax.transAxes,
-            fontsize=9,
-            verticalalignment="top",
-            horizontalalignment="right",
-            bbox=props,
         )
 
         ax.grid(True, alpha=0.2, linestyle=":")
