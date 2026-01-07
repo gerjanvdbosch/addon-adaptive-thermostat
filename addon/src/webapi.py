@@ -45,7 +45,7 @@ def index(request: Request):
             "Prognose Nu": f"{forecast.energy_now:.2f} kW",
             "Prognose Beste": f"{forecast.energy_best:.2f} kW",
             "Opp. Kosten": f"{forecast.opportunity_cost:.3f}",
-            "Betrouwbaarheid": f"{forecast.confidence:.2f}",  # of * 100 voor %
+            "Betrouwbaarheid": f"{forecast.confidence * 100:.1f} %",
             "Bias": f"{forecast.current_bias:.2f}",
             "Geplande Start": start_str,
         }
@@ -225,9 +225,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
     y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.25
 
     fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
         title=dict(
-            text=f"Solar Optimizer: {forecast.action.value}<br><sup>{forecast.reason}</sup>",
-            x=0.05,
+            text="Solar Prognose",
         ),
         xaxis=dict(title="Tijd", showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
         yaxis=dict(
@@ -239,7 +241,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=20, t=80, b=40),
         height=500,
-        template="plotly_dark",  # Schone look
         hovermode="x unified",  # Laat alle waardes zien op 1 verticale lijn
     )
 
