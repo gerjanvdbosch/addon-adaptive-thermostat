@@ -158,12 +158,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=df_hist_plot["timestamp_local"],
                 y=df_hist_plot["pv_actual"],
                 mode="lines",
-                name="Historie",
-                # line=dict(color="#ffffff", width=1.5),
-                line=dict(color="#ffa500", width=1.5),
+                name="PV energy",
+                line=dict(color="#ffffff", width=1.5),
                 fill="tozeroy",
-                fillcolor="rgba(255, 165, 0, 0.15)",
-                # fillcolor="rgba(255, 255, 255, 0.05)",
+                fillcolor="rgba(255, 255, 255, 0.05)",
                 opacity=0.8,
             )
         )
@@ -224,15 +222,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
     fig.add_vline(
         x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
     )
-    fig.add_shape(
-        type="line",
-        x0=df["timestamp_local"].min(),
-        y0=context.stable_pv,
-        x1=local_now,
-        y1=context.stable_pv,
-        line=dict(color="#2ca02c", width=1, dash="dot"),
-        opacity=0.4,
-    )
 
     # Start Window Logic
     if forecast and forecast.planned_start:
@@ -244,10 +233,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=local_start,
                 line_width=2,
                 line_dash="dash",
-                line_color="rgb(68, 115, 158)",
+                line_color="#ffa500",
                 annotation_text="Start",
                 annotation_position="top left",
-                annotation_font_color="rgb(68, 115, 158)",
+                annotation_font_color="#ffa500",
             )
 
             # Gearceerd gebied (Duration)
@@ -255,8 +244,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
             fig.add_vrect(
                 x0=local_start,
                 x1=duration_end,
-                fillcolor="rgb(68, 115, 158)",
-                opacity=0.15,
+                fillcolor="#ffa500",
+                opacity=0.2,
                 layer="below",
                 line_width=0,
             )
