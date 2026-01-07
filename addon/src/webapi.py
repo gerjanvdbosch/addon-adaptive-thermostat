@@ -114,7 +114,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=1)
 
-    df_hist = database.get_forecast_history(cutoff_date)
+    df_hist = database.get_forecast_history(cutoff_date.replace(tzinfo=None))
     df_hist_plot = pd.DataFrame()
 
     logger.info(f"History DataFrame has {len(df_hist)} rows.")
