@@ -173,8 +173,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=[local_now],
             y=[context.stable_pv],
             mode="markers",
-            name=f"Actueel ({context.stable_pv:.2f} kW)",
-            marker=dict(color="#2ca02c", size=12, line=dict(color="white", width=2)),
+            name="PV actual",
+            marker=dict(color="#ffa500", size=12, line=dict(color="white", width=2)),
             zorder=10,
         )
     )
@@ -186,7 +186,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=df["power_corrected"],
             mode="lines",
             name="Solar Optimizer",
-            line=dict(color="#2ca02c", width=2),  # Matplotlib 'g-' equivalent
+            line=dict(color="#ffa500", width=2),  # Matplotlib 'g-' equivalent
         )
     )
 
@@ -233,10 +233,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=local_start,
                 line_width=2,
                 line_dash="dash",
-                line_color="#ffa500",
+                line_color="#2ca02c",
                 annotation_text="Start",
                 annotation_position="top left",
-                annotation_font_color="#ffa500",
+                annotation_font_color="#2ca02c",
             )
 
             # Gearceerd gebied (Duration)
@@ -244,14 +244,15 @@ def _get_solar_forecast_plot(request: Request) -> str:
             fig.add_vrect(
                 x0=local_start,
                 x1=duration_end,
-                fillcolor="#ffa500",
+                fillcolor="#2ca02c",
                 opacity=0.2,
                 layer="below",
                 line_width=0,
             )
 
     # Algemene Layout
-    y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.25
+    # y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.25
+    y_max = max(df["pv_estimate"].max()) * 1.25
 
     fig.update_layout(
         template="plotly_dark",
