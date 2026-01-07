@@ -104,7 +104,6 @@ class Database:
             stmt = (
                 select(SolarForecast)
                 .where(SolarForecast.timestamp >= cutoff_date)
-                .where(SolarForecast.pv_actual.isnot(None))
                 .order_by(SolarForecast.timestamp.asc())
             )
             with self.engine.connect() as conn:
