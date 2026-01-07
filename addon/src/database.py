@@ -81,15 +81,15 @@ class Database:
             # Zoek het record voor dit kwartier
             record = (
                 session.query(SolarForecast)
-                .filter(SolarForecast.timestamp == ts)
+                .where(SolarForecast.timestamp == ts)
                 .first()
             )
             if record:
-                record.actual_yield = yield_kw
+                record.pv_actual = yield_kw
                 session.commit()
             else:
                 # Als het record nog niet bestaat (bijv. geen forecast), maken we een leeg record aan
-                new_record = SolarForecast(timestamp=ts, actual_yield=yield_kw)
+                new_record = SolarForecast(timestamp=ts, pv_actual=yield_kw)
                 session.add(new_record)
                 session.commit()
         except Exception as e:
@@ -104,6 +104,7 @@ class Database:
             stmt = (
                 select(SolarForecast)
                 .where(SolarForecast.timestamp >= cutoff_date)
+                .where(SolarForecast.pv_actual.isnot(None))
                 .order_by(SolarForecast.timestamp.asc())
             )
             with self.engine.connect() as conn:

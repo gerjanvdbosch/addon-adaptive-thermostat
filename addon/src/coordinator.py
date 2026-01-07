@@ -47,7 +47,10 @@ class Coordinator:
     def train(self):
         cutoff_date = self.context.now - timedelta(days=730)
         history = self.collector.database.get_forecast_history(cutoff_date)
+
         self.planner.forecaster.model.train(history, system_max=self.config.pv_max_kw)
+
+        logger.info(f"[Coordinator] Trained model with {len(history)} rows of history")
 
     def start_api(self):
         api.state.coordinator = self

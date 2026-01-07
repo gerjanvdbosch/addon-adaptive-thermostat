@@ -110,11 +110,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
     # --- 2. PLOT GENERATIE (PLOTLY) ---
-    cutoff_date = context.now.replace(
+    cutoff_date = local_now.replace(
         hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(days=1)
+    ) - timedelta(days=10)
 
-    df_hist = database.get_forecast_history(cutoff_date.replace(tzinfo=None))
+    df_hist = database.get_forecast_history(cutoff_date)
     df_hist_plot = pd.DataFrame()
 
     logger.info(f"History DataFrame has {len(df_hist)} rows.")
