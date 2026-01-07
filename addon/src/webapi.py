@@ -1,11 +1,9 @@
 import logging
-import io
-import matplotlib.dates as mdates
-import base64
+import plotly.graph_objects as go
+import plotly.io as pio
 
-from matplotlib.figure import Figure
 from fastapi.templating import Jinja2Templates
-from fastapi import FastAPI, Response, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from datetime import timedelta, datetime
 from pathlib import Path
@@ -15,42 +13,42 @@ logger = logging.getLogger(__name__)
 
 api = FastAPI(title="Home Optimizer API")
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @api.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    image = _get_solar_forecast_image(request)
-    image_b64 = base64.b64encode(image).decode("utf-8")
+    # Haal de HTML div string op in plaats van een plaatje
+    plot_html = _get_solar_forecast_plot(request)
+
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "forecast_image": image_b64},
+        {
+            "request": request,
+            # We geven nu de HTML string door aan de template
+            "forecast_plot": plot_html,
+        },
     )
 
 
-@api.get("/solar/forecast", response_class=Response)
-def get_solar_plot(request: Request):
-    image = _get_solar_forecast_image(request)
-    return Response(content=image, media_type="image/png")
-
-
-def _get_solar_forecast_image(request: Request):
+def _get_solar_forecast_plot(request: Request) -> str:
+    """
+    Genereert een interactieve Plotly grafiek en retourneert deze als HTML string (div).
+    """
     coordinator = request.app.state.coordinator
     context = coordinator.context
     forecaster = coordinator.planner.forecaster
     forecast = context.forecast
 
+    # Check of er data is
     if not hasattr(context, "forecast") or context.forecast is None:
-        return Response(
-            content="Geen data beschikbaar. Wacht op de eerste meting (max 1 minuut).",
-            status_code=202,
-        )
+        return "<div class='alert alert-info'>Geen data beschikbaar. Wacht op de eerste meting (max 1 minuut).</div>"
 
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
 
+    # --- 1. DATA VOORBEREIDING (Identiek aan origineel) ---
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
@@ -74,10 +72,8 @@ def _get_solar_forecast_image(request: Request):
     df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
     df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
-    # 3. FILTERING (Nu kan 'power_corrected' wel gebruikt worden)
+    # Filtering
     one_hour_ago = local_now - timedelta(hours=1)
-
-    # Filter: 1u terug en alleen waar zon is of nabij 'nu'
     mask = (df["timestamp_local"] >= one_hour_ago) & (
         (df["pv_estimate"] > 0.0)
         | (df["power_corrected"] > 0.0)
@@ -86,140 +82,156 @@ def _get_solar_forecast_image(request: Request):
     df_plot = df[mask].copy()
 
     if df_plot.empty:
-        return Response(
-            content="Geen relevante data om te tonen (nacht).", status_code=202
+        return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
+
+    # --- 2. PLOT GENERATIE (PLOTLY) ---
+
+    fig = go.Figure()
+
+    # A. Raw Solcast (Grijs, dashed)
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["timestamp_local"],
+            y=df_plot["pv_estimate"],
+            mode="lines",
+            name="Raw Solcast",
+            line=dict(color="gray", dash="dash", width=1),
+            opacity=0.6,
         )
+    )
 
-    # --- PLOT GENERATIE ---
-    fig = Figure(figsize=(8, 5), dpi=150)
-    ax = fig.add_subplot(111)
+    # B. Model Correction (Blauw, dot)
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["timestamp_local"],
+            y=df_plot["power_ml"],
+            mode="lines",
+            name="Model Correction",
+            line=dict(color="blue", dash="dot", width=1),
+            opacity=0.6,
+            visible="legendonly",  # Standaard uit, kan aangeklikt worden
+        )
+    )
 
-    # Gebruik df_plot["timestamp"] voor alle plot calls
-    ax.plot(
-        df_plot["timestamp_local"],
-        df_plot["pv_estimate"],
-        "--",
-        label="Raw Solcast (Forecast)",
-        color="gray",
-        alpha=0.4,
+    # C. Actuele PV Meting (Stip)
+    # We tekenen alleen de stip, de horizontale stippellijn doen we via shapes of een losse trace als je wilt
+    fig.add_trace(
+        go.Scatter(
+            x=[local_now],
+            y=[context.stable_pv],
+            mode="markers",
+            name=f"Actueel ({context.stable_pv:.2f} kW)",
+            marker=dict(color="darkgreen", size=12, line=dict(color="white", width=2)),
+            zorder=10,
+        )
     )
-    ax.plot(
-        df_plot["timestamp_local"],
-        df_plot["power_ml"],
-        ":",
-        label="Model Correction",
-        color="blue",
-        alpha=0.6,
+
+    # D. Corrected Solar (Solid Green)
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["timestamp_local"],
+            y=df_plot["power_corrected"],
+            mode="lines",
+            name="Solar (Nowcast)",
+            line=dict(color="#2ca02c", width=3),  # Matplotlib 'g-' equivalent
+        )
     )
-    ax.axhline(
-        y=context.stable_pv,
-        color="darkgreen",
-        linestyle=":",
-        alpha=0.5,
-        xmin=0.05,
-        xmax=0.95,
+
+    # E. Load Projection (Rood, Step)
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["timestamp_local"],
+            y=df_plot["consumption"],
+            mode="lines",
+            name="Load Projection",
+            line=dict(color="red", width=2, shape="hv"),  # shape='hv' is step-post
+        )
     )
-    # En een duidelijke marker op de NU-lijn
+
+    # F. Netto Solar (Filled Area)
+    # In Plotly is fill='tozeroy' makkelijk, maar om specifiek netto te kleuren gebruiken we de berekende kolom
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["timestamp_local"],
+            y=df_plot["net_power"],
+            mode="lines",  # Geen markers
+            name="Netto Solar",
+            line=dict(width=0),  # Geen rand
+            fill="tozeroy",
+            fillcolor="rgba(0, 128, 0, 0.15)",  # Green met alpha
+            hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
+        )
+    )
+
+    # --- LAYOUT & SHAPES ---
+
+    # Verticale lijn voor NU
+    fig.add_vline(
+        x=local_now, line_width=1, line_dash="solid", line_color="black", opacity=0.5
+    )
+
+    # Horizontale lijn huidige meting (van begin grafiek tot nu)
     x_min_plot = df_plot["timestamp_local"].min()
-
-    # Teken de horizontale lijn:
-    # y = de waarde, xmin = begin van de grafiek, xmax = nu
-    ax.hlines(
-        y=context.stable_pv,
-        xmin=x_min_plot,
-        xmax=local_now,
-        color="darkgreen",
-        linestyle=":",
-        alpha=0.4,
-        linewidth=1,
+    fig.add_shape(
+        type="line",
+        x0=x_min_plot,
+        y0=context.stable_pv,
+        x1=local_now,
+        y1=context.stable_pv,
+        line=dict(color="darkgreen", width=1, dash="dot"),
+        opacity=0.5,
     )
 
-    # De Stip (Huidige Meting) exact op het eindpunt van de stippellijn
-    ax.scatter(
-        local_now,
-        context.stable_pv,
-        color="darkgreen",
-        s=120,
-        edgecolors="white",
-        linewidths=1.5,
-        zorder=15,
-        label=f"Actuele PV Meting ({context.stable_pv:.2f} kW)",
-    )
-    ax.plot(
-        df_plot["timestamp_local"],
-        df_plot["power_corrected"],
-        "g-",
-        linewidth=2,
-        label="Corrected Solar (Nowcast)",
-    )
-    ax.step(
-        df_plot["timestamp_local"],
-        df_plot["consumption"],
-        where="post",
-        color="red",
-        linewidth=2,
-        label="Load Projection",
-    )
-    ax.fill_between(
-        df_plot["timestamp_local"],
-        0,
-        df_plot["net_power"],
-        color="green",
-        alpha=0.15,
-        label="Netto Solar",
-    )
-
-    # "NU" lijn
-    ax.axvline(local_now, color="black", linestyle="-", alpha=0.6, linewidth=1)
-    y_max = max(df_plot["pv_estimate"].max(), df_plot["consumption"].max()) * 1.35
-    ax.text(
-        local_now, y_max * 0.95, " NU", color="black", fontweight="bold", fontsize=9
-    )
-
-    # Start Window
+    # Start Window Logic
     if forecast and forecast.planned_start:
         local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
-        # Check of startmoment in het plot-window valt
-        if local_start >= df_plot["timestamp_local"].min():
-            ax.axvline(
-                local_start,
-                color="orange",
-                linestyle="--",
-                linewidth=2.5,
-                label=f"Start ({local_start.strftime('%H:%M')})",
-                zorder=9,
+
+        if local_start >= x_min_plot:
+            # Verticale lijn start
+            fig.add_vline(
+                x=local_start,
+                line_width=2,
+                line_dash="dash",
+                line_color="orange",
+                annotation_text="Start",
+                annotation_position="top left",
             )
 
+            # Gearceerd gebied (Duration)
             duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
-            ax.axvspan(local_start, duration_end, color="orange", alpha=0.12, zorder=1)
+            fig.add_vrect(
+                x0=local_start,
+                x1=duration_end,
+                fillcolor="orange",
+                opacity=0.15,
+                layer="below",
+                line_width=0,
+            )
 
-    # X-as formattering
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    ax.set_title(
-        f"Solar Optimizer: {forecast.action.value}\n{forecast.reason}",
-        fontsize=11,
-        pad=15,
+    # Algemene Layout
+    y_max = max(df_plot["pv_estimate"].max(), df_plot["consumption"].max()) * 1.25
+
+    fig.update_layout(
+        title=dict(
+            text=f"Solar Optimizer: {forecast.action.value}<br><sup>{forecast.reason}</sup>",
+            x=0.05,
+        ),
+        xaxis=dict(title="Tijd", showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        yaxis=dict(
+            title="Vermogen (kW)",
+            range=[0, y_max],
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=40, r=20, t=80, b=40),
+        height=500,
+        template="simple_white",  # Schone look
+        hovermode="x unified",  # Laat alle waardes zien op 1 verticale lijn
     )
-    ax.set_ylabel("Vermogen (kW)")
-    ax.set_xlabel("Tijd")
 
-    # Legenda (Rechtsboven)
-    ax.legend(
-        loc="upper right",
-        bbox_to_anchor=(1.0, 1.0),
-        fontsize=9,
-        framealpha=0.8,
-        edgecolor="silver",
-        borderaxespad=0.2,
+    # Genereer de HTML div (include_plotlyjs='cdn' laadt de JS van internet)
+    # Als je dit offline wilt gebruiken, moet je de JS lokaal hosten en hier False zetten.
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False}
     )
-
-    ax.grid(True, alpha=0.2, linestyle=":")
-    ax.set_ylim(0, y_max)
-    fig.autofmt_xdate()
-
-    # EXPORT
-    output = io.BytesIO()
-    fig.savefig(output, format="png", dpi=150, bbox_inches="tight")
-    output.seek(0)
-
-    return output.getvalue()

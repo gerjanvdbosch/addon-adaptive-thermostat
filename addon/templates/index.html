@@ -67,17 +67,12 @@
 <body>
 
 <div class="dashboard-container">
-    <header>
-        <h1>Home Optimizer</h1>
-    </header>
 
     <main class="card">
-        <img src="data:image/png;base64,{{ forecast_image }}" alt="Solar Forecast" class="forecast-img">
+        <div class="chart-container">
+            {{ forecast_plot | safe }}
+        </div>
     </main>
-
-    <footer class="footer">
-
-    </footer>
 </div>
 
 </body>
