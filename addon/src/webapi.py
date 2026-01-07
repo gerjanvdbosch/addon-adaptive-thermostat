@@ -6,7 +6,7 @@ import pandas as pd
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
 
@@ -110,14 +110,14 @@ def _get_solar_forecast_plot(request: Request) -> str:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
     # --- 2. PLOT GENERATIE (PLOTLY) ---
-    cutoff_date = local_now.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(days=10)
+    cutoff_date = (
+        local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        .replace(tzinfo=local_tz)
+        .astimezone(timezone.utc)
+    )
 
     df_hist = database.get_forecast_history(cutoff_date)
     df_hist_plot = pd.DataFrame()
-
-    logger.info(f"History DataFrame has {len(df_hist)} rows.")
 
     if not df_hist.empty:
         df_hist["timestamp_local"] = (
