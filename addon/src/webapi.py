@@ -112,7 +112,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=[context.stable_pv],
             mode="markers",
             name=f"Actueel ({context.stable_pv:.2f} kW)",
-            marker=dict(color="#00cc00", size=12, line=dict(color="white", width=2)),
+            marker=dict(color="#2ca02c", size=12, line=dict(color="white", width=2)),
             zorder=10,
         )
     )
@@ -124,20 +124,20 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=df["power_corrected"],
             mode="lines",
             name="Solar (Nowcast)",
-            line=dict(color="#00cc00", width=3),  # Matplotlib 'g-' equivalent
+            line=dict(color="#2ca02c", width=2),  # Matplotlib 'g-' equivalent
         )
     )
 
     # E. Load Projection (Rood, Step)
-    #     fig.add_trace(
-    #         go.Scatter(
-    #             x=df["timestamp_local"],
-    #             y=df["consumption"],
-    #             mode="lines",
-    #             name="Load Projection",
-    #             line=dict(color="#ff5555", width=2, shape="hv"),  # shape='hv' is step-post
-    #         )
-    #     )
+    fig.add_trace(
+        go.Scatter(
+            x=df["timestamp_local"],
+            y=df["consumption"],
+            mode="lines",
+            name="Load Projection",
+            line=dict(color="#ff5555", width=2, shape="hv"),  # shape='hv' is step-post
+        )
+    )
 
     # F. Netto Solar (Filled Area)
     # In Plotly is fill='tozeroy' makkelijk, maar om specifiek netto te kleuren gebruiken we de berekende kolom
@@ -149,7 +149,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Netto Solar",
             line=dict(width=0),  # Geen rand
             fill="tozeroy",
-            fillcolor="rgba(0, 204, 0, 0.2)",  # Green met alpha
+            fillcolor="rgba(0, 204, 0, 0.3)",  # Green met alpha
             hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
         )
     )
