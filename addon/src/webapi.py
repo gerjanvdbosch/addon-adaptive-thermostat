@@ -86,8 +86,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=df["pv_estimate"],
             mode="lines",
             name="Raw Solcast",
-            line=dict(color="gray", dash="dash", width=1),
-            opacity=0.6,
+            line=dict(color="#888888", dash="dash", width=1),
+            opacity=0.7,
         )
     )
 
@@ -98,8 +98,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=df["power_ml"],
             mode="lines",
             name="Model Correction",
-            line=dict(color="blue", dash="dot", width=1),
-            opacity=0.6,
+            line=dict(color="#4fa8ff", dash="dot", width=1),
+            opacity=0.8,
             visible="legendonly",  # Standaard uit, kan aangeklikt worden
         )
     )
@@ -112,7 +112,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=[context.stable_pv],
             mode="markers",
             name=f"Actueel ({context.stable_pv:.2f} kW)",
-            marker=dict(color="darkgreen", size=12, line=dict(color="white", width=2)),
+            marker=dict(color="#00cc00", size=12, line=dict(color="white", width=2)),
             zorder=10,
         )
     )
@@ -124,7 +124,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=df["power_corrected"],
             mode="lines",
             name="Solar (Nowcast)",
-            line=dict(color="#2ca02c", width=3),  # Matplotlib 'g-' equivalent
+            line=dict(color="#00cc00", width=3),  # Matplotlib 'g-' equivalent
         )
     )
 
@@ -135,7 +135,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
     #             y=df["consumption"],
     #             mode="lines",
     #             name="Load Projection",
-    #             line=dict(color="red", width=2, shape="hv"),  # shape='hv' is step-post
+    #             line=dict(color="#ff5555", width=2, shape="hv"),  # shape='hv' is step-post
     #         )
     #     )
 
@@ -149,7 +149,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Netto Solar",
             line=dict(width=0),  # Geen rand
             fill="tozeroy",
-            fillcolor="rgba(0, 128, 0, 0.15)",  # Green met alpha
+            fillcolor="rgba(0, 204, 0, 0.2)",  # Green met alpha
             hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
         )
     )
@@ -158,7 +158,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # Verticale lijn voor NU
     fig.add_vline(
-        x=local_now, line_width=1, line_dash="solid", line_color="black", opacity=0.5
+        x=local_now, line_width=1, line_dash="solid", line_color="white", opacity=0.6
     )
 
     x_min_plot = df["timestamp_local"].min()
@@ -173,9 +173,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=local_start,
                 line_width=2,
                 line_dash="dash",
-                line_color="orange",
+                line_color="#ffa500",
                 annotation_text="Start",
                 annotation_position="top left",
+                annotation_font_color="#ffa500",
             )
 
             # Gearceerd gebied (Duration)
@@ -183,8 +184,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
             fig.add_vrect(
                 x0=local_start,
                 x1=duration_end,
-                fillcolor="orange",
-                opacity=0.15,
+                fillcolor="#ffa500",
+                opacity=0.2,
                 layer="below",
                 line_width=0,
             )
@@ -197,17 +198,17 @@ def _get_solar_forecast_plot(request: Request) -> str:
             text=f"Solar Optimizer: {forecast.action.value}<br><sup>{forecast.reason}</sup>",
             x=0.05,
         ),
-        xaxis=dict(title="Tijd", showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        xaxis=dict(title="Tijd", showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
         yaxis=dict(
             title="Vermogen (kW)",
             range=[0, y_max],
             showgrid=True,
-            gridcolor="rgba(0,0,0,0.1)",
+            gridcolor="rgba(255,255,255,0.1)",
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=20, t=80, b=40),
         height=500,
-        template="simple_white",  # Schone look
+        template="plotly_dark",  # Schone look
         hovermode="x unified",  # Laat alle waardes zien op 1 verticale lijn
     )
 

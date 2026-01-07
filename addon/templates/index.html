@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title></title>
-    <meta http-equiv="refresh" content="60">
     <style>
         :root {
-            --bg-color: #000;
+            --bg-color: rgb(17, 17, 17);
             --card-bg: rgb(28, 28, 28);
             --text-color: rgb(225, 225, 225);
             --primary-color: rgb(68, 115, 158);
@@ -43,24 +42,17 @@
         }
 
         .card {
-            border-radius: 12px;
-            border: 1px solid --border-color;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
             padding: 15px;
             overflow: hidden;
         }
 
-        .forecast-img {
-            width: 100%;
+        .chart-container {
+            width: 50%;
             height: auto;
             display: block;
-            border-radius: 8px;
-        }
-
-        .footer {
-            margin-top: 15px;
-            font-size: 12px;
-            color: #888;
-            text-align: right;
+            margin: 12px;
         }
     </style>
 </head>
@@ -70,6 +62,7 @@
 
     <main class="card">
         <div class="chart-container">
+            <h1>Home Optimizer</h1>
             {{ forecast_plot | safe }}
         </div>
     </main>
