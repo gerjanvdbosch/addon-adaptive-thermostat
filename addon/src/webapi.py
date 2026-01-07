@@ -121,7 +121,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df_hist["timestamp_local"] = (
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
-        df_hist["pv_actual"].clip(lower=0.01)
+        # df_hist["pv_actual"].clip(lower=0.01)
         df_hist_plot = df_hist.copy()
 
     fig = go.Figure()
