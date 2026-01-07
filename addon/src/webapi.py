@@ -72,16 +72,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
     df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
-    # Filtering
-    one_hour_ago = local_now - timedelta(hours=1)
-    mask = (df["timestamp_local"] >= one_hour_ago) & (
-        (df["pv_estimate"] > 0.0)
-        | (df["power_corrected"] > 0.0)
-        | (df["timestamp_local"] <= local_now + timedelta(hours=1))
-    )
-    df_plot = df[mask].copy()
-
-    if df_plot.empty:
+    if df.empty:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
     # --- 2. PLOT GENERATIE (PLOTLY) ---
@@ -91,8 +82,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
     # A. Raw Solcast (Grijs, dashed)
     fig.add_trace(
         go.Scatter(
-            x=df_plot["timestamp_local"],
-            y=df_plot["pv_estimate"],
+            x=df["timestamp_local"],
+            y=df["pv_estimate"],
             mode="lines",
             name="Raw Solcast",
             line=dict(color="gray", dash="dash", width=1),
@@ -103,8 +94,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
     # B. Model Correction (Blauw, dot)
     fig.add_trace(
         go.Scatter(
-            x=df_plot["timestamp_local"],
-            y=df_plot["power_ml"],
+            x=df["timestamp_local"],
+            y=df["power_ml"],
             mode="lines",
             name="Model Correction",
             line=dict(color="blue", dash="dot", width=1),
@@ -129,8 +120,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
     # D. Corrected Solar (Solid Green)
     fig.add_trace(
         go.Scatter(
-            x=df_plot["timestamp_local"],
-            y=df_plot["power_corrected"],
+            x=df["timestamp_local"],
+            y=df["power_corrected"],
             mode="lines",
             name="Solar (Nowcast)",
             line=dict(color="#2ca02c", width=3),  # Matplotlib 'g-' equivalent
@@ -138,22 +129,22 @@ def _get_solar_forecast_plot(request: Request) -> str:
     )
 
     # E. Load Projection (Rood, Step)
-    fig.add_trace(
-        go.Scatter(
-            x=df_plot["timestamp_local"],
-            y=df_plot["consumption"],
-            mode="lines",
-            name="Load Projection",
-            line=dict(color="red", width=2, shape="hv"),  # shape='hv' is step-post
-        )
-    )
+    #     fig.add_trace(
+    #         go.Scatter(
+    #             x=df["timestamp_local"],
+    #             y=df["consumption"],
+    #             mode="lines",
+    #             name="Load Projection",
+    #             line=dict(color="red", width=2, shape="hv"),  # shape='hv' is step-post
+    #         )
+    #     )
 
     # F. Netto Solar (Filled Area)
     # In Plotly is fill='tozeroy' makkelijk, maar om specifiek netto te kleuren gebruiken we de berekende kolom
     fig.add_trace(
         go.Scatter(
-            x=df_plot["timestamp_local"],
-            y=df_plot["net_power"],
+            x=df["timestamp_local"],
+            y=df["net_power"],
             mode="lines",  # Geen markers
             name="Netto Solar",
             line=dict(width=0),  # Geen rand
@@ -170,17 +161,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         x=local_now, line_width=1, line_dash="solid", line_color="black", opacity=0.5
     )
 
-    # Horizontale lijn huidige meting (van begin grafiek tot nu)
-    x_min_plot = df_plot["timestamp_local"].min()
-    fig.add_shape(
-        type="line",
-        x0=x_min_plot,
-        y0=context.stable_pv,
-        x1=local_now,
-        y1=context.stable_pv,
-        line=dict(color="darkgreen", width=1, dash="dot"),
-        opacity=0.5,
-    )
+    x_min_plot = df["timestamp_local"].min()
 
     # Start Window Logic
     if forecast and forecast.planned_start:
@@ -209,7 +190,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             )
 
     # Algemene Layout
-    y_max = max(df_plot["pv_estimate"].max(), df_plot["consumption"].max()) * 1.25
+    y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.25
 
     fig.update_layout(
         title=dict(
@@ -230,8 +211,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
         hovermode="x unified",  # Laat alle waardes zien op 1 verticale lijn
     )
 
-    # Genereer de HTML div (include_plotlyjs='cdn' laadt de JS van internet)
-    # Als je dit offline wilt gebruiken, moet je de JS lokaal hosten en hier False zetten.
     return pio.to_html(
         fig, full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False}
     )
