@@ -1,11 +1,12 @@
 import logging
 import plotly.graph_objects as go
 import plotly.io as pio
+import pandas as pd
 
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
 
@@ -41,11 +42,11 @@ def index(request: Request):
             "Status": forecast.action.value,
             "Reden": forecast.reason,
             "PV Huidig": f"{forecast.actual_pv:.2f} kW",
-            "Last Huidig": f"{forecast.load_now:.2f} kW",
+            "Load Huidig": f"{forecast.load_now:.2f} kW",
             "Prognose Nu": f"{forecast.energy_now:.2f} kW",
             "Prognose Beste": f"{forecast.energy_best:.2f} kW",
-            "Opp. Kosten": f"{forecast.opportunity_cost:.3f}",
-            "Betrouwbaarheid": f"{forecast.confidence * 100:.1f} %",
+            "Opp. Kosten": f"{forecast.opportunity_cost * 100:.3f} %",
+            "Betrouwbaarheid": f"{forecast.confidence * 100:.3f} %",
             "Bias": f"{forecast.current_bias:.2f}",
             "Geplande Start": start_str,
         }
@@ -69,6 +70,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
     context = coordinator.context
     forecaster = coordinator.planner.forecaster
     forecast = context.forecast
+    database = coordinator.collector.database
 
     # Check of er data is
     if not hasattr(context, "forecast") or context.forecast is None:
@@ -108,6 +110,19 @@ def _get_solar_forecast_plot(request: Request) -> str:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
     # --- 2. PLOT GENERATIE (PLOTLY) ---
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_midnight_aware = local_midnight.replace(tzinfo=local_tz)
+    fetch_start_utc = local_midnight_aware.astimezone(timezone.utc)
+
+    df_hist = database.get_forecast_history(fetch_start_utc)
+    df_hist_plot = pd.DataFrame()
+
+    if not df_hist.empty:
+        df_hist["timestamp_local"] = (
+            df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
+        )
+        df_hist["pv_actual"].clip(lower=0.01)
+        df_hist_plot = df_hist.copy()
 
     fig = go.Figure()
 
@@ -117,7 +132,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=df["timestamp_local"],
             y=df["pv_estimate"],
             mode="lines",
-            name="Raw Solcast",
+            name="Solcast",
             line=dict(color="#888888", dash="dash", width=1),
             opacity=0.7,
         )
@@ -129,11 +144,25 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=df["timestamp_local"],
             y=df["power_ml"],
             mode="lines",
-            name="Model Correction",
+            name="Model",
             line=dict(color="#4fa8ff", dash="dot", width=1),
             opacity=0.8,
         )
     )
+
+    if not df_hist_plot.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df_hist_plot["timestamp_local"],
+                y=df_hist_plot["pv_actual"],
+                mode="lines",
+                name="Historie",
+                line=dict(color="#ffffff", width=1.5),
+                fill="tozeroy",
+                fillcolor="rgba(255, 255, 255, 0.05)",
+                opacity=0.8,
+            )
+        )
 
     # C. Actuele PV Meting (Stip)
     # We tekenen alleen de stip, de horizontale stippellijn doen we via shapes of een losse trace als je wilt
@@ -154,7 +183,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=df["timestamp_local"],
             y=df["power_corrected"],
             mode="lines",
-            name="Solar (Nowcast)",
+            name="Solar Optimizer",
             line=dict(color="#2ca02c", width=2),  # Matplotlib 'g-' equivalent
         )
     )
