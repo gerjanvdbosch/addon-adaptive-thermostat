@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title></title>
+    <title>Home Optimizer</title>
     <style>
         :root {
             --bg-color: rgb(17, 17, 17);
             --card-bg: rgb(28, 28, 28);
             --text-color: rgb(225, 225, 225);
+            --text-muted: rgba(225, 225, 225, 0.6);
             --primary-color: rgb(68, 115, 158);
             --border-color: rgba(225, 225, 225, 0.12);
         }
@@ -29,40 +30,105 @@
             max-width: 1200px;
         }
 
-        header {
-            margin-bottom: 20px;
-            text-align: left;
-            width: 100%;
-        }
-
         h1 {
-            margin: 0;
+            margin: 0 0 16px 0;
             font-size: 24px;
+            font-weight: 600;
             color: var(--text-color);
         }
 
         .card {
+            background-color: var(--card-bg);
             border-radius: 8px;
             border: 1px solid var(--border-color);
-            padding: 12px;
+            padding: 4px; /* Iets padding zodat de grafiek niet tegen de rand plakt */
             overflow: hidden;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
 
         .chart-container {
-            height: auto;
+            width: 100%;
             display: block;
+        }
+
+        /* GRID STYLING VOOR DE DATA ONDERAAN */
+        .details-grid {
+            display: grid;
+            /* Automatisch kolommen maken van minimaal 140px breed */
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .stat-item {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            transition: border-color 0.2s;
+        }
+
+        .stat-item:hover {
+            border-color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 0.75rem; /* 12px */
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .stat-value {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--text-color);
+        }
+
+        /* Highlight classes voor Status en Starttijd */
+        .stat-item.highlight {
+            border-color: var(--primary-color);
+            background-color: rgba(68, 115, 158, 0.1); /* Zeer subtiele blauwe gloed */
+        }
+
+        .stat-item.highlight .stat-value {
+            color: rgb(100, 180, 255); /* Iets feller blauw voor de tekst */
+        }
+
+        .empty-msg {
+            text-align: center;
+            color: var(--text-muted);
+            font-style: italic;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
 
 <div class="dashboard-container">
-    <main class="card">
-        <h1>Home Optimizer</h1>
+    <h1>Home Optimizer</h1>
+    <div class="card">
         <div class="chart-container">
             {{ forecast_plot | safe }}
         </div>
-    </main>
+    </div>
+
+    {% if details %}
+    <div class="details-grid">
+        {% for key, value in details.items() %}
+        <div class="stat-item {% if key == 'Status' or key == 'Geplande Start' %}highlight{% endif %}">
+            <span class="stat-label">{{ key }}</span>
+            <span class="stat-value">{{ value }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+        <div class="empty-msg">Wachten op data...</div>
+    {% endif %}
+
 </div>
 
 </body>

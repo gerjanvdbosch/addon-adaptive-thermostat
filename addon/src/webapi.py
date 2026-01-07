@@ -22,12 +22,41 @@ def index(request: Request):
     # Haal de HTML div string op in plaats van een plaatje
     plot_html = _get_solar_forecast_plot(request)
 
+    coordinator = request.app.state.coordinator
+    context = coordinator.context
+    forecast = context.forecast
+
+    details = {}
+
+    if hasattr(context, "forecast") and context.forecast is not None:
+        # Helper voor veilige datum weergave
+        start_str = "-"
+        if forecast.planned_start:
+            # Converteer naar lokale tijd voor weergave
+            local_tz = datetime.now().astimezone().tzinfo
+            local_start = forecast.planned_start.astimezone(local_tz)
+            start_str = local_start.strftime("%H:%M")
+
+        details = {
+            "Status": forecast.action.value,
+            "Reden": forecast.reason,
+            "PV Huidig": f"{forecast.actual_pv:.2f} kW",
+            "Last Huidig": f"{forecast.load_now:.2f} kW",
+            "Prognose Nu": f"{forecast.energy_now:.2f} kW",
+            "Prognose Beste": f"{forecast.energy_best:.2f} kW",
+            "Opp. Kosten": f"{forecast.opportunity_cost:.3f}",
+            "Betrouwbaarheid": f"{forecast.confidence:.2f}",  # of * 100 voor %
+            "Bias": f"{forecast.current_bias:.2f}",
+            "Geplande Start": start_str,
+        }
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             # We geven nu de HTML string door aan de template
             "forecast_plot": plot_html,
+            "details": details,
         },
     )
 
@@ -56,6 +85,9 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df["power_corrected"] = forecaster.nowcaster.apply(
         df, context.now, "power_ml", actual_pv=context.stable_pv
     )
+
+    for col in ["pv_estimate", "power_ml", "power_corrected"]:
+        df[col] = df[col].clip(lower=0.01)
 
     # Load & Net Power projectie
     baseload = forecaster.optimizer.avg_baseload
@@ -100,7 +132,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Model Correction",
             line=dict(color="#4fa8ff", dash="dot", width=1),
             opacity=0.8,
-            visible="legendonly",  # Standaard uit, kan aangeklikt worden
         )
     )
 
