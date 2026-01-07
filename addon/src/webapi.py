@@ -252,7 +252,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # Algemene Layout
     # y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.25
-    y_max = max(df["pv_estimate"].max()) * 1.25
+    y_max = df["pv_estimate"].max() * 1.25
 
     fig.update_layout(
         template="plotly_dark",
