@@ -211,7 +211,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             name="Netto Solar",
             line=dict(width=0),  # Geen rand
             fill="tozeroy",
-            fillcolor="rgba(255, 165, 0, 0.5)",
+            fillcolor="rgba(255, 165, 0, 0.3)",
             hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
         )
     )
