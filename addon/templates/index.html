@@ -110,21 +110,22 @@
 
 <div class="dashboard-container">
     <h1>Home Optimizer</h1>
-    <div class="card">
-        <div class="chart-container">
-            {{ forecast_plot | safe }}
-        </div>
-    </div>
 
     {% if details %}
-    <div class="details-grid">
-        {% for key, value in details.items() %}
-        <div class="stat-item {% if key == 'Status' or key == 'Geplande Start' %}highlight{% endif %}">
-            <span class="stat-label">{{ key }}</span>
-            <span class="stat-value">{{ value }}</span>
+        <div class="card">
+            <div class="chart-container">
+                {{ forecast_plot | safe }}
+            </div>
         </div>
-        {% endfor %}
-    </div>
+
+        <div class="details-grid">
+            {% for key, value in details.items() %}
+            <div class="stat-item {% if key == 'Status' or key == 'Geplande Start' %}highlight{% endif %}">
+                <span class="stat-label">{{ key }}</span>
+                <span class="stat-value">{{ value }}</span>
+            </div>
+            {% endfor %}
+        </div>
     {% else %}
         <div class="empty-msg">Wachten op data...</div>
     {% endif %}

@@ -5,7 +5,7 @@ import pandas as pd
 
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
@@ -60,6 +60,49 @@ def index(request: Request):
             "details": details,
         },
     )
+
+
+@api.get("/solar/explain", response_class=JSONResponse)
+def explain_model_prediction(request: Request):
+    """
+    Geeft de SHAP values terug voor het huidige tijdstip.
+    """
+    coordinator = request.app.state.coordinator
+    context = coordinator.context
+    forecaster = coordinator.planner.forecaster
+
+    # 1. Validatie
+    if (
+        not hasattr(context, "forecast_df")
+        or context.forecast_df is None
+        or context.forecast_df.empty
+    ):
+        return JSONResponse({"error": "Geen data beschikbaar"}, status_code=404)
+
+    if not forecaster.model.is_fitted:
+        return JSONResponse({"error": "Model is nog niet getraind"}, status_code=503)
+
+    # 2. Zoek de rij die het dichtst bij 'nu' ligt
+    local_tz = datetime.now().astimezone().tzinfo
+    current_time = datetime.now(local_tz)
+
+    # Zorg dat de dataframe timestamps ook timezone-aware zijn voor vergelijking
+    df = context.forecast_df.copy()
+
+    # Kleine hack: pandas searchsorted werkt het best als alles in UTC of offset-naive is
+    # We converteren zoek-tijd naar de dataframe tijdzone (vaak UTC)
+    target_time = current_time.astimezone(df["timestamp"].dt.tz)
+
+    idx = df["timestamp"].searchsorted(target_time)
+    idx = min(idx, len(df) - 1)
+
+    # Pak de rij als DataFrame (niet Series, want prepare_features verwacht DF)
+    row = df.iloc[[idx]].copy()
+
+    # 3. Vraag uitleg aan het model
+    explanation = forecaster.model.explain(row)
+
+    return JSONResponse(explanation)
 
 
 def _get_solar_forecast_plot(request: Request) -> str:
@@ -179,7 +222,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         )
     )
 
-    # D. Corrected Solar (Solid Green)
+    # D. Corrected Solar
     fig.add_trace(
         go.Scatter(
             x=df["timestamp_local"],

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from context import Context
 from config import Config
 from forecaster import SolarForecaster
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,13 @@ class Planner:
         self.context.forecast = forecast
         logger.info(f"[Planner] Status {status}")
 
+        if forecast is not None:
+            if forecast.planned_start is None:
+                forecast.planned_start = datetime.now(timezone.utc).replace(
+                    hour=17, minute=0, second=0, microsecond=0
+                )
 
-#         if forecast is not None:
+
 #             logger.info(f"[Planner] Reason {forecast.reason}")
 #             logger.info(f"[Planner] PV now {forecast.actual_pv}kW")
 #             logger.info(f"[Planner] Load now {forecast.load_now}kW")
