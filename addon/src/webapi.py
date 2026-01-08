@@ -271,6 +271,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
             mode="lines",
             name="Prediction",
             line=dict(color="#ffa500", width=2),  # Oranje lijn
+            fill="tozeroy",  # Vul tot aan de X-as (0)
+            fillcolor="rgba(255, 165, 0, 0.1)",
         )
     )
 
@@ -313,35 +315,41 @@ def _get_solar_forecast_plot(request: Request) -> str:
         local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
 
         if local_start >= df["timestamp_local"].min():
-            # Verticale lijn start
-            fig.add_vline(
-                x=local_start,
-                line_width=2,
-                line_dash="dash",
-                line_color="#2ca02c",
-            )
+            max_y = df[["power_corrected", "pv_estimate"]].max().max()
+            y_top = max_y * 1.2
 
-            # 2. DE TEKST (Handmatig toevoegen)
-            fig.add_annotation(
-                x=local_start,
-                y=1,  # Helemaal bovenin
-                yref="paper",  # Y-coordinaat is relatief (0 tot 1)
-                text="Start",
-                font=dict(color="#2ca02c"),
-                xanchor="left",  # Tekst begint links van de lijn
-                yanchor="top",
-                xshift=5,  # Klein beetje marge van de lijn af
-            )
-
-            # Gearceerd gebied (Duration)
             duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
-            fig.add_vrect(
-                x0=local_start,
-                x1=duration_end,
-                fillcolor="#2ca02c",
-                opacity=0.15,
-                layer="below",
-                line_width=0,
+
+            # 2. TRACE A: De verticale stippellijn + Tekst
+            fig.add_trace(
+                go.Scatter(
+                    x=[local_start, local_start],
+                    y=[0, y_top],
+                    mode="lines+text",
+                    name="Start",  # Dit komt in de legenda
+                    legendgroup="start",  # Koppelnaam
+                    line=dict(color="#2ca02c", dash="dash", width=2),
+                    text=["", "Start"],  # Tekst alleen bij het bovenste punt
+                    textposition="top right",  # Rechts van de lijn
+                    textfont=dict(color="#2ca02c"),
+                )
+            )
+
+            # 3. TRACE B: Het gearceerde vlak
+            # We tekenen een onzichtbare lijn rondom het gebied en vullen die in ("toself")
+            fig.add_trace(
+                go.Scatter(
+                    x=[local_start, duration_end, duration_end, local_start],
+                    y=[0, 0, y_top, y_top],
+                    fill="toself",
+                    fillcolor="rgba(44, 160, 44, 0.15)",
+                    mode="lines",
+                    line=dict(width=0),  # Geen rand
+                    name="Start",  # Zelfde naam
+                    legendgroup="start",  # Zelfde groep!
+                    showlegend=False,  # Niet dubbel in de lijst tonen
+                    hoverinfo="skip",
+                )
             )
 
     # Algemene Layout

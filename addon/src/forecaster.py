@@ -409,16 +409,10 @@ class SolarForecaster:
             return SolarStatus.WAIT, None
 
         df_calc = forecast_df.copy()
-        if self.model and self.model.is_fitted:
-            preds = self.model.predict(df_calc)
+        preds = self.model.predict(df_calc)
 
-            df_calc["power_ml"] = preds["prediction"]
-            df_calc["power_ml_raw"] = preds["prediction_raw"]
-        else:
-            # Fallback: Gebruik de ruwe schatting van de weerdienst
-            val = df_calc["pv_estimate"].fillna(0)
-            df_calc["power_ml"] = val
-            df_calc["power_ml_raw"] = val
+        df_calc["power_ml"] = preds["prediction"]
+        df_calc["power_ml_raw"] = preds["prediction_raw"]
 
         # Bias ankerpunt (nu)
         idx_now = df_calc["timestamp"].searchsorted(current_time)
