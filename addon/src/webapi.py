@@ -120,7 +120,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # Check of er data is
     if not hasattr(context, "forecast") or context.forecast is None:
-        return "<div class='alert alert-info'>Geen data beschikbaar. Wacht op de eerste meting (max 1 minuut).</div>"
+        return "No forecast available."
 
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
@@ -327,7 +327,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=1,  # Helemaal bovenin
                 yref="paper",  # Y-coordinaat is relatief (0 tot 1)
                 text="Start",
-                legendgroup="start",
                 font=dict(color="#2ca02c"),
                 xanchor="left",  # Tekst begint links van de lijn
                 yanchor="top",
@@ -343,7 +342,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 opacity=0.15,
                 layer="below",
                 line_width=0,
-                legendgroup="start",
             )
 
     # Algemene Layout
