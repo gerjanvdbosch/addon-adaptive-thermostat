@@ -274,19 +274,6 @@ class SolarOptimizer:
         # We kijken hier PUUR naar energie. Waar ligt de fysieke top?
         max_energy = future["rolling_energy_kwh"].max()
 
-        # Low Light Check op basis van fysieke realiteit
-        if max_energy < self.min_kwh_threshold:
-            return SolarStatus.LOW_LIGHT, SolarContext(
-                energy_now=0,
-                energy_best=0,
-                opportunity_cost=1.0,
-                confidence=0,
-                action=SolarStatus.LOW_LIGHT,
-                reason=f"Te weinig energie ({max_energy:.2f} kWh)",
-                load_now=current_load_kw,
-                actual_pv=current_pv_kw,
-            )
-
         # Confidence Berekening (Objectief)
         # Hoe uniek is de fysieke piek t.o.v. de rest van de dag?
         scores = future["rolling_energy_kwh"].dropna()

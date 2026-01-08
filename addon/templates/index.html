@@ -157,7 +157,12 @@
 <body>
 
 <div class="dashboard-container">
-    <h1>Home Optimizer</h1>
+    <div style="display: flex; align-items: center; margin-bottom: 16px;">
+        <h1>Home Optimizer</h1>
+        {% if explanation %}
+        <button class="explain-btn" onclick="toggleExplain()">Why?</button>
+        {% endif %}
+    </div>
 
     <div class="card">
         <div class="chart-container">
@@ -165,10 +170,49 @@
         </div>
     </div>
 
+    {% if explanation %}
     <div id="explain-box" class="explain-container">
-        <h3 style="margin-top:0; font-size:1rem; color:var(--text-color);">Model Verklaring (SHAP)</h3>
-        <div id="explain-content" style="color: var(--text-muted);">Laden...</div>
+        <div style="margin-bottom:10px; font-weight:bold; color:var(--primary-color);">
+            Focus: {{ explanation.time_label }}
+        </div>
+
+        <table class="explain-table">
+            <thead>
+            <tr>
+                <th>Factor</th>
+                <th>Impact (kW)</th>
+            </tr>
+            </thead>
+            <tbody>
+            <!-- Basiswaarde -->
+            <tr>
+                <td>Basiswaarde (Gem.)</td>
+                <td class="val-base">{{ explanation.base }}</td>
+            </tr>
+
+            <!-- Factoren Loop -->
+            {% for factor in explanation.factors %}
+            <tr>
+                <td>{{ factor.label }}</td>
+                <td class="{{ factor.css_class }}">{{ factor.value }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="2" style="text-align:center; font-style:italic; padding:10px;">
+                    Geen significante invloeden gevonden.
+                </td>
+            </tr>
+            {% endfor %}
+
+            <!-- Eindresultaat -->
+            <tr style="border-top: 1px solid var(--border-color); font-weight:bold;">
+                <td>ML Voorspelling</td>
+                <td>{{ explanation.prediction }}</td>
+            </tr>
+            </tbody>
+        </table>
     </div>
+    {% endif %}
 
     {% if details %}
         <div class="details-grid">
@@ -186,68 +230,14 @@
 </div>
 
 <script>
-    async function toggleExplain() {
+    function toggleExplain() {
         const box = document.getElementById('explain-box');
-        const content = document.getElementById('explain-content');
-
-        // Toggle zichtbaarheid
-        if (box.style.display === 'block') {
-            box.style.display = 'none';
-            return;
-        }
-
-        box.style.display = 'block';
-        content.innerHTML = '<i>Analyseren...</i>';
-
-        try {
-            const response = await fetch('/solar/explain');
-            const data = await response.json();
-
-            if (data.error) {
-                content.innerHTML = `<span style="color:red">${data.error}</span>`;
-                return;
+        if (box) {
+            if (box.style.display === 'block') {
+                box.style.display = 'none';
+            } else {
+                box.style.display = 'block';
             }
-
-            // Tabel bouwen
-            let html = '<table class="explain-table"><thead><tr><th>Factor</th><th>Impact (kW)</th></tr></thead><tbody>';
-
-            // Eerst Base en Prediction tonen
-            if (data.Base) {
-                html += `<tr><td>Basiswaarde (Gemiddelde)</td><td class="val-base">${data.Base}</td></tr>`;
-            }
-
-            // Sorteer keys op absolute waarde (belangrijkste bovenaan), negeer Base/Prediction even
-            const entries = Object.entries(data).filter(([k]) => k !== 'Base' && k !== 'Prediction' && k !== 'Info');
-
-            // Sorteren (grootste impact eerst)
-            entries.sort((a, b) => Math.abs(parseFloat(b[1])) - Math.abs(parseFloat(a[1])));
-
-            for (const [key, valStr] of entries) {
-                const val = parseFloat(valStr);
-                if (Math.abs(val) < 0.01) continue; // Verberg verwaarloosbare impact
-
-                const colorClass = val >= 0 ? 'val-pos' : 'val-neg';
-                // Maak de labels wat leesbaarder
-                let label = key.replace('_sin', '').replace('_cos', '').replace('pv_', '');
-
-                html += `<tr>
-                    <td>${label}</td>
-                    <td class="${colorClass}">${valStr}</td>
-                </tr>`;
-            }
-
-            if (data.Prediction) {
-                html += `<tr style="border-top: 1px solid var(--border-color); font-weight:bold;">
-                    <td>Uiteindelijke ML Voorspelling</td>
-                    <td>${data.Prediction}</td>
-                </tr>`;
-            }
-
-            html += '</tbody></table>';
-            content.innerHTML = html;
-
-        } catch (e) {
-            content.innerHTML = `<span style="color:red">Fout bij ophalen: ${e}</span>`;
         }
     }
 </script>

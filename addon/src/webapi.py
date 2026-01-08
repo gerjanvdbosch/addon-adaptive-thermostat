@@ -3,6 +3,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 
+from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -50,6 +51,7 @@ def index(request: Request):
             "Bias": f"{forecast.current_bias:.2f}",
             "Geplande Start": start_str,
         }
+    explanation = _get_model_explanation(coordinator)
 
     return templates.TemplateResponse(
         "index.html",
@@ -58,6 +60,7 @@ def index(request: Request):
             # We geven nu de HTML string door aan de template
             "forecast_plot": plot_html,
             "details": details,
+            "explanation": explanation,
         },
     )
 
@@ -152,6 +155,20 @@ def _get_solar_forecast_plot(request: Request) -> str:
     if df.empty:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
+    # We zoeken rijen waar de zon schijnt (> 50 Watt)
+    zon_uren = df[df["power_corrected"] > 0.05]
+
+    if not zon_uren.empty:
+        # Start = vroegste zon of 'Nu' (min 1 uur buffer)
+        x_start = min(zon_uren["timestamp_local"].min(), local_now) - timedelta(hours=1)
+
+        # Eind = laatste zon of 'Nu' (plus 1 uur buffer)
+        x_end = max(zon_uren["timestamp_local"].max(), local_now) + timedelta(hours=1)
+    else:
+        # Fallback: als er helemaal geen zon is, toon gewoon alles
+        x_start = df["timestamp_local"].min()
+        x_end = df["timestamp_local"].max()
+
     # --- 2. PLOT GENERATIE (PLOTLY) ---
     cutoff_date = (
         local_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -217,6 +234,18 @@ def _get_solar_forecast_plot(request: Request) -> str:
             )
         )
 
+        fig.add_trace(
+            go.Scatter(
+                x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
+                y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
+                mode="lines",
+                line=dict(color="#ffffff", dash="dash", width=1.5),  # Wit en gestippeld
+                opacity=0.8,
+                showlegend=False,  # We hoeven deze niet apart in de legenda
+                hoverinfo="skip",  # Geen popup als je over het lijntje muist
+            )
+        )
+
     # C. Actuele PV Meting (Stip)
     # We tekenen alleen de stip, de horizontale stippellijn doen we via shapes of een losse trace als je wilt
     fig.add_trace(
@@ -236,7 +265,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=df["timestamp_local"],
             y=df["power_corrected"],
             mode="lines",
-            name="Solar Optimizer",
+            name="Prediction",
             line=dict(color="#ffa500", width=2),  # Matplotlib 'g-' equivalent
         )
     )
@@ -312,20 +341,24 @@ def _get_solar_forecast_plot(request: Request) -> str:
             )
 
     # Algemene Layout
-    # y_max = max(df["pv_estimate"].max(), df["consumption"].max()) * 1.25
-    y_max = df["pv_estimate"].max() * 1.25
+    # y_max = max(df["pv_estimate"].max(), df["pv_actual"].max()) * 1.25
 
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
         plot_bgcolor="rgb(28, 28, 28)",
         title=dict(
-            text="Solar Prognose",
+            text="Solar Prediction",
         ),
-        xaxis=dict(title="Tijd", showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
+        xaxis=dict(
+            title="Tijd",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+            range=[x_start, x_end],
+        ),
         yaxis=dict(
             title="Vermogen (kW)",
-            range=[0, y_max],
+            # range=[0, y_max],
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
         ),
@@ -338,3 +371,111 @@ def _get_solar_forecast_plot(request: Request) -> str:
     return pio.to_html(
         fig, full_html=False, include_plotlyjs="cdn", config={"displayModeBar": False}
     )
+
+
+def _get_model_explanation(coordinator) -> dict:
+    """
+    Bereidt de SHAP data voor zodat de HTML het direct kan tonen.
+    """
+    context = coordinator.context
+    forecaster = coordinator.planner.forecaster
+
+    # Geen data of model? Leeg teruggeven
+    if (
+        not hasattr(context, "forecast_df")
+        or context.forecast_df is None
+        or context.forecast_df.empty
+    ):
+        return None
+    if not forecaster.model.is_fitted:
+        return None
+
+    try:
+        local_tz = datetime.now().astimezone().tzinfo
+        current_time = datetime.now(local_tz)
+        df = context.forecast_df.copy()
+
+        # Voorspelling toevoegen (Raw ML nodig voor Piek-detectie)
+        preds = forecaster.model.predict(df, detailed=True)
+        if isinstance(preds, pd.DataFrame):
+            df["power_ml"] = preds["raw_ml"]
+        else:
+            df["power_ml"] = preds
+
+        # Zoek index van 'Nu'
+        target_time = current_time.astimezone(df["timestamp"].dt.tz)
+        idx_now = df["timestamp"].searchsorted(target_time)
+        idx_now = min(idx_now, len(df) - 1)
+
+        # --- SLIMME KEUZE LOGICA (Nu vs Piek) ---
+        prediction_now = df.iloc[idx_now]["power_ml"]
+
+        row = None
+        time_label = ""
+
+        # Als het donker is (< 0.1 kW), zoek de piek van de dag
+        if prediction_now < 0.1:
+            idx_max = df["power_ml"].idxmax()
+            peak_val = df.iloc[idx_max]["power_ml"]
+
+            if peak_val > 0.1:
+                row = df.iloc[[idx_max]].copy()
+                ts = row["timestamp"].dt.tz_convert(local_tz).iloc[0]
+                time_label = f"Piek om {ts.strftime('%H:%M')}"
+            else:
+                row = df.iloc[[idx_now]].copy()
+                time_label = "Nu (Nacht/Donker)"
+        else:
+            row = df.iloc[[idx_now]].copy()
+            time_label = "Nu"
+
+        # Vraag SHAP waardes op
+        shap_data = forecaster.model.explain(row)
+
+        # --- DATA VOORBEREIDEN VOOR TEMPLATE ---
+        # We willen niet sorteren in Jinja, dat is gedoe. Doen we hier in Python.
+
+        base_val = shap_data.pop("Base", "0.00")
+        pred_val = shap_data.pop("Prediction", "0.00")
+
+        factors = []
+        for key, val_str in shap_data.items():
+            try:
+                val = float(val_str)
+                # Filter verwaarloosbare waardes
+                if abs(val) < 0.01:
+                    continue
+
+                # Mooiere labels
+                label = key.replace("_sin", "").replace("_cos", "").replace("pv_", "")
+                if label == "estimate":
+                    label = "Solcast Forecast"
+                if label == "radiation":
+                    label = "Straling"
+                if label == "uncertainty":
+                    label = "Onzekerheid"
+
+                factors.append(
+                    {
+                        "label": label,
+                        "value": val_str,
+                        "abs_value": abs(val),
+                        "css_class": "val-pos" if val >= 0 else "val-neg",
+                    }
+                )
+            except Exception:
+                continue
+
+        # Sorteer op absolute impact (grootste bovenaan)
+        factors.sort(key=itemgetter("abs_value"), reverse=True)
+
+        return {
+            "time_label": time_label,
+            "base": base_val,
+            "prediction": pred_val,
+            "factors": factors,
+        }
+
+    except Exception as e:
+        logger.error(f"Error preparing explanation: {e}")
+        return None
