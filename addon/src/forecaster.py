@@ -161,7 +161,7 @@ class SolarModel:
 
         logger.info(f"[Solar] Model getraind met MAE: {self.mae:.3f} kW")
 
-    def predict(self, df_forecast: pd.DataFrame):
+    def predict(self, df_forecast: pd.DataFrame, model_ratio: float = 0.7):
         raw_solcast = df_forecast["pv_estimate"].fillna(0)
 
         if not self.is_fitted:
@@ -173,7 +173,8 @@ class SolarModel:
         # 1. De "Pure" ML voorspelling
         pred_ml = np.maximum(self.model.predict(X), 0)
         # 2. De "Blended" veiligheidsmix
-        pred_final = (pred_ml * 0.7) + (raw_solcast * 0.3)
+        solcast_ratio = 1.0 - model_ratio
+        pred_final = (pred_ml * model_ratio) + (raw_solcast * solcast_ratio)
 
         return pd.DataFrame({"prediction": pred_final, "prediction_raw": pred_ml})
 
@@ -408,7 +409,7 @@ class SolarForecaster:
             return SolarStatus.WAIT, None
 
         df_calc = forecast_df.copy()
-        preds = self.model.predict(df_calc)
+        preds = self.model.predict(df_calc, self.config.solar_model_ratio)
 
         df_calc["power_ml"] = preds["prediction"]
         df_calc["power_ml_raw"] = preds["prediction_raw"]

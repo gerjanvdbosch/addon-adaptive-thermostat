@@ -1,3 +1,6 @@
+import json
+import os
+
 from client import HAClient
 from dataclasses import dataclass
 
@@ -32,6 +35,7 @@ class Config:
 
     database_path: str = "/config/db/database.sqlite"
     solar_model_path: str = "/config/models/solar_model.joblib"
+    solar_model_ratio: float = 0.7
 
     webapi_host: str = "0.0.0.0"
     webapi_port: int = 8000
@@ -43,5 +47,12 @@ class Config:
         location = client.get_location(config.sensor_home)
         if location != (None, None):
             config.latitude, config.longitude = location
+
+        solar = json.loads(os.getenv("SOLAR", None))
+
+        if solar:
+            config.solar_model_ratio = solar.get(
+                "model_ratio", config.solar_model_ratio
+            )
 
         return config

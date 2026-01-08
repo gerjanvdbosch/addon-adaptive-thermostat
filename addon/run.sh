@@ -9,6 +9,7 @@ export DB_DIR="/config/db"
 mkdir -p "${MODEL_DIR}"
 mkdir -p "${DB_DIR}"
 
+export SOLAR="$(bashio::config 'solar' || echo '{}')"
 export LOG_LEVEL="$(bashio::config 'log_level')"
 
 python3 -u ./src/coordinator.py
