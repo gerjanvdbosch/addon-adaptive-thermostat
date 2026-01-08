@@ -160,27 +160,23 @@ class SolarModel:
         joblib.dump({"model": self.model, "mae": self.mae}, self.path)
         self.is_fitted = True
 
-    def predict(self, df_forecast: pd.DataFrame) -> pd.Series:
+        logger.info(f"[Solar] Model getraind met MAE: {self.mae:.3f} kW")
+
+    def predict(self, df_forecast: pd.DataFrame):
         raw_solcast = df_forecast["pv_estimate"].fillna(0)
 
         if not self.is_fitted:
-            return raw_solcast
+            return pd.DataFrame(
+                {"prediction": raw_solcast, "prediction_raw": raw_solcast}
+            )
 
         X = self._prepare_features(df_forecast)
+        # 1. De "Pure" ML voorspelling
         pred_ml = np.maximum(self.model.predict(X), 0)
+        # 2. De "Blended" veiligheidsmix
+        pred_final = (pred_ml * 0.7) + (raw_solcast * 0.3)
 
-        return (pred_ml * 0.7) + (raw_solcast * 0.3)
-
-    #         # 1. De "Pure" ML voorspelling
-    #         pred_ml = np.maximum(self.model.predict(X), 0)
-    #
-    #         # 2. De "Blended" veiligheidsmix
-    #         pred_final = (pred_ml * 0.7) + (raw_solcast * 0.3)
-    #
-    #         return pd.DataFrame({
-    #             "prediction": pred_final,
-    #             "raw_ml": pred_ml
-    #         })
+        return pd.DataFrame({"prediction": pred_final, "prediction_raw": pred_ml})
 
     def explain(self, df_row: pd.DataFrame) -> Dict[str, str]:
         if not self.is_fitted:
@@ -414,13 +410,15 @@ class SolarForecaster:
 
         df_calc = forecast_df.copy()
         if self.model and self.model.is_fitted:
-            df_calc["power_ml"] = self.model.predict(df_calc)
+            preds = self.model.predict(df_calc)
+
+            df_calc["power_ml"] = preds["prediction"]
+            df_calc["power_ml_raw"] = preds["prediction_raw"]
         else:
             # Fallback: Gebruik de ruwe schatting van de weerdienst
-            df_calc["power_ml"] = df_calc["pv_estimate"].fillna(0)
-
-        #         df["power_ml"] = preds["prediction"]     # De 70/30 mix (voor de nowcaster)
-        #         df["power_pure_ml"] = preds["raw_ml"]    # De pure ML (voor de grafiek)
+            val = df_calc["pv_estimate"].fillna(0)
+            df_calc["power_ml"] = val
+            df_calc["power_ml_raw"] = val
 
         # Bias ankerpunt (nu)
         idx_now = df_calc["timestamp"].searchsorted(current_time)
@@ -439,5 +437,7 @@ class SolarForecaster:
         status, context = self.optimizer.calculate_optimal_window(
             df_calc, current_time, current_load_kw, self.context.stable_pv
         )
+
+        self.context.forecast_df = df_calc
 
         return status, context

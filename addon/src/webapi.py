@@ -208,13 +208,17 @@ def _get_solar_forecast_plot(request: Request) -> str:
         )
     )
 
-    #     fig.add_trace(go.Scatter(
-    #         x=df_plot["timestamp_local"], y=df_plot["power_pure_ml"],
-    #         mode="lines", name="Model",
-    #         line=dict(color="#9467bd", dash="dot", width=1.5),
-    #         opacity=0.8,
-    #         visible="legendonly" # Standaard aan of uit? Zet op True om direct te zien
-    #     ))
+    fig.add_trace(
+        go.Scatter(
+            x=df["timestamp_local"],
+            y=df["power_ml_raw"],
+            mode="lines",
+            name="Raw Model",
+            line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
+            opacity=0.6,
+            visible="legendonly",  # Standaard uit, klik om te zien
+        )
+    )
 
     if not df_hist_plot.empty:
         fig.add_trace(
@@ -252,6 +256,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=[context.stable_pv],
             mode="markers",
             name="PV actual",
+            showlegend=False,
             marker=dict(color="#ffa500", size=12, line=dict(color="white", width=2)),
             zorder=10,
         )
@@ -328,7 +333,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=1,  # Helemaal bovenin
                 yref="paper",  # Y-coordinaat is relatief (0 tot 1)
                 text="Start",
-                showarrow=False,
+                legendgroup="start",
                 font=dict(color="#2ca02c"),
                 xanchor="left",  # Tekst begint links van de lijn
                 yanchor="top",
@@ -344,6 +349,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 opacity=0.15,
                 layer="below",
                 line_width=0,
+                legendgroup="start",
             )
 
     # Algemene Layout
