@@ -51,7 +51,7 @@
             padding: 4px; /* Iets padding zodat de grafiek niet tegen de rand plakt */
             overflow: hidden;
             margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
         }
 
         .chart-container {
@@ -154,12 +154,23 @@
 
         .explain-table td {
             padding: 6px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         }
 
-        .val-pos { color: #2ca02c; } /* Groen voor positieve impact */
-        .val-neg { color: #ff5555; } /* Rood voor negatieve impact */
-        .val-base { color: #4fa8ff; font-weight: bold; }
+        .val-pos {
+            color: #2ca02c;
+        }
+
+        /* Groen voor positieve impact */
+        .val-neg {
+            color: #ff5555;
+        }
+
+        /* Rood voor negatieve impact */
+        .val-base {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
