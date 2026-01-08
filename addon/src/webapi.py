@@ -256,13 +256,20 @@ def _get_solar_forecast_plot(request: Request) -> str:
     )
 
     # D. Corrected Solar
+    df_future = df[df["timestamp_local"] >= local_now]
+
+    # Om de lijn visueel aan het 'Huidig PV' bolletje te knopen,
+    # plakken we het huidige punt vooraan de lijst.
+    x_future = [local_now] + df_future["timestamp_local"].tolist()
+    y_future = [context.stable_pv] + df_future["power_corrected"].tolist()
+
     fig.add_trace(
         go.Scatter(
-            x=df["timestamp_local"],
-            y=df["power_corrected"],
+            x=x_future,
+            y=y_future,
             mode="lines",
             name="Prediction",
-            line=dict(color="#ffa500", width=2),  # Matplotlib 'g-' equivalent
+            line=dict(color="#ffa500", width=2),  # Oranje lijn
         )
     )
 
@@ -392,7 +399,7 @@ def _get_model_explanation(coordinator) -> dict:
         df = context.forecast_df.copy()
 
         # Voorspelling toevoegen (Raw ML nodig voor Piek-detectie)
-        preds = forecaster.model.predict(df, detailed=True)
+        preds = forecaster.model.predict(df)
         if isinstance(preds, pd.DataFrame):
             df["power_ml"] = preds["raw_ml"]
         else:
