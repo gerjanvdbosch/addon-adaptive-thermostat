@@ -155,15 +155,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
     if df.empty:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
-    # We zoeken rijen waar de zon schijnt (> 50 Watt)
-    zon_uren = df[df["power_corrected"] > 0.05]
+    zon_uren = df[df["power_corrected"] > 0]
 
     if not zon_uren.empty:
-        # Start = vroegste zon of 'Nu' (min 1 uur buffer)
-        x_start = min(zon_uren["timestamp_local"].min(), local_now) - timedelta(hours=1)
-
-        # Eind = laatste zon of 'Nu' (plus 1 uur buffer)
-        x_end = max(zon_uren["timestamp_local"].max(), local_now) + timedelta(hours=1)
+        x_start = zon_uren["timestamp_local"].min() - timedelta(hours=1)
+        x_end = zon_uren["timestamp_local"].max() + timedelta(hours=1)
     else:
         # Fallback: als er helemaal geen zon is, toon gewoon alles
         x_start = df["timestamp_local"].min()

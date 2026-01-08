@@ -287,7 +287,7 @@ class SolarOptimizer:
 
             rest_scores = scores.iloc[mask] if len(scores) > 0 else pd.Series()
 
-            if not rest_scores.empty:
+            if not rest_scores.empty and max_energy > 0.001:
                 # Dit is de zuivere confidence: Piek vs Rest
                 confidence = float(
                     np.clip((max_energy - rest_scores.max()) / max_energy, 0.0, 1.0)
