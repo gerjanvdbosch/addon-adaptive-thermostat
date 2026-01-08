@@ -16,12 +16,8 @@ ingress_stream: true
 panel_title: Optimizer
 panel_icon: mdi:home-lightning-bolt-outline
 options:
-  solar:
-    model_ratio: 0.7
   log_level: info
 schema:
-  solar:
-    model_ratio: float(0.0, 1.0)
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
 ports:
   8000/tcp: 8000
