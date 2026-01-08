@@ -171,6 +171,17 @@ class SolarModel:
 
         return (pred_ml * 0.7) + (raw_solcast * 0.3)
 
+    #         # 1. De "Pure" ML voorspelling
+    #         pred_ml = np.maximum(self.model.predict(X), 0)
+    #
+    #         # 2. De "Blended" veiligheidsmix
+    #         pred_final = (pred_ml * 0.7) + (raw_solcast * 0.3)
+    #
+    #         return pd.DataFrame({
+    #             "prediction": pred_final,
+    #             "raw_ml": pred_ml
+    #         })
+
     def explain(self, df_row: pd.DataFrame) -> Dict[str, str]:
         if not self.is_fitted:
             return {"Info": "No model"}
@@ -420,6 +431,9 @@ class SolarForecaster:
         else:
             # Fallback: Gebruik de ruwe schatting van de weerdienst
             df_calc["power_ml"] = df_calc["pv_estimate"].fillna(0)
+
+        #         df["power_ml"] = preds["prediction"]     # De 70/30 mix (voor de nowcaster)
+        #         df["power_pure_ml"] = preds["raw_ml"]    # De pure ML (voor de grafiek)
 
         # Bias ankerpunt (nu)
         idx_now = df_calc["timestamp"].searchsorted(current_time)

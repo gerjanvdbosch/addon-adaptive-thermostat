@@ -189,11 +189,19 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=df["timestamp_local"],
             y=df["power_ml"],
             mode="lines",
-            name="Model",
+            name="Blended",
             line=dict(color="#4fa8ff", dash="dot", width=1),
             opacity=0.8,
         )
     )
+
+    #     fig.add_trace(go.Scatter(
+    #         x=df_plot["timestamp_local"], y=df_plot["power_pure_ml"],
+    #         mode="lines", name="Model",
+    #         line=dict(color="#9467bd", dash="dot", width=1.5),
+    #         opacity=0.8,
+    #         visible="legendonly" # Standaard aan of uit? Zet op True om direct te zien
+    #     ))
 
     if not df_hist_plot.empty:
         fig.add_trace(
@@ -277,9 +285,19 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 line_width=2,
                 line_dash="dash",
                 line_color="#2ca02c",
-                annotation_text="Start",
-                annotation_position="top left",
-                annotation_font_color="#2ca02c",
+            )
+
+            # 2. DE TEKST (Handmatig toevoegen)
+            fig.add_annotation(
+                x=local_start,
+                y=1,  # Helemaal bovenin
+                yref="paper",  # Y-coordinaat is relatief (0 tot 1)
+                text="Start",
+                showarrow=False,
+                font=dict(color="#2ca02c"),
+                xanchor="left",  # Tekst begint links van de lijn
+                yanchor="top",
+                xshift=5,  # Klein beetje marge van de lijn af
             )
 
             # Gearceerd gebied (Duration)
