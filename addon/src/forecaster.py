@@ -197,7 +197,7 @@ class SolarModel:
             )
 
             y_pred = self.model.predict(X)
-            result = {"Base": f"{base:.2f}", "Prediction": f"{y_pred[0]:.2f}"}
+            result = {"base": f"{base:.2f}", "prediction": f"{y_pred[0]:.2f}"}
 
             for col, val in zip(self.feature_cols, shap_values[0]):
                 result[col] = f"{val:+.2f}"

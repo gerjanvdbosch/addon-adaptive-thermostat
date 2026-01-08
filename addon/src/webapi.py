@@ -306,7 +306,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x0=local_start,
                 x1=duration_end,
                 fillcolor="#2ca02c",
-                opacity=0.2,
+                opacity=0.15,
                 layer="below",
                 line_width=0,
             )

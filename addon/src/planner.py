@@ -31,7 +31,7 @@ class Planner:
         if forecast is not None:
             if forecast.planned_start is None:
                 forecast.planned_start = datetime.now(timezone.utc).replace(
-                    hour=17, minute=0, second=0, microsecond=0
+                    hour=16, minute=0, second=0, microsecond=0
                 )
 
 
