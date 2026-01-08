@@ -68,7 +68,9 @@ def index(request: Request):
 @api.get("/solar/explain", response_class=JSONResponse)
 def explain_model_prediction(request: Request):
     """
-    Geeft de SHAP values terug voor het huidige tijdstip.
+    Geeft de SHAP values terug.
+    Gebruikt 'power_ml_raw' om te bepalen of we 'Nu' of de 'Piek' tonen,
+    zodat dit overeenkomt met wat SHAP daadwerkelijk uitlegt.
     """
     coordinator = request.app.state.coordinator
     context = coordinator.context
@@ -85,25 +87,45 @@ def explain_model_prediction(request: Request):
     if not forecaster.model.is_fitted:
         return JSONResponse({"error": "Model is nog niet getraind"}, status_code=503)
 
-    # 2. Zoek de rij die het dichtst bij 'nu' ligt
+    # 2. Zoek 'Nu'
     local_tz = datetime.now().astimezone().tzinfo
     current_time = datetime.now(local_tz)
-
-    # Zorg dat de dataframe timestamps ook timezone-aware zijn voor vergelijking
     df = context.forecast_df.copy()
 
-    # Kleine hack: pandas searchsorted werkt het best als alles in UTC of offset-naive is
-    # We converteren zoek-tijd naar de dataframe tijdzone (vaak UTC)
     target_time = current_time.astimezone(df["timestamp"].dt.tz)
+    idx_now = df["timestamp"].searchsorted(target_time)
+    idx_now = min(idx_now, len(df) - 1)
 
-    idx = df["timestamp"].searchsorted(target_time)
-    idx = min(idx, len(df) - 1)
+    # --- AANGEPAST: Gebruik RAW data voor logica ---
+    # We prefereren de raw kolom, want dat is wat SHAP uitlegt.
+    target_col = "power_ml_raw" if "power_ml_raw" in df.columns else "power_ml"
 
-    # Pak de rij als DataFrame (niet Series, want prepare_features verwacht DF)
-    row = df.iloc[[idx]].copy()
+    prediction_now = df.iloc[idx_now][target_col]
+
+    row = None
+    time_label = ""
+
+    # Grens iets verlaagd naar 0.05 omdat RAW soms iets scherper naar 0 gaat
+    if prediction_now < 0.05:
+        # HET IS DONKER -> Zoek de Piek in de RAW data
+        idx_max = df[target_col].idxmax()
+        peak_val = df.iloc[idx_max][target_col]
+
+        if peak_val > 0.1:
+            row = df.iloc[[idx_max]].copy()
+            ts = row["timestamp"].dt.tz_convert(local_tz).iloc[0]
+            time_label = f"Piek om {ts.strftime('%H:%M')}"
+        else:
+            row = df.iloc[[idx_now]].copy()
+            time_label = "Nu (Nacht)"
+    else:
+        # HET IS LICHT -> Leg 'Nu' uit
+        row = df.iloc[[idx_now]].copy()
+        time_label = "Nu"
 
     # 3. Vraag uitleg aan het model
     explanation = forecaster.model.explain(row)
+    explanation["label"] = time_label
 
     return JSONResponse(explanation)
 
@@ -117,8 +139,6 @@ def trigger_training(request: Request):
     forecaster = coordinator.planner.forecaster
     database = coordinator.collector.database
     config = coordinator.config
-
-    logger.info("[API] Manuele training aangevraagd...")
 
     # 1. Data ophalen
     # Zorg dat we genoeg data hebben voor een goed model
@@ -138,9 +158,7 @@ def trigger_training(request: Request):
     try:
         # Dit blokkeert heel even de server (paar seconden), dat is prima voor thuisgebruik.
         forecaster.model.train(df_hist, config.pv_max_kw)
-
         new_mae = forecaster.model.mae
-        logger.info(f"[API] Training klaar. Nieuwe MAE: {new_mae:.3f}")
 
         return {
             "status": "success",
@@ -199,7 +217,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     if not zon_uren.empty:
         x_start = zon_uren["timestamp_local"].min() - timedelta(hours=1)
-        x_end = zon_uren["timestamp_local"].max() + timedelta(hours=2)
+        x_end = zon_uren["timestamp_local"].max() + timedelta(hours=1.5)
     else:
         # Fallback: als er helemaal geen zon is, toon gewoon alles
         x_start = df["timestamp_local"].min()
@@ -360,11 +378,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
         local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
 
         if local_start >= df["timestamp_local"].min():
-            max_y = max(
+            y_top = max(
                 df[["power_corrected", "pv_estimate"]].max().max(),
                 df_hist_plot["pv_actual"].max() if not df_hist_plot.empty else 0,
             )
-            y_top = max_y * 1.2
 
             duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
 
