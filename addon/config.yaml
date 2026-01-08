@@ -21,7 +21,7 @@ options:
   log_level: info
 schema:
   solar:
-    model_ratio: "float(0.0, 1.0)"
+    model_ratio: "float(0,1)?"
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
 ports:
   8000/tcp: 8000
