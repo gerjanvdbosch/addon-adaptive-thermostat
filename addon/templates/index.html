@@ -30,6 +30,12 @@
             max-width: 1200px;
         }
 
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
         h1 {
             margin: 0 0 16px 0;
             font-size: 24px;
@@ -58,6 +64,7 @@
             /* Automatisch kolommen maken van minimaal 140px breed */
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 12px;
+            margin-bottom: 30px;
         }
 
         .stat-item {
@@ -123,8 +130,8 @@
         }
 
         .explain-container {
-            display: none; /* Standaard verborgen */
-            margin-top: 20px;
+            display: none;
+            margin-bottom: 20px;
             background-color: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 8px;
@@ -157,14 +164,14 @@
 <body>
 
 <div class="dashboard-container">
-    <div style="display: flex; align-items: center; margin-bottom: 16px;">
-        <h1>Home Optimizer</h1>
-        {% if explanation %}
-        <button class="explain-btn" onclick="toggleExplain()">Why?</button>
-        {% endif %}
-    </div>
-
+    <h1>Home Optimizer</h1>
     <div class="card">
+        <div class="header">
+            <h2>Solar Prediction</h2>
+            {% if explanation %}
+                <button class="explain-btn" onclick="toggleExplain()">Explain</button>
+            {% endif %}
+        </div>
         <div class="chart-container">
             {{ forecast_plot | safe }}
         </div>
@@ -199,7 +206,7 @@
             {% else %}
             <tr>
                 <td colspan="2" style="text-align:center; font-style:italic; padding:10px;">
-                    Geen significante invloeden gevonden.
+                    Geen significante invloeden.
                 </td>
             </tr>
             {% endfor %}
@@ -217,14 +224,14 @@
     {% if details %}
         <div class="details-grid">
             {% for key, value in details.items() %}
-            <div class="stat-item {% if key == 'Status' or key == 'Geplande Start' %}highlight{% endif %}">
+            <div class="stat-item">
                 <span class="stat-label">{{ key }}</span>
                 <span class="stat-value">{{ value }}</span>
             </div>
             {% endfor %}
         </div>
     {% else %}
-        <div class="empty-msg">Wachten op data...</div>
+        <div class="empty-msg">Systeem is aan het opstarten...</div>
     {% endif %}
 
 </div>

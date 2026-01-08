@@ -26,16 +26,16 @@ jobs:
       #pylint flake8
 
       - name: Pyflakes (syntax check)
-        run: pyflakes addon/src
+        run: pyflakes addon
 
       - name: Ruff (lint)
-        run: ruff check addon/src
+        run: ruff check addon
 
       - name: Black (format check)
-        run: black --check addon/src
+        run: black --check addon
 
 #      - name: Flake8 (style check)
-#        run: flake8 addon/src
+#        run: flake8 addon
 #
 #      - name: Pylint (code quality)
-#        run: pylint addon/src
+#        run: pylint addon

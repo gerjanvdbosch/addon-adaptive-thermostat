@@ -51,83 +51,19 @@ def index(request: Request):
             "Bias": f"{forecast.current_bias:.2f}",
             "Geplande Start": start_str,
         }
-    explanation = _get_model_explanation(coordinator)
+
+    # 3. Explain Genereren (Gedeelde Functie)
+    explanation = _get_explanation_data(coordinator)
 
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            # We geven nu de HTML string door aan de template
             "forecast_plot": plot_html,
             "details": details,
             "explanation": explanation,
         },
     )
-
-
-@api.get("/solar/explain", response_class=JSONResponse)
-def explain_model_prediction(request: Request):
-    """
-    Geeft de SHAP values terug.
-    Gebruikt 'power_ml_raw' om te bepalen of we 'Nu' of de 'Piek' tonen,
-    zodat dit overeenkomt met wat SHAP daadwerkelijk uitlegt.
-    """
-    coordinator = request.app.state.coordinator
-    context = coordinator.context
-    forecaster = coordinator.planner.forecaster
-
-    # 1. Validatie
-    if (
-        not hasattr(context, "forecast_df")
-        or context.forecast_df is None
-        or context.forecast_df.empty
-    ):
-        return JSONResponse({"error": "Geen data beschikbaar"}, status_code=404)
-
-    if not forecaster.model.is_fitted:
-        return JSONResponse({"error": "Model is nog niet getraind"}, status_code=503)
-
-    # 2. Zoek 'Nu'
-    local_tz = datetime.now().astimezone().tzinfo
-    current_time = datetime.now(local_tz)
-    df = context.forecast_df.copy()
-
-    target_time = current_time.astimezone(df["timestamp"].dt.tz)
-    idx_now = df["timestamp"].searchsorted(target_time)
-    idx_now = min(idx_now, len(df) - 1)
-
-    # --- AANGEPAST: Gebruik RAW data voor logica ---
-    # We prefereren de raw kolom, want dat is wat SHAP uitlegt.
-    target_col = "power_ml_raw" if "power_ml_raw" in df.columns else "power_ml"
-
-    prediction_now = df.iloc[idx_now][target_col]
-
-    row = None
-    time_label = ""
-
-    # Grens iets verlaagd naar 0.05 omdat RAW soms iets scherper naar 0 gaat
-    if prediction_now < 0.05:
-        # HET IS DONKER -> Zoek de Piek in de RAW data
-        idx_max = df[target_col].idxmax()
-        peak_val = df.iloc[idx_max][target_col]
-
-        if peak_val > 0.1:
-            row = df.iloc[[idx_max]].copy()
-            ts = row["timestamp"].dt.tz_convert(local_tz).iloc[0]
-            time_label = f"Piek om {ts.strftime('%H:%M')}"
-        else:
-            row = df.iloc[[idx_now]].copy()
-            time_label = "Nu (Nacht)"
-    else:
-        # HET IS LICHT -> Leg 'Nu' uit
-        row = df.iloc[[idx_now]].copy()
-        time_label = "Nu"
-
-    # 3. Vraag uitleg aan het model
-    explanation = forecaster.model.explain(row)
-    explanation["label"] = time_label
-
-    return JSONResponse(explanation)
 
 
 @api.post("/solar/train", response_class=JSONResponse)
@@ -424,9 +360,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
         template="plotly_dark",
         paper_bgcolor="rgb(28, 28, 28)",
         plot_bgcolor="rgb(28, 28, 28)",
-        title=dict(
-            text="Solar Prediction",
-        ),
         xaxis=dict(
             title="Tijd",
             showgrid=True,
@@ -450,47 +383,50 @@ def _get_solar_forecast_plot(request: Request) -> str:
     )
 
 
-def _get_model_explanation(coordinator) -> dict:
+def _get_explanation_data(coordinator) -> dict:
     """
-    Bereidt de SHAP data voor zodat de HTML het direct kan tonen.
+    CENTRALE FUNCTIE: Bereidt de SHAP data voor.
+    Wordt gebruikt door zowel de HTML template als de JSON API.
     """
     context = coordinator.context
     forecaster = coordinator.planner.forecaster
 
-    # Geen data of model? Leeg teruggeven
+    # 1. Validatie
     if (
         not hasattr(context, "forecast_df")
         or context.forecast_df is None
         or context.forecast_df.empty
     ):
         return None
+
     if not forecaster.model.is_fitted:
         return None
 
     try:
         local_tz = datetime.now().astimezone().tzinfo
         current_time = datetime.now(local_tz)
+
+        # Werk op een kopie
         df = context.forecast_df.copy()
 
-        # Voorspelling toevoegen (Raw ML nodig voor Piek-detectie)
-        preds = forecaster.model.predict(df)
-        df["power_ml"] = preds["prediction_raw"]
+        # 2. Bepaal kolom: 'power_ml_raw' heeft voorkeur (want dat legt SHAP uit)
+        target_col = "power_ml_raw"
 
-        # Zoek index van 'Nu'
+        # 3. Zoek 'Nu'
         target_time = current_time.astimezone(df["timestamp"].dt.tz)
         idx_now = df["timestamp"].searchsorted(target_time)
         idx_now = min(idx_now, len(df) - 1)
 
-        # --- SLIMME KEUZE LOGICA (Nu vs Piek) ---
-        prediction_now = df.iloc[idx_now]["power_ml"]
+        # 4. Slimme Logica: Nu of Piek?
+        prediction_now = df.iloc[idx_now][target_col]
 
         row = None
         time_label = ""
 
-        # Als het donker is (< 0.1 kW), zoek de piek van de dag
-        if prediction_now < 0.1:
-            idx_max = df["power_ml"].idxmax()
-            peak_val = df.iloc[idx_max]["power_ml"]
+        # Als het donker is (< 0.05 kW), zoek de piek van de dag
+        if prediction_now < 0.05:
+            idx_max = df[target_col].idxmax()
+            peak_val = df.iloc[idx_max][target_col]
 
             if peak_val > 0.1:
                 row = df.iloc[[idx_max]].copy()
@@ -498,29 +434,32 @@ def _get_model_explanation(coordinator) -> dict:
                 time_label = f"Piek om {ts.strftime('%H:%M')}"
             else:
                 row = df.iloc[[idx_now]].copy()
-                time_label = "Nu (Nacht/Donker)"
+                time_label = "Nu (Nacht)"
         else:
             row = df.iloc[[idx_now]].copy()
             time_label = "Nu"
 
-        # Vraag SHAP waardes op
+        # 5. Vraag SHAP waardes op
         shap_data = forecaster.model.explain(row)
 
-        # --- DATA VOORBEREIDEN VOOR TEMPLATE ---
-        # We willen niet sorteren in Jinja, dat is gedoe. Doen we hier in Python.
+        # 6. Formatteren en Opschonen
+        # Haal base en prediction eruit (kleine letters want SolarModel geeft lowercase terug)
+        base_val = shap_data.pop("base", "0.00")
+        pred_val = shap_data.pop("prediction", "0.00")
 
-        base_val = shap_data.pop("Base", "0.00")
-        pred_val = shap_data.pop("Prediction", "0.00")
+        # Verwijder rommel
+        shap_data.pop("Info", None)
+        shap_data.pop("_meta_label", None)
 
         factors = []
         for key, val_str in shap_data.items():
             try:
                 val = float(val_str)
-                # Filter verwaarloosbare waardes
+                # Filter verwaarloosbare waardes (< 10 Watt)
                 if abs(val) < 0.01:
                     continue
 
-                # Mooiere labels
+                # Labels vertalen naar leesbaar Nederlands
                 label = key.replace("_sin", "").replace("_cos", "").replace("pv_", "")
                 if label == "estimate":
                     label = "Solcast Forecast"
@@ -528,6 +467,14 @@ def _get_model_explanation(coordinator) -> dict:
                     label = "Straling"
                 if label == "uncertainty":
                     label = "Onzekerheid"
+                if label == "diffuse":
+                    label = "Diffuus licht"
+                if label == "tilted":
+                    label = "Dakhelling"
+                if label == "temp":
+                    label = "Temperatuur"
+                if label == "cloud":
+                    label = "Bewolking"
 
                 factors.append(
                     {
