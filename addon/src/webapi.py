@@ -129,11 +129,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
-    df["power_ml"] = forecaster.model.predict(df)
-    df["power_corrected"] = forecaster.nowcaster.apply(
-        df, context.now, "power_ml", actual_pv=context.stable_pv
-    )
-
     for col in ["pv_estimate", "power_ml", "power_corrected"]:
         df[col] = df[col].round(3)
 
@@ -213,10 +208,9 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=df["timestamp_local"],
             y=df["power_ml_raw"],
             mode="lines",
-            name="Raw Model",
+            name="Model",
             line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
             opacity=0.6,
-            visible="legendonly",  # Standaard uit, klik om te zien
         )
     )
 
