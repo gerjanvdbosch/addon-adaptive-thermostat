@@ -249,7 +249,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=[local_now],
             y=[context.stable_pv],
             mode="markers",
-            name="PV actual",
+            name="Now",
             showlegend=False,
             marker=dict(color="#ffa500", size=12, line=dict(color="white", width=2)),
             zorder=10,
@@ -269,7 +269,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=x_future,
             y=y_future,
             mode="lines",
-            name="Prediction",
+            name="Corrected",
             line=dict(color="#ffa500", width=2),  # Oranje lijn
             fill="tozeroy",  # Vul tot aan de X-as (0)
             fillcolor="rgba(255, 165, 0, 0.1)",
@@ -315,7 +315,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
 
         if local_start >= df["timestamp_local"].min():
-            max_y = df[["power_corrected", "pv_estimate", "pv_actual"]].max().max()
+            max_y = df[["power_corrected", "pv_estimate", "power_ml"]].max().max()
             y_top = max_y * 1.2
 
             duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
