@@ -159,7 +159,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     if not zon_uren.empty:
         x_start = zon_uren["timestamp_local"].min() - timedelta(hours=1)
-        x_end = zon_uren["timestamp_local"].max() + timedelta(hours=1)
+        x_end = zon_uren["timestamp_local"].max() + timedelta(hours=2)
     else:
         # Fallback: als er helemaal geen zon is, toon gewoon alles
         x_start = df["timestamp_local"].min()
@@ -223,6 +223,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 y=df_hist_plot["pv_actual"],
                 mode="lines",
                 name="PV energy",
+                legendgroup="history",
                 line=dict(color="#ffffff", width=1.5),
                 fill="tozeroy",
                 fillcolor="rgba(255, 255, 255, 0.05)",
@@ -239,6 +240,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 opacity=0.8,
                 showlegend=False,  # We hoeven deze niet apart in de legenda
                 hoverinfo="skip",  # Geen popup als je over het lijntje muist
+                legendgroup="history",
             )
         )
 
@@ -292,6 +294,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=df["net_power"],
             mode="lines",  # Geen markers
             name="Netto Solar",
+            showlegend=False,
             line=dict(width=0),  # Geen rand
             fill="tozeroy",
             fillcolor="rgba(255, 165, 0, 0.3)",
