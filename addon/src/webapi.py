@@ -108,6 +108,51 @@ def explain_model_prediction(request: Request):
     return JSONResponse(explanation)
 
 
+@api.post("/solar/train", response_class=JSONResponse)
+def trigger_training(request: Request):
+    """
+    Forceer een hertraining van het model op basis van de laatste 60 dagen.
+    """
+    coordinator = request.app.state.coordinator
+    forecaster = coordinator.planner.forecaster
+    database = coordinator.collector.database
+    config = coordinator.config
+
+    logger.info("[API] Manuele training aangevraagd...")
+
+    # 1. Data ophalen
+    # Zorg dat we genoeg data hebben voor een goed model
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=730)
+
+    # We gebruiken de bestaande functie die ook voor de grafiek wordt gebruikt,
+    # maar dan met een datum ver in het verleden.
+    df_hist = database.get_forecast_history(cutoff_date)
+
+    if df_hist.empty or len(df_hist) < 48:  # Minimaal ~12 uur aan kwartier-data
+        return JSONResponse(
+            {"error": "Te weinig data beschikbaar in database (minimaal 1 dag nodig)."},
+            status_code=400,
+        )
+
+    # 2. Train het model
+    try:
+        # Dit blokkeert heel even de server (paar seconden), dat is prima voor thuisgebruik.
+        forecaster.model.train(df_hist, config.pv_max_kw)
+
+        new_mae = forecaster.model.mae
+        logger.info(f"[API] Training klaar. Nieuwe MAE: {new_mae:.3f}")
+
+        return {
+            "status": "success",
+            "message": f"Model getraind op {len(df_hist)} datapunten.",
+            "new_mae": round(new_mae, 3),
+        }
+
+    except Exception as e:
+        logger.error(f"[API] Training mislukt: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def _get_solar_forecast_plot(request: Request) -> str:
     """
     Genereert een interactieve Plotly grafiek en retourneert deze als HTML string (div).
@@ -315,7 +360,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
         local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
 
         if local_start >= df["timestamp_local"].min():
-            max_y = df[["power_corrected", "pv_estimate", "power_ml"]].max().max()
+            max_y = max(
+                df[["power_corrected", "pv_estimate"]].max().max(),
+                df_hist_plot["pv_actual"].max() if not df_hist_plot.empty else 0,
+            )
             y_top = max_y * 1.2
 
             duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
