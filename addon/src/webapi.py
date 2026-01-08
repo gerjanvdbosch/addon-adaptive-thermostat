@@ -315,7 +315,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         local_start = forecast.planned_start.astimezone(local_tz).replace(tzinfo=None)
 
         if local_start >= df["timestamp_local"].min():
-            max_y = df[["power_corrected", "pv_estimate"]].max().max()
+            max_y = df[["power_corrected", "pv_estimate", "pv_actual"]].max().max()
             y_top = max_y * 1.2
 
             duration_end = local_start + timedelta(hours=forecaster.optimizer.duration)
@@ -409,10 +409,7 @@ def _get_model_explanation(coordinator) -> dict:
 
         # Voorspelling toevoegen (Raw ML nodig voor Piek-detectie)
         preds = forecaster.model.predict(df)
-        if isinstance(preds, pd.DataFrame):
-            df["power_ml"] = preds["raw_ml"]
-        else:
-            df["power_ml"] = preds
+        df["power_ml"] = preds["prediction_raw"]
 
         # Zoek index van 'Nu'
         target_time = current_time.astimezone(df["timestamp"].dt.tz)
