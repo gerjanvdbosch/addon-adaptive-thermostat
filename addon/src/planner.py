@@ -29,7 +29,7 @@ class Planner:
         logger.info(f"[Planner] Status {status}")
 
         if forecast is not None:
-            if forecast.planned_start is None:
+            if forecast.planned_start is None and forecast.planned_start > now:
                 forecast.planned_start = datetime.now(timezone.utc).replace(
                     hour=16, minute=0, second=0, microsecond=0
                 )
