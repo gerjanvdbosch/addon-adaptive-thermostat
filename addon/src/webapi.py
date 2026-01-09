@@ -144,7 +144,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df.at[idx, "consumption"] = max(blended_load, baseload)
 
     df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
-    df["net_power"] = (df["power_corrected"] - df["consumption"]).round(3)
+    df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
     if df.empty:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
