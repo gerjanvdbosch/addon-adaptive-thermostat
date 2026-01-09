@@ -1,7 +1,5 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import joblib
-import numpy as np
 import os
 import sys
 
@@ -14,15 +12,15 @@ src_path = os.path.abspath(os.path.join(current_dir, "..", "src"))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from forecaster import SolarModel
-from config import Config
-from context import Context
-from database import Database
+from forecaster import SolarModel  # noqa: E402
+from config import Config  # noqa: E402
+from database import Database  # noqa: E402
 
 # Instellingen
 DB_PATH = "database.sqlite"
 MODEL_PATH = "solar_model.joblib"
 CUTOFF_DATE = "2025-01-08"  # Datum vanaf waar je data wilt analyseren
+
 
 def analyze():
     print("1. Model en Data laden...")
@@ -37,7 +35,6 @@ def analyze():
     if not model_wrapper.is_fitted:
         print("Model is nog niet getraind!")
         return
-
 
     # Filteren en voorbereiden (net zoals in je train functie)
     is_daytime = (df["pv_estimate"] > 0.0) | (df["pv_actual"] > 0.0)
@@ -57,8 +54,10 @@ def analyze():
 
     if test_preds.max() < 0.01:
         print("!!! ALARM: Je model voorspelt ALLEEN MAAR 0. !!!")
-        print("Oorzaak: Je traint lokaal op een lege database of laadt een corrupt bestand.")
-        return # Stop hier, want plotten heeft geen zin
+        print(
+            "Oorzaak: Je traint lokaal op een lege database of laadt een corrupt bestand."
+        )
+        return  # Stop hier, want plotten heeft geen zin
 
     print(f"Data geladen: {len(X)} rijen (gefilterd op daglicht).")
 
@@ -79,7 +78,7 @@ def analyze():
     plt.boxplot(
         result.importances[sorted_idx].T,
         vert=False,
-        tick_labels=X.columns[sorted_idx], # <--- AANPASSING: labels -> tick_labels
+        tick_labels=X.columns[sorted_idx],  # <--- AANPASSING: labels -> tick_labels
     )
     plt.title("Welke factoren bepalen de opbrengst het meest?")
     plt.tight_layout()
@@ -97,19 +96,18 @@ def analyze():
 
     # Hier zat de warning: Als het model overal 0 voorspelt, crasht de schaal
     try:
-        display = PartialDependenceDisplay.from_estimator(
-            model_wrapper.model,
-            X,
-            features_to_plot,
-            kind="average",
-            ax=ax
+        PartialDependenceDisplay.from_estimator(
+            model_wrapper.model, X, features_to_plot, kind="average", ax=ax
         )
         plt.suptitle("Hoe reageert het model op veranderingen?", y=1.02)
         plt.tight_layout()
         plt.savefig("analyse_behavior.png")
         print("Opgeslagen: analyse_behavior.png")
     except Exception as e:
-        print(f"Kon behavior plot niet maken (waarschijnlijk is model een platte lijn): {e}")
+        print(
+            f"Kon behavior plot niet maken (waarschijnlijk is model een platte lijn): {e}"
+        )
+
 
 if __name__ == "__main__":
     analyze()
