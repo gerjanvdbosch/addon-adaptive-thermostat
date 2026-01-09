@@ -128,12 +128,12 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
-    for col in ["pv_estimate", "power_ml", "power_corrected"]:
+    for col in ["pv_estimate", "power_ml", "power_ml_raw", "power_corrected"]:
         df[col] = df[col].round(3)
 
     # Load & Net Power projectie
     baseload = forecaster.optimizer.avg_baseload
-    df["consumption"] = baseload
+    df["consumption"] = baseload.round(3)
 
     future_mask = df["timestamp_local"] >= local_now
     future_indices = df.index[future_mask].copy()
@@ -144,7 +144,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df.at[idx, "consumption"] = max(blended_load, baseload)
 
     df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
-    df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
+    df["net_power"] = (df["power_corrected"] - df["consumption"]).round(3)
 
     if df.empty:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
