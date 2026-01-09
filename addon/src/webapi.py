@@ -219,7 +219,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=df_hist_plot["timestamp_local"],
                 y=df_hist_plot["pv_actual"],
                 mode="lines",
-                name="PV energy",
+                name="PV history",
                 legendgroup="history",
                 line=dict(color="#ffa500", width=1.5),
                 fill="tozeroy",
@@ -269,7 +269,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=y_future,
             mode="lines",
             name="Corrected",
-            line=dict(color="#ffa500", dash="dash", width=2),
+            line=dict(color="#ffffff", dash="dash", width=2),
             fill="tozeroy",  # Vul tot aan de X-as (0)
             fillcolor="rgba(255, 255, 255, 0.05)",
             opacity=0.8,
