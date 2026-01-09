@@ -164,7 +164,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
         df_hist["pv_actual"] = df_hist["pv_actual"].round(3)
-        df_hist = df_hist[df_hist["pv_actual"] > 0]
         df_hist_plot = df_hist.copy()
 
     zon_uren = df[df["power_corrected"] > 0]
@@ -235,7 +234,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 mode="lines",
                 line=dict(color="#ffa500", dash="dash", width=1.5),  # Wit en gestippeld
                 fill="tozeroy",
-                opacity=0.8,
+                fillcolor="rgba(255, 165, 0, 0.1)",
                 showlegend=False,  # We hoeven deze niet apart in de legenda
                 hoverinfo="skip",  # Geen popup als je over het lijntje muist
                 legendgroup="history",
