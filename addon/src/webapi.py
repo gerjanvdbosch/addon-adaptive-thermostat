@@ -268,7 +268,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
             x=x_future,
             y=y_future,
             mode="lines",
-            name="Corrected",
+            name="Forecast",
             line=dict(color="#ffffff", dash="dash", width=2),
             fill="tozeroy",  # Vul tot aan de X-as (0)
             fillcolor="rgba(255, 255, 255, 0.05)",
