@@ -138,9 +138,6 @@ class SolarModel:
     def train(self, df_history: pd.DataFrame, system_max: float):
         df_train = df_history.dropna(subset=["pv_actual"]).copy()
 
-        is_daytime = (df_train["pv_estimate"] > 0.0) | (df_train["pv_actual"] > 0.0)
-        df_train = df_train[is_daytime]
-
         X = self._prepare_features(df_train)
         y = df_train["pv_actual"].clip(0, system_max)
 
