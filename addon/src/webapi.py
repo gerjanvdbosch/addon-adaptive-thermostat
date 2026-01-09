@@ -133,7 +133,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # Load & Net Power projectie
     baseload = forecaster.optimizer.avg_baseload
-    df["consumption"] = baseload.round(3)
+    df["consumption"] = baseload
 
     future_mask = df["timestamp_local"] >= local_now
     future_indices = df.index[future_mask].copy()
