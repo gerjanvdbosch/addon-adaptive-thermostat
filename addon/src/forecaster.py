@@ -133,7 +133,7 @@ class SolarModel:
         df["uncertainty"] = df["pv_estimate90"] - df["pv_estimate10"]
         X = df.reindex(columns=self.feature_cols)
 
-        return X.apply(pd.to_numeric, errors="coerce").fillna(0)
+        return X.apply(pd.to_numeric, errors="coerce")
 
     def train(self, df_history: pd.DataFrame, system_max: float):
         df_train = df_history.dropna(subset=["pv_actual"]).copy()

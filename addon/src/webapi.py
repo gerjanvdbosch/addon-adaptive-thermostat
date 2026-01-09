@@ -149,16 +149,6 @@ def _get_solar_forecast_plot(request: Request) -> str:
     if df.empty:
         return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
 
-    zon_uren = df[df["power_corrected"] > 0]
-
-    if not zon_uren.empty:
-        x_start = zon_uren["timestamp_local"].min() - timedelta(hours=1)
-        x_end = zon_uren["timestamp_local"].max() + timedelta(hours=1.5)
-    else:
-        # Fallback: als er helemaal geen zon is, toon gewoon alles
-        x_start = df["timestamp_local"].min()
-        x_end = df["timestamp_local"].max()
-
     # --- 2. PLOT GENERATIE (PLOTLY) ---
     cutoff_date = (
         local_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -174,7 +164,18 @@ def _get_solar_forecast_plot(request: Request) -> str:
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
         df_hist["pv_actual"] = df_hist["pv_actual"].round(3)
+        df_hist = df_hist[df_hist["pv_actual"] > 0]
         df_hist_plot = df_hist.copy()
+
+    zon_uren = df[df["power_corrected"] > 0]
+    if not zon_uren.empty:
+        x_start = zon_uren["timestamp_local"].min() - timedelta(hours=2)
+        x_end = max(
+            zon_uren["timestamp_local"].max(), df_hist_plot["timestamp_local"].max()
+        ) + timedelta(hours=2)
+    else:
+        x_start = df["timestamp_local"].min()
+        x_end = df["timestamp_local"].max()
 
     fig = go.Figure()
 
@@ -221,10 +222,9 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 mode="lines",
                 name="PV energy",
                 legendgroup="history",
-                line=dict(color="#ffffff", width=1.5),
+                line=dict(color="#ffa500", width=1.5),
                 fill="tozeroy",
-                fillcolor="rgba(255, 255, 255, 0.05)",
-                opacity=0.8,
+                fillcolor="rgba(255, 165, 0, 0.1)",
             )
         )
 
@@ -233,7 +233,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 x=[df_hist_plot["timestamp_local"].iloc[-1], local_now],
                 y=[df_hist_plot["pv_actual"].iloc[-1], context.stable_pv],
                 mode="lines",
-                line=dict(color="#ffffff", dash="dash", width=1.5),  # Wit en gestippeld
+                line=dict(color="#ffa500", dash="dash", width=1.5),  # Wit en gestippeld
+                fill="tozeroy",
                 opacity=0.8,
                 showlegend=False,  # We hoeven deze niet apart in de legenda
                 hoverinfo="skip",  # Geen popup als je over het lijntje muist
@@ -269,9 +270,10 @@ def _get_solar_forecast_plot(request: Request) -> str:
             y=y_future,
             mode="lines",
             name="Corrected",
-            line=dict(color="#ffa500", width=2),  # Oranje lijn
+            line=dict(color="#ffa500", dash="dash", width=2),
             fill="tozeroy",  # Vul tot aan de X-as (0)
-            fillcolor="rgba(255, 165, 0, 0.1)",
+            fillcolor="rgba(255, 255, 255, 0.05)",
+            opacity=0.8,
         )
     )
 
@@ -329,7 +331,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                     mode="lines+text",
                     name="Start",  # Dit komt in de legenda
                     legendgroup="start",  # Koppelnaam
-                    line=dict(color="#2ca02c", dash="dash", width=2),
+                    line=dict(color="#2ca02c", width=2),
                     text=["", "Start"],  # Tekst alleen bij het bovenste punt
                     textposition="top right",  # Rechts van de lijn
                     textfont=dict(color="#2ca02c"),
@@ -372,7 +374,14 @@ def _get_solar_forecast_plot(request: Request) -> str:
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)",
         ),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            itemdoubleclick=False,
+        ),
         margin=dict(l=40, r=20, t=80, b=40),
         height=500,
         hovermode="x unified",  # Laat alle waardes zien op 1 verticale lijn
