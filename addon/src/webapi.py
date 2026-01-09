@@ -129,7 +129,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
     for col in ["pv_estimate", "power_ml", "power_ml_raw", "power_corrected"]:
-        df[col] = df[col].round(3)
+        df[col] = df[col].round(2)
 
     # Load & Net Power projectie
     baseload = forecaster.optimizer.avg_baseload
@@ -163,7 +163,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df_hist["timestamp_local"] = (
             df_hist["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
         )
-        df_hist["pv_actual"] = df_hist["pv_actual"].round(3)
+        df_hist["pv_actual"] = df_hist["pv_actual"].round(2)
         df_hist_plot = df_hist.copy()
 
     zon_uren = df[df["power_corrected"] > 0]
