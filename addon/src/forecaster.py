@@ -351,7 +351,7 @@ class SolarOptimizer:
             model_power_now = df.iloc[idx_now]["power_corrected"]
 
             # Absolute harde blokkade
-            if current_pv_kw < 0.5:
+            if current_pv_kw < self.min_kwh_threshold:
                 should_start = False
                 reason = f"Wachten: Huidige PV ({current_pv_kw:.2f} kW) te laag."
 
@@ -375,6 +375,7 @@ class SolarOptimizer:
         elif energy_now < 0.1 and energy_best < self.min_kwh_threshold:
             status = SolarStatus.LOW_LIGHT
             reason = "Te weinig netto licht voor start"
+            planned_start = None
         else:
             status = SolarStatus.WAIT
             reason = f"Wacht op overcapaciteit ({energy_best:.2f}kWh) over {minutes_to_peak}m"
