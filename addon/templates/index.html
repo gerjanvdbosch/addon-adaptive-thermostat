@@ -212,7 +212,7 @@
             <!-- Factoren Loop -->
             {% for factor in explanation.factors %}
             <tr>
-                <td>{{ factor.label }}</td>
+                <td style="text-transform: capitalize;">{{ factor.label }}</td>
                 <td class="{{ factor.css_class }}">{{ factor.value }}</td>
             </tr>
             {% else %}
@@ -225,11 +225,35 @@
 
             <!-- Eindresultaat -->
             <tr style="border-top: 1px solid var(--border-color); font-weight:bold;">
-                <td>ML Voorspelling</td>
+                <td>Voorspelling</td>
                 <td class="val-base">{{ explanation.prediction }}</td>
             </tr>
             </tbody>
         </table>
+
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+
+            <!-- Importance Card (Links) -->
+            <div class="card" style="flex: 1; min-width: 300px;">
+                <div class="header">
+                    <h3 style="margin: 0;">Wat is belangrijk?</h3>
+                </div>
+                <div class="chart-container">
+                    {{ importance_plot | safe }}
+                </div>
+            </div>
+
+            <!-- Behavior Card (Rechts) -->
+            <div class="card" style="flex: 1; min-width: 300px;">
+                <div class="header">
+                    <h3 style="margin: 0;">Hoe reageert het model?</h3>
+                </div>
+                <div class="chart-container">
+                    {{ behavior_plot | safe }}
+                </div>
+            </div>
+
+        </div>
     </div>
     {% endif %}
 
@@ -243,7 +267,7 @@
             {% endfor %}
         </div>
     {% else %}
-        <div class="empty-msg">Systeem is aan het opstarten...</div>
+        <div class="empty-msg">Wachten op data...</div>
     {% endif %}
 
 </div>

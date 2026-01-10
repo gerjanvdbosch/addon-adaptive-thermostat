@@ -3,6 +3,8 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 
+from plotly.subplots import make_subplots
+from sklearn.inspection import partial_dependence, permutation_importance
 from operator import itemgetter
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, Request
@@ -23,12 +25,15 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def index(request: Request):
     # Haal de HTML div string op in plaats van een plaatje
     plot_html = _get_solar_forecast_plot(request)
+    importance_html = _get_importance_plot_plotly(request)
+    behavior_html = _get_behavior_plot_plotly(request)
 
     coordinator = request.app.state.coordinator
     context = coordinator.context
     forecast = context.forecast
 
     details = {}
+    explanation = {}
 
     if hasattr(context, "forecast") and context.forecast is not None:
         # Helper voor veilige datum weergave
@@ -44,22 +49,24 @@ def index(request: Request):
             "Reden": forecast.reason,
             "PV Huidig": f"{forecast.actual_pv:.2f} kW",
             "Load Huidig": f"{forecast.load_now:.2f} kW",
-            "Prognose Nu": f"{forecast.energy_now:.2f} kW",
-            "Prognose Beste": f"{forecast.energy_best:.2f} kW",
+            "Prognose Nu": f"{forecast.energy_now:.2f} kWh",
+            "Prognose Beste": f"{forecast.energy_best:.2f} kWh",
             "Opp. Kosten": f"{forecast.opportunity_cost * 100:.3f} %",
             "Betrouwbaarheid": f"{forecast.confidence * 100:.3f} %",
             "Bias": f"{forecast.current_bias:.2f}",
             "Geplande Start": start_str,
         }
 
-    # 3. Explain Genereren (Gedeelde Functie)
-    explanation = _get_explanation_data(coordinator)
+        # 3. Explain Genereren (Gedeelde Functie)
+        explanation = _get_explanation_data(coordinator)
 
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "forecast_plot": plot_html,
+            "importance_plot": importance_html,
+            "behavior_plot": behavior_html,
             "details": details,
             "explanation": explanation,
         },
@@ -119,7 +126,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # Check of er data is
     if not hasattr(context, "forecast") or context.forecast is None:
-        return "No forecast available."
+        return ""
 
     local_tz = datetime.now().astimezone().tzinfo
     local_now = context.now.astimezone(local_tz).replace(tzinfo=None)
@@ -129,7 +136,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
     for col in ["pv_estimate", "power_ml", "power_ml_raw", "power_corrected"]:
-        df[col] = df[col].round(2)
+        if col in df.columns:
+            df[col] = df[col].round(2)
 
     # Load & Net Power projectie
     baseload = forecaster.optimizer.avg_baseload
@@ -147,7 +155,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
 
     if df.empty:
-        return "<div class='alert alert-warning'>Geen relevante data om te tonen (nacht).</div>"
+        return ""
 
     # --- 2. PLOT GENERATIE (PLOTLY) ---
     cutoff_date = (
@@ -191,27 +199,29 @@ def _get_solar_forecast_plot(request: Request) -> str:
     )
 
     # B. Model Correction (Blauw, dot)
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp_local"],
-            y=df["power_ml"],
-            mode="lines",
-            name="Blended",
-            line=dict(color="#4fa8ff", dash="dot", width=1),
-            opacity=0.8,
+    if "power_ml" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df["timestamp_local"],
+                y=df["power_ml"],
+                mode="lines",
+                name="Blended",
+                line=dict(color="#4fa8ff", dash="dot", width=1),
+                opacity=0.8,
+            )
         )
-    )
 
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp_local"],
-            y=df["power_ml_raw"],
-            mode="lines",
-            name="Model",
-            line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
-            opacity=0.6,
+    if "power_ml_raw" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df["timestamp_local"],
+                y=df["power_ml_raw"],
+                mode="lines",
+                name="Model",
+                line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
+                opacity=0.6,
+            )
         )
-    )
 
     if not df_hist_plot.empty:
         fig.add_trace(
@@ -508,3 +518,193 @@ def _get_explanation_data(coordinator) -> dict:
     except Exception as e:
         logger.error(f"Error preparing explanation: {e}")
         return None
+
+
+def _get_importance_plot_plotly(request: Request) -> str:
+    """
+    Genereert een Plotly Bar Chart met de feature importance.
+    Let op: Dit is rekenintensief, dus we doen dit op een beperkte set.
+    """
+    coordinator = request.app.state.coordinator
+    forecaster = coordinator.planner.forecaster
+    database = coordinator.collector.database
+
+    # 1. Check: Is het model getraind?
+    if not forecaster.model.is_fitted:
+        return "<div class='p-4 text-muted'>Model nog niet getraind.</div>"
+
+    # 2. Data ophalen (Beperk tot laatste 14 dagen voor snelheid)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
+    df_hist = database.get_forecast_history(cutoff_date)
+
+    if df_hist.empty:
+        return "<div class='p-4 text-muted'>Onvoldoende data voor analyse.</div>"
+
+    # 3. Filter op daglicht (cruciaal, anders klopt de importance niet)
+    # We gebruiken dezelfde logica als bij het trainen/analyseren
+    is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
+    df_day = df_hist[is_daytime].copy()
+
+    if len(df_day) < 10:
+        return "<div class='p-4 text-muted'>Wachten op meer daglicht-data...</div>"
+
+    # 4. Features voorbereiden
+    try:
+        X = forecaster.model._prepare_features(df_day)
+        y = df_day["pv_actual"]
+
+        # 5. Bereken Importance (n_repeats=2 houdt het snel genoeg voor een dashboard)
+        # Voor wetenschappelijke precisie wil je 10, voor een dashboard is 2-3 prima.
+        result = permutation_importance(
+            forecaster.model.model, X, y, n_repeats=2, random_state=42, n_jobs=-1
+        )
+    except Exception as e:
+        logger.error(f"Fout bij berekenen importance: {e}")
+        return "<div class='p-4 text-danger'>Kon importance niet berekenen.</div>"
+
+    # 6. Sorteren en Labelen
+    sorted_idx = result.importances_mean.argsort()
+
+    # Vertaal de labels naar leesbaar Nederlands
+    labels_raw = X.columns[sorted_idx]
+    labels_clean = []
+
+    label_map = {
+        "pv_estimate": "Solcast Basis",
+        "pv_estimate10": "Solcast Min (10%)",
+        "pv_estimate90": "Solcast Max (90%)",
+        "radiation": "Straling",
+        "hour_cos": "Tijdstip (Uur)",
+        "hour_sin": "Tijdstip (Cyclisch)",
+        "temp": "Temperatuur",
+        "cloud": "Bewolking",
+        "diffuse": "Diffuus Licht",
+        "tilted": "Dakhelling Effect",
+        "uncertainty": "Onzekerheid",
+        "wind": "Wind",
+        "precipitation": "Neerslag",
+        "doy_cos": "Seizoen",
+        "doy_sin": "Seizoen (Cyclisch)",
+    }
+
+    for label in labels_raw:
+        clean = label_map.get(label, label)  # Pak vertaling of origineel
+        labels_clean.append(clean)
+
+    values = result.importances_mean[sorted_idx]
+
+    # 7. Plotly Grafiek Maken
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels_clean,
+            orientation="h",
+            marker=dict(
+                color=values,
+                colorscale="Viridis",  # Of 'Blues', 'Magma'
+                showscale=False,
+            ),
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgb(28, 28, 28)",
+        plot_bgcolor="rgb(28, 28, 28)",
+        margin=dict(l=20, r=20, t=30, b=30),
+        height=400,
+        xaxis=dict(
+            title="Impact op voorspelling",
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.1)",
+        ),
+        yaxis=dict(showgrid=False),
+    )
+
+    return pio.to_html(
+        fig, full_html=False, include_plotlyjs=False, config={"displayModeBar": False}
+    )
+
+
+def _get_behavior_plot_plotly(request: Request) -> str:
+    """
+    Genereert Partial Dependence Plots (PDP) voor de belangrijkste fysieke features.
+    """
+    coordinator = request.app.state.coordinator
+    forecaster = coordinator.planner.forecaster
+    database = coordinator.collector.database
+
+    if not forecaster.model.is_fitted:
+        return ""
+
+    # 1. Data ophalen (Laatste 14 dagen is genoeg voor gedrag)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
+    df_hist = database.get_forecast_history(cutoff_date)
+
+    # Filter op daglicht
+    is_daytime = (df_hist["pv_estimate"] > 0.01) | (df_hist["pv_actual"] > 0.01)
+    df_day = df_hist[is_daytime].copy()
+
+    if len(df_day) < 50:
+        return "<div class='p-4 text-muted'>Te weinig data voor gedragsanalyse.</div>"
+
+    try:
+        X = forecaster.model._prepare_features(df_day)
+
+        # 2. Kies de features die we willen inspecteren
+        # We pakken hardcoded de 3 interessantste, dat is sneller dan eerst sorteren.
+        features_to_plot = ["radiation", "pv_estimate10", "temp"]
+        feature_labels = ["Straling (W/m²)", "Solcast Min (kW)", "Temperatuur (°C)"]
+
+        # 3. Maak Subplots (1 rij, 3 kolommen)
+        fig = make_subplots(
+            rows=1, cols=3, subplot_titles=feature_labels, horizontal_spacing=0.05
+        )
+
+        # 4. Berekenen en tekenen per feature
+        for i, feature in enumerate(features_to_plot):
+            if feature not in X.columns:
+                continue
+
+            # Dit is het zware werk: Sklearn rekent de lijn uit
+            pdp_results = partial_dependence(
+                forecaster.model.model, X, [feature], grid_resolution=20, kind="average"
+            )
+
+            x_vals = pdp_results["grid_values"][0]
+            y_vals = pdp_results["average"][0]
+
+            # Voeg lijn toe aan de subplot
+            fig.add_trace(
+                go.Scatter(
+                    x=x_vals,
+                    y=y_vals,
+                    mode="lines",
+                    name=feature,
+                    line=dict(width=3, color="#4fa8ff"),  # Mooi blauw
+                    showlegend=False,
+                ),
+                row=1,
+                col=i + 1,
+            )
+
+        # 5. Opmaak
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgb(28, 28, 28)",
+            plot_bgcolor="rgb(28, 28, 28)",
+            margin=dict(l=20, r=20, t=50, b=20),
+            height=300,  # Niet te hoog maken
+            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
+        )
+
+        return pio.to_html(
+            fig,
+            full_html=False,
+            include_plotlyjs=False,
+            config={"displayModeBar": False},
+        )
+
+    except Exception as e:
+        logger.error(f"Fout bij behavior plot: {e}")
+        return "<div class='p-4 text-danger'>Kon gedrag niet analyseren.</div>"
