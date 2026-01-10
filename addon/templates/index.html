@@ -170,6 +170,42 @@
             color: var(--primary-color);
             font-weight: bold;
         }
+
+        .loading-overlay {
+            display: none; /* Standaard verborgen */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7); /* Donkere achtergrond */
+            z-index: 9999; /* Boven alles */
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            backdrop-filter: blur(2px); /* Mooi blur effect */
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255, 255, 255, 0.1);
+            border-top: 5px solid var(--primary-color); /* Blauwe rand */
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        .loading-text {
+            color: var(--text-color);
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -263,15 +299,33 @@
 
 </div>
 
+<div id="loading-overlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Model analyseren...</div>
+</div>
+
 <script>
     function toggleExplain() {
-        const url = new URL(window.location.href);
-        if (url.searchParams.get('explain') === '1') {
-            url.searchParams.delete('explain');
-        } else {
-            url.searchParams.set('explain', '1');
+        // 1. Toon de loader direct
+        const loader = document.getElementById('loading-overlay');
+        if (loader) {
+            loader.style.display = 'flex';
         }
-        window.location.href = url.toString();
+
+        // 2. Korte vertraging om de browser tijd te geven de loader te tekenen
+        setTimeout(() => {
+            const url = new URL(window.location.href);
+
+            // Toggle logic
+            if (url.searchParams.get('explain') === '1') {
+                url.searchParams.delete('explain');
+            } else {
+                url.searchParams.set('explain', '1');
+            }
+
+            // Herlaad de pagina
+            window.location.href = url.toString();
+        }, 10);
     }
 </script>
 </body>
