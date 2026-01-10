@@ -187,7 +187,7 @@
     </div>
 
     {% if explanation %}
-    <div id="explain-box" class="explain-container">
+    <div class="explain-container">
         <div style="margin-bottom:10px; font-weight:bold; color:var(--primary-color);">
             Focus: {{ explanation.time_label }}
         </div>
@@ -227,23 +227,23 @@
             </tr>
             </tbody>
         </table>
+    </div>
 
-        <div class="card">
-            <div class="header">
-                <h3 style="margin: 0;">Wat is belangrijk?</h3>
-            </div>
-            <div class="chart-container">
-                {{ importance_plot | safe }}
-            </div>
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Wat is belangrijk?</h3>
         </div>
+        <div class="chart-container">
+            {{ importance_plot | safe }}
+        </div>
+    </div>
 
-        <div class="card">
-            <div class="header">
-                <h3 style="margin: 0;">Hoe reageert het model?</h3>
-            </div>
-            <div class="chart-container">
-                {{ behavior_plot | safe }}
-            </div>
+    <div class="card">
+        <div class="header">
+            <h3 style="margin: 0;">Hoe reageert het model?</h3>
+        </div>
+        <div class="chart-container">
+            {{ behavior_plot | safe }}
         </div>
     </div>
     {% endif %}

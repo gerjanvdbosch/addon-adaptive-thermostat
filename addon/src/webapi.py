@@ -138,9 +138,12 @@ def _get_solar_forecast_plot(request: Request) -> str:
     df = context.forecast_df.copy()
     df["timestamp_local"] = df["timestamp"].dt.tz_convert(local_tz).dt.tz_localize(None)
 
+    is_night = df["timestamp_local"].dt.hour.isin([23, 0, 1, 2, 3, 4])
+
     for col in ["pv_estimate", "power_ml", "power_ml_raw", "power_corrected"]:
         if col in df.columns:
             df[col] = df[col].round(2)
+            df.loc[is_night, col] = 0.0
 
     # Load & Net Power projectie
     baseload = forecaster.optimizer.avg_baseload
@@ -155,7 +158,11 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df.at[idx, "consumption"] = max(blended_load, baseload)
 
     df.loc[df["timestamp_local"] < local_now, "consumption"] = context.stable_load
-    df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
+
+    if "power_corrected" in df.columns:
+        df["net_power"] = (df["power_corrected"] - df["consumption"]).clip(lower=0)
+    else:
+        df["net_power"] = 0.0
 
     if df.empty:
         return ""
@@ -177,7 +184,8 @@ def _get_solar_forecast_plot(request: Request) -> str:
         df_hist["pv_actual"] = df_hist["pv_actual"].round(2)
         df_hist_plot = df_hist.copy()
 
-    zon_uren = df[df["power_corrected"] > 0]
+    active_col = "power_corrected" if "power_corrected" in df.columns else "pv_estimate"
+    zon_uren = df[df[active_col] > 0]
     if not zon_uren.empty:
         x_start = zon_uren["timestamp_local"].min() - timedelta(hours=2)
         x_end = max(
@@ -270,26 +278,27 @@ def _get_solar_forecast_plot(request: Request) -> str:
         )
     )
 
-    # D. Corrected Solar
-    df_future = df[df["timestamp_local"] >= local_now]
+    if "power_corrected" in df.columns:
+        # D. Corrected Solar
+        df_future = df[df["timestamp_local"] >= local_now]
 
-    # Om de lijn visueel aan het 'Huidig PV' bolletje te knopen,
-    # plakken we het huidige punt vooraan de lijst.
-    x_future = [local_now] + df_future["timestamp_local"].tolist()
-    y_future = [context.stable_pv] + df_future["power_corrected"].tolist()
+        # Om de lijn visueel aan het 'Huidig PV' bolletje te knopen,
+        # plakken we het huidige punt vooraan de lijst.
+        x_future = [local_now] + df_future["timestamp_local"].tolist()
+        y_future = [context.stable_pv] + df_future["power_corrected"].tolist()
 
-    fig.add_trace(
-        go.Scatter(
-            x=x_future,
-            y=y_future,
-            mode="lines",
-            name="Forecast",
-            line=dict(color="#ffffff", dash="dash", width=2),
-            fill="tozeroy",  # Vul tot aan de X-as (0)
-            fillcolor="rgba(255, 255, 255, 0.05)",
-            opacity=0.8,
+        fig.add_trace(
+            go.Scatter(
+                x=x_future,
+                y=y_future,
+                mode="lines",
+                name="Forecast",
+                line=dict(color="#ffffff", dash="dash", width=2),
+                fill="tozeroy",  # Vul tot aan de X-as (0)
+                fillcolor="rgba(255, 255, 255, 0.05)",
+                opacity=0.8,
+            )
         )
-    )
 
     # E. Load Projection (Rood, Step)
     #     fig.add_trace(
@@ -304,6 +313,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # F. Netto Solar (Filled Area)
     # In Plotly is fill='tozeroy' makkelijk, maar om specifiek netto te kleuren gebruiken we de berekende kolom
+    # if "net_power" in df.columns and df["net_power"].max() > 0:
     #     fig.add_trace(
     #         go.Scatter(
     #             x=df["timestamp_local"],
@@ -661,8 +671,8 @@ def _get_behavior_plot_plotly(request: Request) -> str:
 
         # 2. Kies de features die we willen inspecteren
         # We pakken hardcoded de 3 interessantste, dat is sneller dan eerst sorteren.
-        features_to_plot = ["radiation", "pv_estimate10", "hour_cos"]
-        feature_labels = ["Straling (W/m²)", "Solcast Min (kW)", "Tijdstip (Uur)"]
+        features_to_plot = ["pv_estimate10", "pv_estimate", "pv_estimate10"]
+        feature_labels = ["Solcast Min (kW)", "Solcast (kW)", "Solcast Max (kW)"]
 
         # 3. Maak Subplots (1 rij, 3 kolommen)
         fig = make_subplots(
