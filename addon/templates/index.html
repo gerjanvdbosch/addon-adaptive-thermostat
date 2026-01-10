@@ -214,13 +214,26 @@
     <h1>Home Optimizer</h1>
     <div class="card">
         <div class="header">
-            <h3 style="margin: 0;">Solar Prediction</h3>
+            <h3 style="margin: 0;">Solar Forecast</h3>
             <button class="explain-btn" onclick="toggleExplain()">Explain</button>
         </div>
         <div class="chart-container">
             {{ forecast_plot | safe }}
         </div>
     </div>
+
+    {% if details %}
+    <div class="details-grid">
+        {% for key, value in details.items() %}
+        <div class="stat-item">
+            <span class="stat-label">{{ key }}</span>
+            <span class="stat-value">{{ value }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-msg">Wachten op data...</div>
+    {% endif %}
 
     {% if explanation %}
     <div class="explain-container">
@@ -283,20 +296,6 @@
         </div>
     </div>
     {% endif %}
-
-    {% if details %}
-        <div class="details-grid">
-            {% for key, value in details.items() %}
-            <div class="stat-item">
-                <span class="stat-label">{{ key }}</span>
-                <span class="stat-value">{{ value }}</span>
-            </div>
-            {% endfor %}
-        </div>
-    {% else %}
-        <div class="empty-msg">Wachten op data...</div>
-    {% endif %}
-
 </div>
 
 <div id="loading-overlay" class="loading-overlay">

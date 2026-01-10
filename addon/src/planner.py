@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from context import Context
 from config import Config
-from forecaster import SolarForecaster
+from solar import SolarForecaster
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

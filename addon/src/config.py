@@ -23,7 +23,7 @@ class Config:
 
     min_kwh_threshold: float = 0.2
     avg_baseload_kw: float = 0.15
-    max_compressor_freq: int = 70
+    max_compressor_freq: int = 75
 
     sensor_pv: str = "sensor.pv_output"
     sensor_load: str = "sensor.stroomverbruik"

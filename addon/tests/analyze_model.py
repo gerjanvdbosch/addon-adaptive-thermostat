@@ -12,7 +12,7 @@ src_path = os.path.abspath(os.path.join(current_dir, "..", "src"))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from forecaster import SolarModel  # noqa: E402
+from solar import SolarModel  # noqa: E402
 from config import Config  # noqa: E402
 from database import Database  # noqa: E402
 

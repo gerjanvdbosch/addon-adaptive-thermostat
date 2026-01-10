@@ -15,7 +15,7 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 
-from forecaster import (  # noqa: E402
+from solar import (  # noqa: E402
     SolarForecaster,
     SolarModel,
     NowCaster,
@@ -67,6 +67,7 @@ class MockConfig:
         self.min_kwh_threshold = 0.3
         self.avg_baseload_kw = 0.15
         self.solar_model_path = "solar_model.joblib"
+        self.solar_model_ratio = 1
 
 
 class MockContext:
@@ -267,7 +268,7 @@ def run_simulation():
             self.is_fitted = True
             self.mae = 0.15
 
-        def predict(self, df):
+        def predict(self, df, model_ratio: float = 0.7):
             val = df["pv_estimate"] * 0.95
             # FIX: Return DataFrame zoals de echte code verwacht
             return pd.DataFrame({"prediction": val, "prediction_raw": val})
@@ -313,7 +314,7 @@ def run_time_travel_simulation():
             self.is_fitted = True
             self.mae = 0.15
 
-        def predict(self, df):
+        def predict(self, df, model_ratio: float = 0.7):
             val = df["pv_estimate"] * 0.95
             return pd.DataFrame({"prediction": val, "prediction_raw": val})
 
