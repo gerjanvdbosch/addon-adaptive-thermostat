@@ -699,7 +699,7 @@ def _get_behavior_plot_plotly(request: Request) -> str:
                     y=y_vals,
                     mode="lines",
                     name=feature,
-                    line=dict(width=3, color="#4fa8ff"),  # Mooi blauw
+                    line=dict(width=2, color="#4fa8ff"),  # Mooi blauw
                     showlegend=False,
                 ),
                 row=1,
