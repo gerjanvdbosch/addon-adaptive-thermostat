@@ -22,11 +22,11 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @api.get("/", response_class=HTMLResponse)
-def index(request: Request):
+def index(request: Request, explain: str = None):
     # Haal de HTML div string op in plaats van een plaatje
     plot_html = _get_solar_forecast_plot(request)
-    importance_html = _get_importance_plot_plotly(request)
-    behavior_html = _get_behavior_plot_plotly(request)
+    importance_html = ""
+    behavior_html = ""
 
     coordinator = request.app.state.coordinator
     context = coordinator.context
@@ -58,7 +58,10 @@ def index(request: Request):
         }
 
         # 3. Explain Genereren (Gedeelde Functie)
-        explanation = _get_explanation_data(coordinator)
+        if explain == "1":
+            explanation = _get_explanation_data(coordinator)
+            importance_html = _get_importance_plot_plotly(request)
+            behavior_html = _get_behavior_plot_plotly(request)
 
     return templates.TemplateResponse(
         "index.html",
@@ -471,6 +474,24 @@ def _get_explanation_data(coordinator) -> dict:
         shap_data.pop("Info", None)
         shap_data.pop("_meta_label", None)
 
+        label_map = {
+            "pv_estimate": "Solcast Basis",
+            "pv_estimate10": "Solcast Min (10%)",
+            "pv_estimate90": "Solcast Max (90%)",
+            "radiation": "Straling",
+            "hour_cos": "Tijdstip (Uur)",
+            "hour_sin": "Tijdstip (Cyclisch)",
+            "temp": "Temperatuur",
+            "cloud": "Bewolking",
+            "diffuse": "Diffuus Licht",
+            "tilted": "Dakhelling Effect",
+            "uncertainty": "Onzekerheid",
+            "wind": "Wind",
+            "precipitation": "Neerslag",
+            "doy_cos": "Seizoen",
+            "doy_sin": "Seizoen (Cyclisch)",
+        }
+
         factors = []
         for key, val_str in shap_data.items():
             try:
@@ -479,22 +500,7 @@ def _get_explanation_data(coordinator) -> dict:
                 if abs(val) < 0.01:
                     continue
 
-                # Labels vertalen naar leesbaar Nederlands
-                label = key.replace("_sin", "").replace("_cos", "").replace("pv_", "")
-                if label == "estimate":
-                    label = "Solcast Forecast"
-                if label == "radiation":
-                    label = "Straling"
-                if label == "uncertainty":
-                    label = "Onzekerheid"
-                if label == "diffuse":
-                    label = "Diffuus licht"
-                if label == "tilted":
-                    label = "Dakhelling"
-                if label == "temp":
-                    label = "Temperatuur"
-                if label == "cloud":
-                    label = "Bewolking"
+                label = label_map.get(key, key)  # Vertaal of gebruik origineel
 
                 factors.append(
                     {
@@ -655,8 +661,8 @@ def _get_behavior_plot_plotly(request: Request) -> str:
 
         # 2. Kies de features die we willen inspecteren
         # We pakken hardcoded de 3 interessantste, dat is sneller dan eerst sorteren.
-        features_to_plot = ["radiation", "pv_estimate10", "temp"]
-        feature_labels = ["Straling (W/m²)", "Solcast Min (kW)", "Temperatuur (°C)"]
+        features_to_plot = ["radiation", "pv_estimate10", "hour_cos"]
+        feature_labels = ["Straling (W/m²)", "Solcast Min (kW)", "Tijdstip (Uur)"]
 
         # 3. Maak Subplots (1 rij, 3 kolommen)
         fig = make_subplots(

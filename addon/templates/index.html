@@ -230,23 +230,23 @@
             </tr>
             </tbody>
         </table>
-    </div>
 
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Wat is belangrijk?</h3>
+        <div class="card">
+            <div class="header">
+                <h3 style="margin: 0;">Wat is belangrijk?</h3>
+            </div>
+            <div class="chart-container">
+                {{ importance_plot | safe }}
+            </div>
         </div>
-        <div class="chart-container">
-            {{ importance_plot | safe }}
-        </div>
-    </div>
 
-    <div class="card">
-        <div class="header">
-            <h3 style="margin: 0;">Hoe reageert het model?</h3>
-        </div>
-        <div class="chart-container">
-            {{ behavior_plot | safe }}
+        <div class="card">
+            <div class="header">
+                <h3 style="margin: 0;">Hoe reageert het model?</h3>
+            </div>
+            <div class="chart-container">
+                {{ behavior_plot | safe }}
+            </div>
         </div>
     </div>
     {% endif %}
@@ -268,16 +268,14 @@
 
 <script>
     function toggleExplain() {
-        const box = document.getElementById('explain-box');
-        if (box) {
-            if (box.style.display === 'block') {
-                box.style.display = 'none';
-            } else {
-                box.style.display = 'block';
-            }
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('explain') === '1') {
+            url.searchParams.delete('explain');
+        } else {
+            url.searchParams.set('explain', '1');
         }
+        window.location.href = url.toString();
     }
 </script>
-
 </body>
 </html>
