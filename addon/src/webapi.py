@@ -208,6 +208,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 name="Blended",
                 line=dict(color="#4fa8ff", dash="dot", width=1),
                 opacity=0.8,
+                visible="legendonly",
             )
         )
 
@@ -220,6 +221,7 @@ def _get_solar_forecast_plot(request: Request) -> str:
                 name="Model",
                 line=dict(color="#9467bd", dash="dot", width=1.5),  # Paars stippel
                 opacity=0.6,
+                visible="legendonly",
             )
         )
 
@@ -299,19 +301,19 @@ def _get_solar_forecast_plot(request: Request) -> str:
 
     # F. Netto Solar (Filled Area)
     # In Plotly is fill='tozeroy' makkelijk, maar om specifiek netto te kleuren gebruiken we de berekende kolom
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp_local"],
-            y=df["net_power"],
-            mode="lines",  # Geen markers
-            name="Netto Solar",
-            showlegend=False,
-            line=dict(width=0),  # Geen rand
-            fill="tozeroy",
-            fillcolor="rgba(255, 165, 0, 0.3)",
-            hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
-        )
-    )
+    #     fig.add_trace(
+    #         go.Scatter(
+    #             x=df["timestamp_local"],
+    #             y=df["net_power"],
+    #             mode="lines",  # Geen markers
+    #             name="Netto Solar",
+    #             showlegend=False,
+    #             line=dict(width=0),  # Geen rand
+    #             fill="tozeroy",
+    #             fillcolor="rgba(255, 165, 0, 0.3)",
+    #             hoverinfo="skip",  # Maakt de grafiek rustiger bij hoveren
+    #         )
+    #     )
 
     # --- LAYOUT & SHAPES ---
 

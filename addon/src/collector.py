@@ -32,7 +32,7 @@ class Collector:
         ).tz_convert("UTC")
         end_filter = start_filter + timedelta(days=1)
         full_index = pd.date_range(
-            start=start_filter, periods=96, freq="15min", name="timestamp"
+            start=start_filter, periods=97, freq="15min", name="timestamp"
         )
 
         df = pd.DataFrame(solcast)
@@ -54,7 +54,7 @@ class Collector:
         df_today = (
             df_merged[
                 (df_merged["timestamp"] >= start_filter)
-                & (df_merged["timestamp"] < end_filter)
+                & (df_merged["timestamp"] <= end_filter)
             ]
             .copy()
             .sort_values("timestamp")
