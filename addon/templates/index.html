@@ -131,7 +131,6 @@
         }
 
         .explain-container {
-            display: none;
             margin-bottom: 20px;
             background-color: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -180,9 +179,7 @@
     <div class="card">
         <div class="header">
             <h3 style="margin: 0;">Solar Prediction</h3>
-            {% if explanation %}
-                <button class="explain-btn" onclick="toggleExplain()">Explain</button>
-            {% endif %}
+            <button class="explain-btn" onclick="toggleExplain()">Explain</button>
         </div>
         <div class="chart-container">
             {{ forecast_plot | safe }}
